@@ -16,6 +16,8 @@
 - Playwright UI smoke flow。
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
 
+[下载 0.1.0-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.1.0-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
+
 尚未完成：
 
 - 正式安装器、自动更新器和后台常驻管理。
@@ -39,11 +41,21 @@
 npm install
 ```
 
+源码树一键启动真实本地 Web 后端：
+
+```powershell
+.\setup.cmd
+```
+
+该入口会在需要时构建前端和 `local_backend`，然后调用 `CodeXProviderSwitcher.ps1`，固定打开 `http://127.0.0.1:47832/`。它不是 UI-only mock 预览。
+
 启动并打开本地预览：
 
 ```powershell
 npm run preview:start
 ```
+
+该入口只用于开发阶段检查 UI mock，不代表真实产品运行态。
 
 停止预览：
 

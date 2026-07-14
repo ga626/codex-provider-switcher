@@ -7,7 +7,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$backend = Join-Path $root "bin\local_backend.exe"
+$backendCandidates = @(
+    (Join-Path $root "bin\local_backend.exe"),
+    (Join-Path $root "src-tauri\target\debug\local_backend.exe")
+)
+$backend = $backendCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 $distIndex = Join-Path $root "dist\index.html"
 $logs = Join-Path $root "logs"
 $healthUrl = "http://127.0.0.1:$Port/api/health"
@@ -16,9 +20,12 @@ $appUrl = "http://127.0.0.1:$Port/"
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 
 function Get-BackendProcess {
-    $escaped = [Regex]::Escape($backend)
+    $candidateFullPaths = @($backendCandidates | ForEach-Object {
+        try { [System.IO.Path]::GetFullPath($_) } catch { $_ }
+    })
     Get-CimInstance Win32_Process | Where-Object {
-        $_.ExecutablePath -eq $backend -or $_.CommandLine -match $escaped
+        ($candidateFullPaths -contains $_.ExecutablePath) -or
+        ($_.CommandLine -like "*local_backend.exe*" -and $_.CommandLine -like "*$root*")
     }
 }
 
@@ -39,8 +46,8 @@ if ($Stop) {
     exit 0
 }
 
-if (-not (Test-Path -LiteralPath $backend -PathType Leaf)) {
-    throw "Missing backend executable: $backend"
+if ([string]::IsNullOrWhiteSpace($backend)) {
+    throw "Missing backend executable. Build it with: npm run backend:build"
 }
 if (-not (Test-Path -LiteralPath $distIndex -PathType Leaf)) {
     throw "Missing frontend asset: $distIndex"

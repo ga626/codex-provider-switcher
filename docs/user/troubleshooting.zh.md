@@ -2,7 +2,28 @@
 
 ## 页面打不开
 
-如果只是检查 UI mock，先确认本地预览是否启动：
+如果你是从 Release 包启动，先确认是在解压出的 `CodeXProviderSwitcher-windows-x64-0.1.0-alpha` 目录里双击 `CodeXProviderSwitcher.cmd`。
+
+固定入口是：
+
+```text
+http://127.0.0.1:47832/
+```
+
+如果页面没有自动打开，可以手动访问上面的地址。也可以先停止再启动：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\CodeXProviderSwitcher.ps1 -Stop
+powershell -NoProfile -ExecutionPolicy Bypass -File .\CodeXProviderSwitcher.ps1
+```
+
+如果你是从源码树启动，优先使用真实本地 Web 后端入口：
+
+```powershell
+.\setup.cmd
+```
+
+如果只是检查 UI mock，再确认本地预览是否启动：
 
 ```powershell
 npm run preview:start
@@ -10,7 +31,7 @@ npm run preview:start
 
 如果端口被占用，脚本会尝试 `5173`、`5174`、`5175`、`5180`、`3000`、`3001`。
 
-如果要检查真实本地 Web 后端，先构建并启动后端：
+也可以手动构建并启动真实本地 Web 后端：
 
 ```powershell
 npm run build

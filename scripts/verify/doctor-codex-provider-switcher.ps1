@@ -89,6 +89,22 @@ try {
         }
     }
 
+    $packageJsonPath = Join-Path $projectRoot "package.json"
+    if (Test-Path -LiteralPath $packageJsonPath -PathType Leaf) {
+        $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($packageJson.version -ne "0.1.0-alpha") {
+            Add-Failure "package.json version must match current alpha release: 0.1.0-alpha"
+        }
+    }
+
+    $setupText = Get-Content -LiteralPath (Join-Path $projectRoot "setup.ps1") -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+    if ($setupText -match "start-preview\.ps1") {
+        Add-Failure "setup.ps1 must not start the UI-only preview path."
+    }
+    if ($setupText -notmatch "CodeXProviderSwitcher\.ps1") {
+        Add-Failure "setup.ps1 must call the real local Web backend launcher."
+    }
+
     $gitignore = Get-Content -LiteralPath (Join-Path $projectRoot ".gitignore") -Raw -Encoding UTF8
     foreach ($ignored in @("node_modules", "dist", "src-tauri/target", "logs/", "release/", "archive/", "project_status/", ".codex-provider-switcher/", "auth.json", "profiles.json")) {
         if ($gitignore -notlike "*$ignored*") {

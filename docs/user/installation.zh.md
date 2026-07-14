@@ -6,10 +6,17 @@
 
 ## Release 包启动
 
-1. 下载 `CodeXProviderSwitcher-windows-x64-0.1.0-alpha.zip` 和对应 `.sha256`。
-2. 解压 zip 到一个普通目录。
-3. 双击 `CodeXProviderSwitcher.cmd`。
-4. 浏览器会打开：
+1. 打开 GitHub Release 页面：
+
+```text
+https://github.com/ga626/codex-provider-switcher/releases/tag/v0.1.0-alpha
+```
+
+2. 下载 `CodeXProviderSwitcher-windows-x64-0.1.0-alpha.zip` 和对应 `.sha256`。
+3. 解压 zip 到一个普通目录。
+4. 进入解压出的 `CodeXProviderSwitcher-windows-x64-0.1.0-alpha` 目录。
+5. 双击 `CodeXProviderSwitcher.cmd`。
+6. 浏览器会打开：
 
 ```text
 http://127.0.0.1:47832/
@@ -42,6 +49,16 @@ npm run preview:start
 ```powershell
 npm run preview:stop
 ```
+
+## 源码树便捷启动
+
+如果你是从 GitHub 源码仓库运行，而不是从 Release zip 运行，可以双击根目录的 `setup.cmd`，或执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -Apply
+```
+
+这个入口会在需要时安装依赖、构建前端、构建本地后端，然后启动真实本地 Web 控制台。它不会使用 UI-only mock 预览。
 
 ## 真实本地 Web 后端开发入口
 
