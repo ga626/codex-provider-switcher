@@ -269,7 +269,11 @@ function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">
-            {state.runtimeMode === 'tauri_native' ? '本机真实后端' : '浏览器假数据'}
+            {state.runtimeMode === 'browser_preview_mock'
+              ? '浏览器假数据'
+              : state.runtimeMode === 'local_web_backend'
+                ? '本机 Web 后端'
+                : '本机真实后端'}
           </p>
           <h1>CodeX Provider Switcher</h1>
         </div>

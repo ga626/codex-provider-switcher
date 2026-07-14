@@ -35,6 +35,12 @@ jobs:
       - name: Cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+      - name: Build local web backend
+        run: npm run backend:build
+
+      - name: Smoke local web backend
+        run: npm run backend:smoke
+
       - name: Diff whitespace check
         shell: pwsh
         run: git diff --check

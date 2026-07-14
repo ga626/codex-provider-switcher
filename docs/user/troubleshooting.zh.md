@@ -2,13 +2,27 @@
 
 ## 页面打不开
 
-先确认本地预览是否启动：
+如果只是检查 UI mock，先确认本地预览是否启动：
 
 ```powershell
 npm run preview:start
 ```
 
 如果端口被占用，脚本会尝试 `5173`、`5174`、`5175`、`5180`、`3000`、`3001`。
+
+如果要检查真实本地 Web 后端，先构建并启动后端：
+
+```powershell
+npm run build
+npm run backend:build
+npm run backend:dev -- --port 47832
+```
+
+然后打开：
+
+```text
+http://127.0.0.1:47832/
+```
 
 ## 构建失败
 

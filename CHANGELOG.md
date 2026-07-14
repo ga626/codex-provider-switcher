@@ -5,6 +5,7 @@
 - Added provider model catalog state, read-only `/models` refresh, full returned-list display, light model tags, and manual model selection.
 - Removed `gpt-5.5` as an application default in source and mock state; existing imported user profiles are not auto-migrated.
 - Marked browser preview state as UI-only mock data and added Rust tests for model-list parsing.
+- Added a first local Web backend binary that serves `dist/` on `127.0.0.1` and exposes real `/api/*` endpoints backed by the Rust state/actions.
 - Bootstrapped the public repository structure for `CodeX Provider Switcher`.
 - Added project rules, contribution guidance, security policy, GitHub issue/PR templates, CI, release runbook, and release gate checklist.
 - Documented the product direction as a lightweight local Web console with a quiet backend and optional native shell.

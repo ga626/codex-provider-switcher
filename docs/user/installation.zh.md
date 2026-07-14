@@ -26,6 +26,36 @@ npm run preview:start
 npm run preview:stop
 ```
 
+## 真实本地 Web 后端开发入口
+
+该入口会服务 `dist/` 前端，并通过同源 `/api/*` 调用本机真实后端。它仍是开发态入口，不是最终无可见 CMD 的产品启动器。
+
+先构建前端和后端：
+
+```powershell
+npm run build
+npm run backend:build
+```
+
+启动真实本地 Web 后端：
+
+```powershell
+npm run backend:dev -- --port 47832
+```
+
+打开：
+
+```text
+http://127.0.0.1:47832/
+```
+
+只读验证：
+
+```powershell
+npm run backend:smoke
+npm run backend:ui-smoke
+```
+
 ## Release 包预期
 
 未来 Windows Release 包应提供：

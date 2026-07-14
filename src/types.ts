@@ -73,7 +73,7 @@ export type LegacySwitcherStatus = {
 }
 
 export type AppState = {
-  runtimeMode: 'tauri_native' | 'browser_preview_mock'
+  runtimeMode: 'tauri_native' | 'local_web_backend' | 'browser_preview_mock'
   currentProfileId: string
   configPath: string
   authPath: string

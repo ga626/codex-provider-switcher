@@ -17,7 +17,7 @@
 
 尚未完成：
 
-- 静默本地 Web 后端。
+- 静默本地 Web 后端的产品化启动器。
 - 双击启动后无可见 CMD 的最终产品入口。
 - Codex/Responses 与中转站模型名的完整兼容验证策略。
 - Responses API 兼容性验证。
@@ -87,6 +87,28 @@ npm run qa:smoke
 ```
 
 UI smoke 默认运行在浏览器预览假数据上，只证明界面流程没有明显断裂。真实本地能力必须通过 Tauri/Rust 路径、后端测试或后续静默本地 Web 后端验收。
+
+构建并验证本地 Web 后端：
+
+```powershell
+npm run build
+npm run backend:build
+npm run backend:smoke
+```
+
+开发时启动真实本地 Web 后端：
+
+```powershell
+npm run backend:dev -- --port 47832
+```
+
+然后打开：
+
+```text
+http://127.0.0.1:47832/
+```
+
+该入口会服务 `dist/` 前端，并通过同源 `/api/*` 调用本机真实后端；它不同于 `preview:start` 的 UI-only 假数据。
 
 Rust/Tauri 检查：
 

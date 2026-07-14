@@ -7,7 +7,7 @@
 
 - [ ] `AGENTS.md`、`CONTRIBUTING.md`、`SECURITY.md` 已更新。
 - [ ] `.github/pull_request_template.md` 已覆盖验证、安全和用户影响。
-- [ ] GitHub CI 包含 lint、build、Rust check 和 Rust tests。
+- [ ] GitHub CI 包含 lint、build、Rust check、Rust tests、本地 Web 后端 build 和 smoke。
 - [ ] `.gitignore` 排除日志、构建产物、Release 输出、本机配置和密钥。
 - [ ] `git diff --check` 通过。
 - [ ] 敏感信息扫描无真实密钥。
@@ -29,6 +29,8 @@ npm run lint
 npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
+npm run backend:build
+npm run backend:smoke
 git diff --check
 ```
 
@@ -46,9 +48,11 @@ npm run preview:stop
 
 ```powershell
 cargo test --manifest-path src-tauri/Cargo.toml
+npm run backend:build
+npm run backend:smoke
 ```
 
-在静默本地 Web 后端完成前，不能把浏览器预览结果声明为产品真实后端已可用。
+在静默启动器完成前，不能把本地 Web 后端声明为最终普通用户入口。
 
 ## 4. Release 包层
 

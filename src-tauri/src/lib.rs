@@ -24,7 +24,7 @@ const LEGACY_PROFILE_PATH: &str = r"D:\AI Studio\CodeX\Codex Switcher\profiles.j
 const LEGACY_SWITCHER_PORT: u16 = 47831;
 
 #[derive(Debug, Error)]
-enum SwitcherError {
+pub enum SwitcherError {
     #[error("无法定位用户目录。")]
     MissingHome,
     #[error("文件读写错误：{0}")]
@@ -1037,11 +1037,19 @@ fn write_auth_key(api_key: &str) -> Result<(), SwitcherError> {
 
 #[tauri::command]
 fn load_state() -> Result<AppState, SwitcherError> {
+    load_state_core()
+}
+
+pub fn load_state_core() -> Result<AppState, SwitcherError> {
     app_state()
 }
 
 #[tauri::command]
 fn save_profile(profile: EditableProfile) -> Result<AppState, SwitcherError> {
+    save_profile_core(profile)
+}
+
+pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let id = if profile.id.trim().is_empty() {
         normalize_id(&profile.name)
@@ -1093,6 +1101,10 @@ fn save_profile(profile: EditableProfile) -> Result<AppState, SwitcherError> {
 
 #[tauri::command]
 fn delete_profile(profile_id: String) -> Result<AppState, SwitcherError> {
+    delete_profile_core(profile_id)
+}
+
+pub fn delete_profile_core(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let config = read_config().unwrap_or_default();
     let current = current_profile_id(&catalog, &config);
@@ -1119,6 +1131,10 @@ fn delete_profile(profile_id: String) -> Result<AppState, SwitcherError> {
 
 #[tauri::command]
 fn switch_profile(profile_id: String) -> Result<AppState, SwitcherError> {
+    switch_profile_core(profile_id)
+}
+
+pub fn switch_profile_core(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let value = catalog
         .profiles
@@ -1147,6 +1163,10 @@ fn switch_profile(profile_id: String) -> Result<AppState, SwitcherError> {
 
 #[tauri::command]
 fn verify_profile(profile_id: String) -> Result<AppState, SwitcherError> {
+    verify_profile_core(profile_id)
+}
+
+pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let value = catalog
         .profiles
@@ -1187,6 +1207,10 @@ fn verify_profile(profile_id: String) -> Result<AppState, SwitcherError> {
 
 #[tauri::command]
 fn refresh_models(profile_id: String) -> Result<AppState, SwitcherError> {
+    refresh_models_core(profile_id)
+}
+
+pub fn refresh_models_core(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let value = catalog
         .profiles
@@ -1213,6 +1237,10 @@ fn refresh_models(profile_id: String) -> Result<AppState, SwitcherError> {
 
 #[tauri::command]
 fn set_default_profile(profile_id: String) -> Result<AppState, SwitcherError> {
+    set_default_profile_core(profile_id)
+}
+
+pub fn set_default_profile_core(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let mut display_name = profile_id.clone();
     for (id, value) in catalog.profiles.clone() {
@@ -1232,7 +1260,11 @@ fn set_default_profile(profile_id: String) -> Result<AppState, SwitcherError> {
 }
 
 #[tauri::command]
-fn toggle_auto_start(_enabled: bool) -> Result<AppState, SwitcherError> {
+fn toggle_auto_start(enabled: bool) -> Result<AppState, SwitcherError> {
+    toggle_auto_start_core(enabled)
+}
+
+pub fn toggle_auto_start_core(_enabled: bool) -> Result<AppState, SwitcherError> {
     Err(SwitcherError::Message(
         "开机自启动尚未接入 Windows 启动项读写；当前版本不开放这个主功能。".to_string(),
     ))
@@ -1240,6 +1272,10 @@ fn toggle_auto_start(_enabled: bool) -> Result<AppState, SwitcherError> {
 
 #[tauri::command]
 fn restore_latest_backup() -> Result<AppState, SwitcherError> {
+    restore_latest_backup_core()
+}
+
+pub fn restore_latest_backup_core() -> Result<AppState, SwitcherError> {
     let backups = list_backups()?;
     let latest = backups
         .first()

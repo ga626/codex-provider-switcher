@@ -179,7 +179,7 @@ Release 包不得包含：
 
 ## 已知 alpha 缺口
 
-- 静默本地后端尚未完成。
+- 静默本地后端已有开发态 API 入口；无可见 CMD 的产品化启动器尚未完成。
 - 当前 preview 入口仍依赖 Node/npm。
 - 模型发现已有只读 `/v1/models` 基础，Responses/Codex 实际兼容性验证尚未完成。
 - API key 仍需迁移到 Windows Credential Manager、DPAPI 或 Tauri Stronghold。

@@ -5,6 +5,50 @@ import type { AppState, EditableProfile, ModelCatalog } from './types'
 const isTauri = '__TAURI_INTERNALS__' in window
 
 let mockState: AppState = structuredClone(initialState)
+let webBackendAvailable: boolean | null = null
+
+async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  })
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!contentType.includes('application/json')) {
+    throw new Error('本地 Web 后端未返回 JSON。')
+  }
+  const payload = await response.json()
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : `本地 Web 后端请求失败：${response.status}`)
+  }
+  return payload as T
+}
+
+async function tryWebBackend<T>(path: string, init?: RequestInit): Promise<T | null> {
+  if (webBackendAvailable === false) {
+    return null
+  }
+  try {
+    const payload = await apiRequest<T>(path, init)
+    webBackendAvailable = true
+    return payload
+  } catch (err) {
+    if (webBackendAvailable === true) {
+      throw err
+    }
+    webBackendAvailable = false
+    return null
+  }
+}
+
+function apiPost(body?: unknown): RequestInit {
+  return {
+    method: 'POST',
+    body: JSON.stringify(body ?? {}),
+  }
+}
 
 function nowLabel() {
   return new Date().toLocaleString('sv-SE').replace('T', ' ')
@@ -26,6 +70,10 @@ export async function loadState(): Promise<AppState> {
   if (isTauri) {
     return invoke<AppState>('load_state')
   }
+  const webState = await tryWebBackend<AppState>('/api/state')
+  if (webState) {
+    return webState
+  }
   await mockDelay()
   return structuredClone(mockState)
 }
@@ -33,6 +81,10 @@ export async function loadState(): Promise<AppState> {
 export async function saveProfile(profile: EditableProfile): Promise<AppState> {
   if (isTauri) {
     return invoke<AppState>('save_profile', { profile })
+  }
+  const webState = await tryWebBackend<AppState>('/api/profiles/save', apiPost({ profile }))
+  if (webState) {
+    return webState
   }
   await mockDelay()
   const id = profile.id || normalizeId(profile.name)
@@ -139,6 +191,10 @@ export async function refreshModels(profileId: string): Promise<AppState> {
   if (isTauri) {
     return invoke<AppState>('refresh_models', { profileId })
   }
+  const webState = await tryWebBackend<AppState>('/api/models/refresh', apiPost({ profileId }))
+  if (webState) {
+    return webState
+  }
   await mockDelay()
   const catalog = mockModelCatalog(profileId)
   mockState.modelCatalogs = [
@@ -159,6 +215,10 @@ export async function deleteProfile(profileId: string): Promise<AppState> {
   if (isTauri) {
     return invoke<AppState>('delete_profile', { profileId })
   }
+  const webState = await tryWebBackend<AppState>('/api/profiles/delete', apiPost({ profileId }))
+  if (webState) {
+    return webState
+  }
   await mockDelay()
   const target = mockState.profiles.find((profile) => profile.id === profileId)
   if (!target || target.active || target.isDefault) {
@@ -178,6 +238,10 @@ export async function deleteProfile(profileId: string): Promise<AppState> {
 export async function switchProfile(profileId: string): Promise<AppState> {
   if (isTauri) {
     return invoke<AppState>('switch_profile', { profileId })
+  }
+  const webState = await tryWebBackend<AppState>('/api/profiles/switch', apiPost({ profileId }))
+  if (webState) {
+    return webState
   }
   await mockDelay()
   const target = mockState.profiles.find((profile) => profile.id === profileId)
@@ -207,6 +271,10 @@ export async function switchProfile(profileId: string): Promise<AppState> {
 export async function verifyProfile(profileId: string): Promise<AppState> {
   if (isTauri) {
     return invoke<AppState>('verify_profile', { profileId })
+  }
+  const webState = await tryWebBackend<AppState>('/api/profiles/verify', apiPost({ profileId }))
+  if (webState) {
+    return webState
   }
   await mockDelay()
   const target = mockState.profiles.find((profile) => profile.id === profileId)
@@ -239,6 +307,10 @@ export async function setDefaultProfile(profileId: string): Promise<AppState> {
   if (isTauri) {
     return invoke<AppState>('set_default_profile', { profileId })
   }
+  const webState = await tryWebBackend<AppState>('/api/profiles/default', apiPost({ profileId }))
+  if (webState) {
+    return webState
+  }
   await mockDelay()
   const target = mockState.profiles.find((profile) => profile.id === profileId)
   mockState.profiles = mockState.profiles.map((profile) => ({
@@ -259,6 +331,10 @@ export async function toggleAutoStart(enabled: boolean): Promise<AppState> {
   if (isTauri) {
     return invoke<AppState>('toggle_auto_start', { enabled })
   }
+  const webState = await tryWebBackend<AppState>('/api/auto-start', apiPost({ enabled }))
+  if (webState) {
+    return webState
+  }
   await mockDelay()
   mockState.autoStart = enabled
   mockState.activity.unshift({
@@ -274,6 +350,10 @@ export async function toggleAutoStart(enabled: boolean): Promise<AppState> {
 export async function restoreLatestBackup(): Promise<AppState> {
   if (isTauri) {
     return invoke<AppState>('restore_latest_backup')
+  }
+  const webState = await tryWebBackend<AppState>('/api/backup/restore-latest', apiPost())
+  if (webState) {
+    return webState
   }
   await mockDelay()
   if (mockState.backups.length === 0) {
