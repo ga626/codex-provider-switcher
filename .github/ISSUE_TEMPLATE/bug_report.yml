@@ -1,0 +1,43 @@
+name: Bug report
+description: Report a problem with CodeX Provider Switcher
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not include real API keys, auth.json, full config.toml, screenshots with secrets, or private provider account data.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the smallest set of steps that reproduces the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Windows version, app version, Codex surface, provider name. Redact secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Optional. Redact keys, tokens, local auth files, and provider account details.
+    validations:
+      required: false

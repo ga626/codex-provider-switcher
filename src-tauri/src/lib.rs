@@ -1,0 +1,1032 @@
+use chrono::Local;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
+use std::{
+    fs,
+    net::{SocketAddr, TcpStream},
+    path::PathBuf,
+    process::Command,
+    time::Duration,
+};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::TrayIconBuilder,
+    Manager,
+};
+use thiserror::Error;
+
+const APP_DIR_NAME: &str = "CodeX Provider Switcher";
+const PROFILES_FILE: &str = "profiles.json";
+const ACTIVITY_FILE: &str = "activity.json";
+const BACKUPS_DIR: &str = "backups";
+const LEGACY_PROFILE_PATH: &str = r"D:\AI Studio\CodeX\Codex Switcher\profiles.json";
+const LEGACY_SWITCHER_PORT: u16 = 47831;
+
+#[derive(Debug, Error)]
+enum SwitcherError {
+    #[error("无法定位用户目录。")]
+    MissingHome,
+    #[error("文件读写错误：{0}")]
+    Io(#[from] std::io::Error),
+    #[error("JSON 解析错误：{0}")]
+    Json(#[from] serde_json::Error),
+    #[error("TOML 解析错误：{0}")]
+    Toml(#[from] toml::de::Error),
+    #[error("{0}")]
+    Message(String),
+}
+
+impl serde::Serialize for SwitcherError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderProfile {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub model: String,
+    pub reasoning_effort: String,
+    pub note: String,
+    pub verified: bool,
+    pub is_default: bool,
+    pub active: bool,
+    pub has_api_key: bool,
+    pub last_switched_at: Option<String>,
+    pub last_verified_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditableProfile {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub model: String,
+    pub note: String,
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationCheck {
+    pub id: String,
+    pub label: String,
+    pub ok: bool,
+    pub detail: String,
+    pub severity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityItem {
+    pub id: String,
+    pub time: String,
+    pub title: String,
+    pub detail: String,
+    pub tone: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupItem {
+    pub id: String,
+    pub time: String,
+    pub label: String,
+    pub files: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacySwitcherStatus {
+    pub profile_path: String,
+    pub profile_exists: bool,
+    pub process_running: bool,
+    pub port: u16,
+    pub port_in_use: bool,
+    pub imported: bool,
+    pub imported_from: Option<String>,
+    pub imported_at: Option<String>,
+    pub app_profile_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppState {
+    pub current_profile_id: String,
+    pub config_path: String,
+    pub auth_path: String,
+    pub auto_start: bool,
+    pub tray_enabled: bool,
+    pub safe_mode: bool,
+    pub profiles: Vec<ProviderProfile>,
+    pub checks: Vec<ValidationCheck>,
+    pub activity: Vec<ActivityItem>,
+    pub backups: Vec<BackupItem>,
+    pub legacy_switcher: LegacySwitcherStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredProfile {
+    name: String,
+    base_url: String,
+    api_key: String,
+    model: String,
+    #[serde(default = "default_reasoning")]
+    model_reasoning_effort: String,
+    #[serde(default)]
+    verified: bool,
+    #[serde(default)]
+    default: bool,
+    #[serde(default)]
+    note: String,
+    #[serde(default)]
+    last_switched_at: Option<String>,
+    #[serde(default)]
+    last_verified_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredCatalog {
+    #[serde(default = "default_version")]
+    version: String,
+    profiles: Map<String, Value>,
+    #[serde(default)]
+    auto_start: bool,
+    #[serde(default)]
+    invariants: Value,
+    #[serde(default)]
+    imported_from_legacy: Option<String>,
+    #[serde(default)]
+    imported_at: Option<String>,
+}
+
+fn default_version() -> String {
+    "0.1".to_string()
+}
+
+fn default_reasoning() -> String {
+    "high".to_string()
+}
+
+fn now_label() -> String {
+    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+fn short_time() -> String {
+    Local::now().format("%H:%M").to_string()
+}
+
+fn codex_home() -> Result<PathBuf, SwitcherError> {
+    let home = dirs::home_dir().ok_or(SwitcherError::MissingHome)?;
+    Ok(home.join(".codex"))
+}
+
+fn config_path() -> Result<PathBuf, SwitcherError> {
+    Ok(codex_home()?.join("config.toml"))
+}
+
+fn auth_path() -> Result<PathBuf, SwitcherError> {
+    Ok(codex_home()?.join("auth.json"))
+}
+
+fn app_data_dir() -> Result<PathBuf, SwitcherError> {
+    let base = dirs::data_local_dir().ok_or(SwitcherError::MissingHome)?;
+    Ok(base.join(APP_DIR_NAME))
+}
+
+fn profiles_path() -> Result<PathBuf, SwitcherError> {
+    Ok(app_data_dir()?.join(PROFILES_FILE))
+}
+
+fn activity_path() -> Result<PathBuf, SwitcherError> {
+    Ok(app_data_dir()?.join(ACTIVITY_FILE))
+}
+
+fn backups_dir() -> Result<PathBuf, SwitcherError> {
+    Ok(app_data_dir()?.join(BACKUPS_DIR))
+}
+
+fn legacy_profile_path() -> PathBuf {
+    PathBuf::from(LEGACY_PROFILE_PATH)
+}
+
+fn ensure_dirs() -> Result<(), SwitcherError> {
+    fs::create_dir_all(app_data_dir()?)?;
+    fs::create_dir_all(backups_dir()?)?;
+    Ok(())
+}
+
+fn normalize_id(name: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in name.trim().to_lowercase().chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
+    let legacy = legacy_profile_path();
+    if legacy.exists() {
+        let text = fs::read_to_string(legacy)?;
+        let mut catalog: StoredCatalog = serde_json::from_str(&text)?;
+        normalize_catalog(&mut catalog);
+        catalog.imported_from_legacy = Some(LEGACY_PROFILE_PATH.to_string());
+        catalog.imported_at = Some(now_label());
+        return Ok(catalog);
+    }
+
+    let mut profiles = Map::new();
+    profiles.insert(
+        "owl".to_string(),
+        json!({
+            "name": "OWL",
+            "base_url": "https://api.owlai.tech/v1",
+            "api_key": "",
+            "model": "gpt-5.5",
+            "model_reasoning_effort": "high",
+            "verified": false,
+            "default": true,
+            "note": "Default baseline."
+        }),
+    );
+    Ok(StoredCatalog {
+        version: default_version(),
+        profiles,
+        auto_start: false,
+        invariants: default_invariants(),
+        imported_from_legacy: None,
+        imported_at: None,
+    })
+}
+
+fn default_invariants() -> Value {
+    json!({
+        "model_provider": "custom",
+        "protected_sections": [
+            "projects",
+            "features",
+            "desktop",
+            "memories",
+            "mcp_servers",
+            "plugins",
+            "windows",
+            "hooks.state",
+            "marketplaces"
+        ],
+        "protected_field_count": {
+            "hook_trusted_hashes": 4
+        }
+    })
+}
+
+fn load_catalog() -> Result<StoredCatalog, SwitcherError> {
+    ensure_dirs()?;
+    let path = profiles_path()?;
+    if !path.exists() {
+        let catalog = seed_catalog_from_existing()?;
+        save_catalog(&catalog)?;
+        return Ok(catalog);
+    }
+    let text = fs::read_to_string(path)?;
+    let mut catalog: StoredCatalog = serde_json::from_str(&text)?;
+    normalize_catalog(&mut catalog);
+    Ok(catalog)
+}
+
+fn normalize_catalog(catalog: &mut StoredCatalog) {
+    let protected_empty = catalog
+        .invariants
+        .get("protected_sections")
+        .and_then(Value::as_array)
+        .map(|items| items.is_empty())
+        .unwrap_or(true);
+    if protected_empty {
+        catalog.invariants = default_invariants();
+    }
+}
+
+fn save_catalog(catalog: &StoredCatalog) -> Result<(), SwitcherError> {
+    ensure_dirs()?;
+    let text = serde_json::to_string_pretty(catalog)?;
+    fs::write(profiles_path()?, text)?;
+    Ok(())
+}
+
+fn read_config() -> Result<String, SwitcherError> {
+    Ok(fs::read_to_string(config_path()?)?)
+}
+
+fn current_profile_id(catalog: &StoredCatalog, config_text: &str) -> String {
+    for (id, value) in &catalog.profiles {
+        if let Ok(profile) = serde_json::from_value::<StoredProfile>(value.clone()) {
+            if config_text.contains(&format!("base_url = \"{}\"", profile.base_url)) {
+                return id.to_string();
+            }
+        }
+    }
+    "unknown".to_string()
+}
+
+fn catalog_profiles(catalog: &StoredCatalog, current_id: &str) -> Vec<ProviderProfile> {
+    catalog
+        .profiles
+        .iter()
+        .filter_map(|(id, value)| {
+            serde_json::from_value::<StoredProfile>(value.clone())
+                .ok()
+                .map(|profile| ProviderProfile {
+                    id: id.clone(),
+                    name: profile.name,
+                    base_url: profile.base_url,
+                    model: profile.model,
+                    reasoning_effort: profile.model_reasoning_effort,
+                    note: profile.note,
+                    verified: profile.verified,
+                    is_default: profile.default,
+                    active: id == current_id,
+                    has_api_key: !profile.api_key.trim().is_empty(),
+                    last_switched_at: profile.last_switched_at,
+                    last_verified_at: profile.last_verified_at,
+                })
+        })
+        .collect()
+}
+
+fn validation_checks(config_text: &str) -> Vec<ValidationCheck> {
+    let parsed: Result<toml::Value, _> = toml::from_str(config_text);
+    let mut checks = Vec::new();
+
+    match parsed {
+        Ok(value) => {
+            checks.push(check(
+                "toml",
+                "TOML 语法",
+                true,
+                "配置文件可以正常解析。",
+                "required",
+            ));
+            let model_provider = value
+                .get("model_provider")
+                .and_then(toml::Value::as_str)
+                .unwrap_or("");
+            let root_model = value
+                .get("model")
+                .and_then(toml::Value::as_str)
+                .unwrap_or("");
+            let response_storage_disabled = value
+                .get("disable_response_storage")
+                .and_then(toml::Value::as_bool)
+                .unwrap_or(false);
+            checks.push(check(
+                "root-model",
+                "Codex 模型",
+                !root_model.trim().is_empty(),
+                if !root_model.trim().is_empty() {
+                    "根配置中已设置 model。"
+                } else {
+                    "根配置缺少 model，Codex 可能无法确定默认模型。"
+                },
+                "required",
+            ));
+            checks.push(check(
+                "model-provider",
+                "model_provider 已锁定",
+                model_provider == "custom",
+                if model_provider == "custom" {
+                    "Codex 保持在 custom 服务商分组。"
+                } else {
+                    "model_provider 必须保持 custom，避免破坏历史记录和服务商分组行为。"
+                },
+                "required",
+            ));
+            checks.push(check(
+                "disable-response-storage",
+                "禁用 Response Storage",
+                response_storage_disabled,
+                if response_storage_disabled {
+                    "disable_response_storage 已保持 true，第三方 responses 中转不会触发存储型压缩路径。"
+                } else {
+                    "必须写入 disable_response_storage = true，避免第三方中转站在上下文压缩时触发 502。"
+                },
+                "required",
+            ));
+            let custom = value.get("model_providers").and_then(|v| v.get("custom"));
+            checks.push(check(
+                "custom-provider",
+                "custom 服务商配置段",
+                custom.is_some(),
+                if custom.is_some() {
+                    "[model_providers.custom] 存在。"
+                } else {
+                    "缺少 [model_providers.custom]，无法安全切换服务商。"
+                },
+                "required",
+            ));
+            let wire_api = custom
+                .and_then(|v| v.get("wire_api"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or("");
+            checks.push(check(
+                "wire-api",
+                "Responses 线路协议",
+                wire_api == "responses",
+                if wire_api == "responses" {
+                    "wire_api 当前为 responses。"
+                } else {
+                    "wire_api 必须保持 responses，才能兼容 Codex 原生请求。"
+                },
+                "required",
+            ));
+            let base_url = custom
+                .and_then(|v| v.get("base_url"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or("");
+            checks.push(check(
+                "custom-base-url",
+                "当前接口地址",
+                base_url.starts_with("http"),
+                if base_url.starts_with("http") {
+                    "custom 服务商已配置 base_url。"
+                } else {
+                    "custom 服务商缺少有效 base_url。"
+                },
+                "required",
+            ));
+            let api_key = custom
+                .and_then(|v| v.get("api_key"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or("");
+            checks.push(check(
+                "custom-api-key",
+                "当前认证密钥",
+                !api_key.trim().is_empty(),
+                if !api_key.trim().is_empty() {
+                    "custom 服务商已配置 api_key。"
+                } else {
+                    "custom 服务商缺少 api_key，切换后无法认证。"
+                },
+                "required",
+            ));
+        }
+        Err(err) => {
+            checks.push(check(
+                "toml",
+                "TOML 语法",
+                false,
+                &err.to_string(),
+                "required",
+            ));
+        }
+    }
+
+    checks
+}
+
+fn check(id: &str, label: &str, ok: bool, detail: &str, severity: &str) -> ValidationCheck {
+    ValidationCheck {
+        id: id.to_string(),
+        label: label.to_string(),
+        ok,
+        detail: detail.to_string(),
+        severity: severity.to_string(),
+    }
+}
+
+fn list_backups() -> Result<Vec<BackupItem>, SwitcherError> {
+    let dir = backups_dir()?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut items = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        let files = fs::read_dir(&path)?
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .count();
+        let label = entry.file_name().to_string_lossy().to_string();
+        let metadata = entry.metadata()?;
+        let modified = metadata.modified().ok();
+        let time = modified
+            .map(|_| label.trim_start_matches("before-").to_string())
+            .unwrap_or_else(now_label);
+        items.push(BackupItem {
+            id: label.clone(),
+            time,
+            label,
+            files,
+        });
+    }
+    items.sort_by(|a, b| b.label.cmp(&a.label));
+    Ok(items)
+}
+
+fn legacy_port_in_use() -> bool {
+    let addr = SocketAddr::from(([127, 0, 0, 1], LEGACY_SWITCHER_PORT));
+    TcpStream::connect_timeout(&addr, Duration::from_millis(160)).is_ok()
+}
+
+fn legacy_process_running() -> bool {
+    if cfg!(target_os = "windows") {
+        if let Ok(output) = Command::new("tasklist")
+            .args(["/FI", "IMAGENAME eq CodeX-Switcher.exe", "/NH"])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            return text.contains("CodeX-Switcher.exe");
+        }
+    }
+    false
+}
+
+fn legacy_switcher_status(catalog: &StoredCatalog) -> Result<LegacySwitcherStatus, SwitcherError> {
+    let profile_path = legacy_profile_path();
+    Ok(LegacySwitcherStatus {
+        profile_path: profile_path.display().to_string(),
+        profile_exists: profile_path.exists(),
+        process_running: legacy_process_running(),
+        port: LEGACY_SWITCHER_PORT,
+        port_in_use: legacy_port_in_use(),
+        imported: catalog.imported_from_legacy.is_some(),
+        imported_from: catalog.imported_from_legacy.clone(),
+        imported_at: catalog.imported_at.clone(),
+        app_profile_path: profiles_path()?.display().to_string(),
+    })
+}
+
+fn activity_seed() -> ActivityItem {
+    ActivityItem {
+        id: "startup".to_string(),
+        time: short_time(),
+        title: "工作台已加载".to_string(),
+        detail: "已从本地服务商目录和 Codex 配置读取状态。".to_string(),
+        tone: "info".to_string(),
+    }
+}
+
+fn load_activity() -> Result<Vec<ActivityItem>, SwitcherError> {
+    ensure_dirs()?;
+    let path = activity_path()?;
+    if !path.exists() {
+        return Ok(vec![activity_seed()]);
+    }
+    let text = fs::read_to_string(path)?;
+    let mut items: Vec<ActivityItem> =
+        serde_json::from_str(&text).unwrap_or_else(|_| vec![activity_seed()]);
+    if items.is_empty() {
+        items.push(activity_seed());
+    }
+    Ok(items)
+}
+
+fn save_activity(items: &[ActivityItem]) -> Result<(), SwitcherError> {
+    ensure_dirs()?;
+    fs::write(activity_path()?, serde_json::to_string_pretty(items)?)?;
+    Ok(())
+}
+
+fn push_activity(title: &str, detail: &str, tone: &str) -> Result<(), SwitcherError> {
+    let mut items = load_activity()?;
+    items.insert(
+        0,
+        ActivityItem {
+            id: format!("{}-{}", tone, Local::now().timestamp_millis()),
+            time: short_time(),
+            title: title.to_string(),
+            detail: detail.to_string(),
+            tone: tone.to_string(),
+        },
+    );
+    items.truncate(50);
+    save_activity(&items)
+}
+
+fn app_state_with_activity(
+    title: &str,
+    detail: &str,
+    tone: &str,
+) -> Result<AppState, SwitcherError> {
+    push_activity(title, detail, tone)?;
+    app_state()
+}
+
+fn app_state() -> Result<AppState, SwitcherError> {
+    let catalog = load_catalog()?;
+    let config = read_config().unwrap_or_default();
+    let current_id = current_profile_id(&catalog, &config);
+    let profiles = catalog_profiles(&catalog, &current_id);
+    let legacy_switcher = legacy_switcher_status(&catalog)?;
+    Ok(AppState {
+        current_profile_id: current_id,
+        config_path: config_path()?.display().to_string(),
+        auth_path: auth_path()?.display().to_string(),
+        auto_start: catalog.auto_start,
+        tray_enabled: true,
+        safe_mode: true,
+        profiles,
+        checks: validation_checks(&config),
+        activity: load_activity()?,
+        backups: list_backups()?,
+        legacy_switcher,
+    })
+}
+
+fn create_backup() -> Result<PathBuf, SwitcherError> {
+    let label = format!("before-{}", Local::now().format("%Y%m%d-%H%M%S"));
+    let dir = backups_dir()?.join(label);
+    fs::create_dir_all(&dir)?;
+    let config = config_path()?;
+    if config.exists() {
+        fs::copy(&config, dir.join("config.toml"))?;
+    }
+    let auth = auth_path()?;
+    if auth.exists() {
+        fs::copy(&auth, dir.join("auth.json"))?;
+    }
+    Ok(dir)
+}
+
+fn replace_root_kv(line: &str, key: &str, value: &str) -> Option<String> {
+    if line.trim_start().starts_with(&format!("{key} =")) {
+        Some(format!("{key} = \"{value}\""))
+    } else {
+        None
+    }
+}
+
+fn root_section_end(lines: &[String]) -> usize {
+    lines
+        .iter()
+        .position(|line| line.trim_start().starts_with('['))
+        .unwrap_or(lines.len())
+}
+
+fn upsert_root_string(lines: &mut Vec<String>, key: &str, value: &str) {
+    let root_end = root_section_end(lines);
+    for line in lines.iter_mut().take(root_end) {
+        if let Some(next) = replace_root_kv(line, key, value) {
+            *line = next;
+            return;
+        }
+    }
+    let insert_at = lines
+        .iter()
+        .take(root_end)
+        .position(|line| line.trim_start().starts_with("model_provider ="))
+        .map(|idx| idx + 1)
+        .unwrap_or(root_end);
+    lines.insert(insert_at, format!("{key} = \"{value}\""));
+}
+
+fn upsert_root_bool(lines: &mut Vec<String>, key: &str, value: bool) {
+    let root_end = root_section_end(lines);
+    for line in lines.iter_mut().take(root_end) {
+        if line.trim_start().starts_with(&format!("{key} =")) {
+            *line = format!("{key} = {}", if value { "true" } else { "false" });
+            return;
+        }
+    }
+    let insert_at = lines
+        .iter()
+        .take(root_end)
+        .position(|line| line.trim_start().starts_with("model ="))
+        .map(|idx| idx + 1)
+        .unwrap_or(root_end);
+    lines.insert(
+        insert_at,
+        format!("{key} = {}", if value { "true" } else { "false" }),
+    );
+}
+
+fn switch_config(profile: &StoredProfile) -> Result<(), SwitcherError> {
+    let original = read_config()?;
+    let _backup = create_backup()?;
+    let mut lines: Vec<String> = original.lines().map(ToString::to_string).collect();
+
+    upsert_root_string(&mut lines, "model", &profile.model);
+    upsert_root_string(&mut lines, "model_provider", "custom");
+    upsert_root_bool(&mut lines, "disable_response_storage", true);
+
+    let start = lines
+        .iter()
+        .position(|line| line.trim() == "[model_providers.custom]")
+        .ok_or_else(|| {
+            SwitcherError::Message("缺少 [model_providers.custom] 配置段。".to_string())
+        })?;
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find(|(_, line)| line.trim_start().starts_with('['))
+        .map(|(idx, _)| idx)
+        .unwrap_or(lines.len());
+
+    let provider_lines = vec![
+        "[model_providers.custom]".to_string(),
+        format!("name = \"{}\"", profile.name),
+        "wire_api = \"responses\"".to_string(),
+        "requires_openai_auth = true".to_string(),
+        format!("base_url = \"{}\"", profile.base_url),
+        format!("api_key = \"{}\"", profile.api_key),
+    ];
+    lines.splice(start..end, provider_lines);
+    let next_config = lines.join("\r\n");
+    let checks = validation_checks(&next_config);
+    if checks
+        .iter()
+        .any(|check| !check.ok && check.severity == "required")
+    {
+        return Err(SwitcherError::Message(
+            "写入前配置验证失败；备份已保留。".to_string(),
+        ));
+    }
+    fs::write(config_path()?, next_config)?;
+    write_auth_key(&profile.api_key)?;
+    Ok(())
+}
+
+fn write_auth_key(api_key: &str) -> Result<(), SwitcherError> {
+    let path = auth_path()?;
+    let mut value = if path.exists() {
+        serde_json::from_str::<Value>(&fs::read_to_string(&path)?)?
+    } else {
+        json!({})
+    };
+    value["OPENAI_API_KEY"] = Value::String(api_key.to_string());
+    fs::write(path, serde_json::to_string_pretty(&value)?)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn load_state() -> Result<AppState, SwitcherError> {
+    app_state()
+}
+
+#[tauri::command]
+fn save_profile(profile: EditableProfile) -> Result<AppState, SwitcherError> {
+    let mut catalog = load_catalog()?;
+    let id = if profile.id.trim().is_empty() {
+        normalize_id(&profile.name)
+    } else {
+        profile.id.trim().to_string()
+    };
+    if id.is_empty() {
+        return Err(SwitcherError::Message("服务商名称不能为空。".to_string()));
+    }
+    let existing = catalog.profiles.get(&id).cloned();
+    let existing_profile = existing.and_then(|v| serde_json::from_value::<StoredProfile>(v).ok());
+    let api_key = if profile.api_key.trim().is_empty() {
+        existing_profile
+            .as_ref()
+            .map(|p| p.api_key.clone())
+            .unwrap_or_default()
+    } else {
+        profile.api_key.trim().to_string()
+    };
+    let stored = StoredProfile {
+        name: profile.name.trim().to_string(),
+        base_url: profile.base_url.trim().to_string(),
+        api_key,
+        model: profile.model.trim().to_string(),
+        model_reasoning_effort: existing_profile
+            .as_ref()
+            .map(|p| p.model_reasoning_effort.clone())
+            .unwrap_or_else(default_reasoning),
+        verified: false,
+        default: existing_profile
+            .as_ref()
+            .map(|p| p.default)
+            .unwrap_or(false),
+        note: profile.note.trim().to_string(),
+        last_switched_at: existing_profile
+            .as_ref()
+            .and_then(|p| p.last_switched_at.clone()),
+        last_verified_at: Some("编辑后尚未验证".to_string()),
+    };
+    let display_name = stored.name.clone();
+    catalog.profiles.insert(id, serde_json::to_value(stored)?);
+    save_catalog(&catalog)?;
+    app_state_with_activity(
+        &format!("{display_name} 已保存"),
+        "服务商信息已更新；保存后不会明文显示 API 密钥。",
+        "info",
+    )
+}
+
+#[tauri::command]
+fn delete_profile(profile_id: String) -> Result<AppState, SwitcherError> {
+    let mut catalog = load_catalog()?;
+    let config = read_config().unwrap_or_default();
+    let current = current_profile_id(&catalog, &config);
+    if profile_id == current {
+        return Err(SwitcherError::Message("当前服务商不能删除。".to_string()));
+    }
+    let stored = catalog.profiles.get(&profile_id).cloned();
+    let mut display_name = profile_id.clone();
+    if let Some(value) = stored {
+        let profile = serde_json::from_value::<StoredProfile>(value)?;
+        display_name = profile.name.clone();
+        if profile.default {
+            return Err(SwitcherError::Message("默认服务商不能删除。".to_string()));
+        }
+    }
+    catalog.profiles.remove(&profile_id);
+    save_catalog(&catalog)?;
+    app_state_with_activity(
+        &format!("{display_name} 已删除"),
+        "该服务商已从切换目录移除；当前和默认服务商不会被删除。",
+        "warning",
+    )
+}
+
+#[tauri::command]
+fn switch_profile(profile_id: String) -> Result<AppState, SwitcherError> {
+    let mut catalog = load_catalog()?;
+    let value = catalog
+        .profiles
+        .get(&profile_id)
+        .cloned()
+        .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
+    let mut profile: StoredProfile = serde_json::from_value(value)?;
+    if profile.api_key.trim().is_empty() {
+        return Err(SwitcherError::Message(
+            "该服务商缺少 API 密钥。".to_string(),
+        ));
+    }
+    let display_name = profile.name.clone();
+    switch_config(&profile)?;
+    profile.last_switched_at = Some(now_label());
+    catalog
+        .profiles
+        .insert(profile_id, serde_json::to_value(profile)?);
+    save_catalog(&catalog)?;
+    app_state_with_activity(
+        &format!("已切换到 {display_name}"),
+        "已写入 Codex config.toml/auth.json，并生成回滚备份。",
+        "success",
+    )
+}
+
+#[tauri::command]
+fn verify_profile(profile_id: String) -> Result<AppState, SwitcherError> {
+    let mut catalog = load_catalog()?;
+    let value = catalog
+        .profiles
+        .get(&profile_id)
+        .cloned()
+        .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
+    let mut profile: StoredProfile = serde_json::from_value(value)?;
+    let config = read_config().unwrap_or_default();
+    let checks = validation_checks(&config);
+    let required_ok = checks
+        .iter()
+        .all(|check| check.ok || check.severity != "required");
+    let profile_ready = !profile.api_key.trim().is_empty()
+        && !profile.model.trim().is_empty()
+        && profile.base_url.trim().starts_with("http");
+    profile.verified = required_ok && profile_ready;
+    profile.last_verified_at = Some(now_label());
+    let display_name = profile.name.clone();
+    let verified = profile.verified;
+    catalog
+        .profiles
+        .insert(profile_id, serde_json::to_value(profile)?);
+    save_catalog(&catalog)?;
+    if verified {
+        app_state_with_activity(
+            "验证完成",
+            &format!("{display_name} 的本地配置和服务商必填字段已通过；未执行远端 API 调用。"),
+            "success",
+        )
+    } else {
+        app_state_with_activity(
+            "验证需要处理",
+            &format!("{display_name} 缺少 API 密钥、模型、有效接口地址，或当前 Codex 配置仍有红色阻断项。"),
+            "warning",
+        )
+    }
+}
+
+#[tauri::command]
+fn set_default_profile(profile_id: String) -> Result<AppState, SwitcherError> {
+    let mut catalog = load_catalog()?;
+    let mut display_name = profile_id.clone();
+    for (id, value) in catalog.profiles.clone() {
+        let mut profile: StoredProfile = serde_json::from_value(value)?;
+        if id == profile_id {
+            display_name = profile.name.clone();
+        }
+        profile.default = id == profile_id;
+        catalog.profiles.insert(id, serde_json::to_value(profile)?);
+    }
+    save_catalog(&catalog)?;
+    app_state_with_activity(
+        &format!("{display_name} 已设为默认"),
+        "默认标记仅影响切换目录排序和保护策略，不会立即改写 Codex 当前服务商。",
+        "info",
+    )
+}
+
+#[tauri::command]
+fn toggle_auto_start(_enabled: bool) -> Result<AppState, SwitcherError> {
+    Err(SwitcherError::Message(
+        "开机自启动尚未接入 Windows 启动项读写；当前版本不开放这个主功能。".to_string(),
+    ))
+}
+
+#[tauri::command]
+fn restore_latest_backup() -> Result<AppState, SwitcherError> {
+    let backups = list_backups()?;
+    let latest = backups
+        .first()
+        .ok_or_else(|| SwitcherError::Message("当前没有可恢复的备份。".to_string()))?;
+    let backup_dir = backups_dir()?.join(&latest.label);
+    let backup_config = backup_dir.join("config.toml");
+    let backup_auth = backup_dir.join("auth.json");
+    let auth_restored = backup_auth.exists();
+
+    if !backup_config.exists() {
+        return Err(SwitcherError::Message(
+            "最近备份缺少 config.toml。".to_string(),
+        ));
+    }
+
+    fs::copy(backup_config, config_path()?)?;
+    if auth_restored {
+        fs::copy(backup_auth, auth_path()?)?;
+    }
+
+    app_state_with_activity(
+        "已恢复最近备份",
+        &format!(
+            "已从 {} 恢复 config.toml{}。",
+            latest.label,
+            if auth_restored { " 和 auth.json" } else { "" }
+        ),
+        "success",
+    )
+}
+
+fn install_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let _tray = TrayIconBuilder::new()
+        .menu(&menu)
+        .show_menu_on_left_click(true)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .build(app)?;
+    Ok(())
+}
+
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--hidden"]),
+        ))
+        .setup(|app| {
+            install_tray(app)?;
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            load_state,
+            save_profile,
+            delete_profile,
+            switch_profile,
+            verify_profile,
+            set_default_profile,
+            toggle_auto_start,
+            restore_latest_backup
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running CodeX Provider Switcher");
+}

@@ -1,0 +1,201 @@
+import { invoke } from '@tauri-apps/api/core'
+import { initialState } from './mockData'
+import type { AppState, EditableProfile } from './types'
+
+const isTauri = '__TAURI_INTERNALS__' in window
+
+let mockState: AppState = structuredClone(initialState)
+
+function nowLabel() {
+  return new Date().toLocaleString('sv-SE').replace('T', ' ')
+}
+
+function normalizeId(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+async function mockDelay() {
+  await new Promise((resolve) => window.setTimeout(resolve, 160))
+}
+
+export async function loadState(): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('load_state')
+  }
+  await mockDelay()
+  return structuredClone(mockState)
+}
+
+export async function saveProfile(profile: EditableProfile): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('save_profile', { profile })
+  }
+  await mockDelay()
+  const id = profile.id || normalizeId(profile.name)
+  const existingIndex = mockState.profiles.findIndex((item) => item.id === id)
+  const nextProfile = {
+    id,
+    name: profile.name.trim(),
+    baseUrl: profile.baseUrl.trim(),
+    model: profile.model.trim() || 'gpt-5.5',
+    reasoningEffort: existingIndex >= 0 ? mockState.profiles[existingIndex].reasoningEffort : 'high',
+    note: profile.note.trim(),
+    verified: false,
+    isDefault: existingIndex >= 0 ? mockState.profiles[existingIndex].isDefault : false,
+    active: mockState.currentProfileId === id,
+    hasApiKey: profile.apiKey.trim().length > 0 || (existingIndex >= 0 && mockState.profiles[existingIndex].hasApiKey),
+    lastVerifiedAt: '编辑后尚未验证',
+    lastSwitchedAt: existingIndex >= 0 ? mockState.profiles[existingIndex].lastSwitchedAt : undefined,
+  }
+  if (existingIndex >= 0) {
+    mockState.profiles[existingIndex] = nextProfile
+  } else {
+    mockState.profiles.push(nextProfile)
+  }
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: `${nextProfile.name} 已保存`,
+    detail: '服务商信息已更新；保存后不会明文显示 API 密钥。',
+    tone: 'info',
+  })
+  return structuredClone(mockState)
+}
+
+export async function deleteProfile(profileId: string): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('delete_profile', { profileId })
+  }
+  await mockDelay()
+  const target = mockState.profiles.find((profile) => profile.id === profileId)
+  if (!target || target.active || target.isDefault) {
+    throw new Error('默认或当前服务商不能删除。')
+  }
+  mockState.profiles = mockState.profiles.filter((profile) => profile.id !== profileId)
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: `${target.name} 已删除`,
+    detail: '该服务商已从切换目录移除。',
+    tone: 'warning',
+  })
+  return structuredClone(mockState)
+}
+
+export async function switchProfile(profileId: string): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('switch_profile', { profileId })
+  }
+  await mockDelay()
+  const target = mockState.profiles.find((profile) => profile.id === profileId)
+  if (!target) throw new Error('未找到服务商配置。')
+  mockState.currentProfileId = profileId
+  mockState.profiles = mockState.profiles.map((profile) => ({
+    ...profile,
+    active: profile.id === profileId,
+    lastSwitchedAt: profile.id === profileId ? nowLabel() : profile.lastSwitchedAt,
+  }))
+  mockState.backups.unshift({
+    id: crypto.randomUUID(),
+    time: nowLabel(),
+    label: `before-${new Date().toISOString().slice(0, 19).replace(/\D/g, '')}`,
+    files: 2,
+  })
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: `已切换到 ${target.name}`,
+    detail: '演示模式已更新当前服务商，并生成一条备份记录。',
+    tone: 'success',
+  })
+  return structuredClone(mockState)
+}
+
+export async function verifyProfile(profileId: string): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('verify_profile', { profileId })
+  }
+  await mockDelay()
+  const target = mockState.profiles.find((profile) => profile.id === profileId)
+  const requiredChecksOk = mockState.checks.every((check) => check.ok || check.severity !== 'required')
+  const profileReady = Boolean(
+    target &&
+      target.hasApiKey &&
+      target.model.trim().length > 0 &&
+      /^https?:\/\/\S+/i.test(target.baseUrl)
+  )
+  const verified = requiredChecksOk && profileReady
+  mockState.profiles = mockState.profiles.map((profile) => (
+    profile.id === profileId
+      ? { ...profile, verified, lastVerifiedAt: nowLabel() }
+      : profile
+  ))
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: verified ? '验证完成' : '验证未通过',
+    detail: verified
+      ? `${target?.name ?? '服务商'} 的本地配置和必填项已通过。`
+      : `${target?.name ?? '服务商'} 缺少接口地址、模型、API 密钥，或 Codex 当前配置存在阻断项。`,
+    tone: verified ? 'success' : 'warning',
+  })
+  return structuredClone(mockState)
+}
+
+export async function setDefaultProfile(profileId: string): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('set_default_profile', { profileId })
+  }
+  await mockDelay()
+  const target = mockState.profiles.find((profile) => profile.id === profileId)
+  mockState.profiles = mockState.profiles.map((profile) => ({
+    ...profile,
+    isDefault: profile.id === profileId,
+  }))
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: `${target?.name ?? '服务商'} 已设为默认`,
+    detail: '默认标记已更新；不会立即改写当前 Codex 服务商。',
+    tone: 'info',
+  })
+  return structuredClone(mockState)
+}
+
+export async function toggleAutoStart(enabled: boolean): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('toggle_auto_start', { enabled })
+  }
+  await mockDelay()
+  mockState.autoStart = enabled
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: enabled ? '已请求开机启动' : '已关闭开机启动',
+    detail: '演示模式只改变界面状态；原生模式需要核验 Windows 启动项。',
+    tone: enabled ? 'warning' : 'info',
+  })
+  return structuredClone(mockState)
+}
+
+export async function restoreLatestBackup(): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('restore_latest_backup')
+  }
+  await mockDelay()
+  if (mockState.backups.length === 0) {
+    throw new Error('当前没有可恢复的备份。')
+  }
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: '已恢复最近备份',
+    detail: '演示模式已触发恢复动作，并记录本次恢复请求。',
+    tone: 'success',
+  })
+  return structuredClone(mockState)
+}

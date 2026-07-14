@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest an improvement for CodeX Provider Switcher
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What workflow should become easier or safer?
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current workaround
+      description: How do you handle it today?
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Provider switching
+        - Model discovery
+        - Backup / restore
+        - Local Web console
+        - Launcher / update flow
+        - Legacy cutover
+        - UI / information architecture
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Safety concerns
+      description: Does this touch config.toml, auth.json, API keys, backups, or old-tool migration?
+    validations:
+      required: false

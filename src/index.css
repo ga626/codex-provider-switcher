@@ -1,0 +1,64 @@
+:root {
+  --bg: #f5f7fb;
+  --panel: #ffffff;
+  --panel-soft: #f8fafc;
+  --panel-strong: #eef3f8;
+  --text: #17202a;
+  --muted: #687487;
+  --faint: #94a0b2;
+  --border: #dbe2eb;
+  --border-strong: #c4cedb;
+  --accent: #0f766e;
+  --accent-strong: #0a5c56;
+  --accent-soft: #dff5f2;
+  --blue: #2563eb;
+  --blue-soft: #e7efff;
+  --green: #14844a;
+  --green-soft: #e3f6ea;
+  --amber: #a16207;
+  --amber-soft: #fff3d6;
+  --red: #b42318;
+  --red-soft: #ffe8e5;
+  --shadow: 0 18px 50px rgba(25, 39, 58, 0.1);
+  --radius: 8px;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+
+  color: var(--text);
+  background: var(--bg);
+  font-family: var(--font);
+  font-synthesis: none;
+  line-height: 1.45;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.08), transparent 34%),
+    linear-gradient(225deg, rgba(37, 99, 235, 0.08), transparent 32%),
+    var(--bg);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
