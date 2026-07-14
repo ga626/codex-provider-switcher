@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added provider model catalog state, read-only `/models` refresh, model cache display, and manual model selection.
+- Removed `gpt-5.5` as an application default in source and mock state; existing imported user profiles are not auto-migrated.
 - Bootstrapped the public repository structure for `CodeX Provider Switcher`.
 - Added project rules, contribution guidance, security policy, GitHub issue/PR templates, CI, release runbook, and release gate checklist.
 - Documented the product direction as a lightweight local Web console with a quiet backend and optional native shell.

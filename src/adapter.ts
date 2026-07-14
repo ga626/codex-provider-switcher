@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { initialState } from './mockData'
-import type { AppState, EditableProfile } from './types'
+import type { AppState, EditableProfile, ModelCatalog } from './types'
 
 const isTauri = '__TAURI_INTERNALS__' in window
 
@@ -41,7 +41,7 @@ export async function saveProfile(profile: EditableProfile): Promise<AppState> {
     id,
     name: profile.name.trim(),
     baseUrl: profile.baseUrl.trim(),
-    model: profile.model.trim() || 'gpt-5.5',
+    model: profile.model.trim(),
     reasoningEffort: existingIndex >= 0 ? mockState.profiles[existingIndex].reasoningEffort : 'high',
     note: profile.note.trim(),
     verified: false,
@@ -62,6 +62,67 @@ export async function saveProfile(profile: EditableProfile): Promise<AppState> {
     title: `${nextProfile.name} 已保存`,
     detail: '服务商信息已更新；保存后不会明文显示 API 密钥。',
     tone: 'info',
+  })
+  return structuredClone(mockState)
+}
+
+function mockModelCatalog(profileId: string): ModelCatalog {
+  const profile = mockState.profiles.find((item) => item.id === profileId)
+  if (!profile) {
+    throw new Error('未找到服务商配置。')
+  }
+  if (!profile.hasApiKey) {
+    return {
+      providerId: profileId,
+      baseUrl: profile.baseUrl,
+      fetchedAt: nowLabel(),
+      status: 'missing_key',
+      statusDetail: '缺少 API 密钥，无法刷新模型目录。',
+      models: [],
+    }
+  }
+
+  return {
+    providerId: profileId,
+    baseUrl: profile.baseUrl,
+    fetchedAt: nowLabel(),
+    status: 'ok',
+    statusDetail: '演示模式已返回 provider 模型目录；真实模式会调用 /v1/models。',
+    models: [
+      {
+        id: 'gpt-5.6-sol',
+        aliases: ['gpt-5.6'],
+        source: 'mock',
+        recommendedForCodex: true,
+        verifiedForResponses: 'unknown',
+      },
+      {
+        id: 'gpt-5.6-mini',
+        aliases: [],
+        source: 'mock',
+        recommendedForCodex: false,
+        verifiedForResponses: 'unknown',
+      },
+    ],
+  }
+}
+
+export async function refreshModels(profileId: string): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('refresh_models', { profileId })
+  }
+  await mockDelay()
+  const catalog = mockModelCatalog(profileId)
+  mockState.modelCatalogs = [
+    catalog,
+    ...mockState.modelCatalogs.filter((item) => item.providerId !== profileId),
+  ]
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: catalog.status === 'ok' ? '模型目录已刷新' : '模型目录刷新失败',
+    detail: catalog.statusDetail,
+    tone: catalog.status === 'ok' ? 'success' : 'warning',
   })
   return structuredClone(mockState)
 }

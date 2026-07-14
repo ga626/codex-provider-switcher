@@ -10,6 +10,7 @@
 
 - React/Vite 前端。
 - Tauri/Rust 本地文件、profiles、backup、validation、restore 基础。
+- Provider 模型目录缓存和只读刷新入口。
 - 浏览器 mock adapter，方便不启动 Tauri 时验收界面。
 - Playwright smoke flow。
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
@@ -18,7 +19,8 @@
 
 - 静默本地 Web 后端。
 - 双击启动后无可见 CMD 的最终产品入口。
-- provider 模型目录和 GPT-5.6 系列动态发现。
+- GPT-5.6 系列和中转站模型名的完整兼容策略。
+- Responses API 兼容性验证。
 - 自动更新、备份、恢复、回滚的正式用户闭环。
 - 旧版工具最终 cutover。
 - UI 信息架构重构。

@@ -13,6 +13,30 @@ export type ProviderProfile = {
   lastVerifiedAt?: string
 }
 
+export type ProviderModel = {
+  id: string
+  aliases: string[]
+  source: 'provider_models_api' | 'mock' | 'manual'
+  recommendedForCodex: boolean
+  verifiedForResponses: 'unknown' | 'verified' | 'failed'
+}
+
+export type ModelCatalog = {
+  providerId: string
+  baseUrl: string
+  fetchedAt?: string
+  status:
+    | 'not_fetched'
+    | 'ok'
+    | 'missing_key'
+    | 'unauthorized'
+    | 'network_error'
+    | 'provider_error'
+    | 'empty_models'
+  statusDetail: string
+  models: ProviderModel[]
+}
+
 export type ValidationCheck = {
   id: string
   label: string
@@ -56,6 +80,7 @@ export type AppState = {
   trayEnabled: boolean
   safeMode: boolean
   profiles: ProviderProfile[]
+  modelCatalogs: ModelCatalog[]
   checks: ValidationCheck[]
   activity: ActivityItem[]
   backups: BackupItem[]

@@ -34,9 +34,10 @@ try {
   await desktop.locator('.app-shell').waitFor()
   await desktop.screenshot({ path: join(outputDir, 'desktop.png'), fullPage: true })
 
-  await desktop.getByRole('button', { name: '刷新' }).click()
-  await desktop.getByRole('button', { name: '刷新' }).waitFor({ state: 'visible' })
-  await desktop.getByRole('button', { name: '刷新' }).waitFor({ state: 'attached' })
+  const headerRefresh = desktop.locator('header').getByRole('button', { name: '刷新' })
+  await headerRefresh.click()
+  await headerRefresh.waitFor({ state: 'visible' })
+  await headerRefresh.waitFor({ state: 'attached' })
   await desktop.waitForFunction(() => {
     const buttons = [...document.querySelectorAll('button')]
     return buttons.some((button) => button.textContent?.includes('刷新') && !button.disabled)

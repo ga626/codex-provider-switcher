@@ -64,6 +64,27 @@ pub struct ProviderProfile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProviderModel {
+    pub id: String,
+    pub aliases: Vec<String>,
+    pub source: String,
+    pub recommended_for_codex: bool,
+    pub verified_for_responses: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCatalog {
+    pub provider_id: String,
+    pub base_url: String,
+    pub fetched_at: Option<String>,
+    pub status: String,
+    pub status_detail: String,
+    pub models: Vec<ProviderModel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EditableProfile {
     pub id: String,
     pub name: String,
@@ -126,6 +147,7 @@ pub struct AppState {
     pub tray_enabled: bool,
     pub safe_mode: bool,
     pub profiles: Vec<ProviderProfile>,
+    pub model_catalogs: Vec<ModelCatalog>,
     pub checks: Vec<ValidationCheck>,
     pub activity: Vec<ActivityItem>,
     pub backups: Vec<BackupItem>,
@@ -157,6 +179,8 @@ struct StoredCatalog {
     #[serde(default = "default_version")]
     version: String,
     profiles: Map<String, Value>,
+    #[serde(default)]
+    model_catalogs: Map<String, Value>,
     #[serde(default)]
     auto_start: bool,
     #[serde(default)]
@@ -256,7 +280,7 @@ fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
             "name": "OWL",
             "base_url": "https://api.owlai.tech/v1",
             "api_key": "",
-            "model": "gpt-5.5",
+            "model": "",
             "model_reasoning_effort": "high",
             "verified": false,
             "default": true,
@@ -266,6 +290,7 @@ fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
     Ok(StoredCatalog {
         version: default_version(),
         profiles,
+        model_catalogs: Map::new(),
         auto_start: false,
         invariants: default_invariants(),
         imported_from_legacy: None,
@@ -363,6 +388,14 @@ fn catalog_profiles(catalog: &StoredCatalog, current_id: &str) -> Vec<ProviderPr
                     last_verified_at: profile.last_verified_at,
                 })
         })
+        .collect()
+}
+
+fn catalog_model_catalogs(catalog: &StoredCatalog) -> Vec<ModelCatalog> {
+    catalog
+        .model_catalogs
+        .iter()
+        .filter_map(|(_, value)| serde_json::from_value::<ModelCatalog>(value.clone()).ok())
         .collect()
 }
 
@@ -642,11 +675,153 @@ fn app_state() -> Result<AppState, SwitcherError> {
         tray_enabled: true,
         safe_mode: true,
         profiles,
+        model_catalogs: catalog_model_catalogs(&catalog),
         checks: validation_checks(&config),
         activity: load_activity()?,
         backups: list_backups()?,
         legacy_switcher,
     })
+}
+
+fn model_aliases(model_id: &str) -> Vec<String> {
+    match model_id {
+        "gpt-5.6-sol" => vec!["gpt-5.6".to_string()],
+        "gpt-5.6" => vec!["gpt-5.6-sol".to_string()],
+        _ => Vec::new(),
+    }
+}
+
+fn is_codex_recommended_model(model_id: &str) -> bool {
+    model_id.contains("gpt-5.6") || model_id.contains("codex")
+}
+
+fn build_model_catalog(
+    provider_id: &str,
+    profile: &StoredProfile,
+    status: &str,
+    detail: &str,
+    models: Vec<ProviderModel>,
+) -> ModelCatalog {
+    ModelCatalog {
+        provider_id: provider_id.to_string(),
+        base_url: profile.base_url.clone(),
+        fetched_at: Some(now_label()),
+        status: status.to_string(),
+        status_detail: detail.to_string(),
+        models,
+    }
+}
+
+fn fetch_provider_models(
+    provider_id: &str,
+    profile: &StoredProfile,
+) -> Result<ModelCatalog, SwitcherError> {
+    if profile.api_key.trim().is_empty() {
+        return Ok(build_model_catalog(
+            provider_id,
+            profile,
+            "missing_key",
+            "缺少 API 密钥，无法刷新模型目录。",
+            Vec::new(),
+        ));
+    }
+
+    let base_url = profile.base_url.trim().trim_end_matches('/');
+    if !base_url.starts_with("http") {
+        return Ok(build_model_catalog(
+            provider_id,
+            profile,
+            "provider_error",
+            "接口地址无效，必须以 http 或 https 开头。",
+            Vec::new(),
+        ));
+    }
+
+    let url = format!("{base_url}/models");
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(18))
+        .build()
+        .map_err(|err| SwitcherError::Message(format!("创建 HTTP client 失败：{err}")))?;
+    let response = match client.get(url).bearer_auth(profile.api_key.trim()).send() {
+        Ok(response) => response,
+        Err(err) => {
+            return Ok(build_model_catalog(
+                provider_id,
+                profile,
+                "network_error",
+                &format!("模型目录请求失败：{err}"),
+                Vec::new(),
+            ));
+        }
+    };
+
+    let status = response.status();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Ok(build_model_catalog(
+            provider_id,
+            profile,
+            "unauthorized",
+            "API key 无效或权限不足，provider 拒绝返回模型列表。",
+            Vec::new(),
+        ));
+    }
+    if !status.is_success() {
+        return Ok(build_model_catalog(
+            provider_id,
+            profile,
+            "provider_error",
+            &format!("provider 返回 HTTP {status}。"),
+            Vec::new(),
+        ));
+    }
+
+    let body: Value = match response.json() {
+        Ok(value) => value,
+        Err(err) => {
+            return Ok(build_model_catalog(
+                provider_id,
+                profile,
+                "provider_error",
+                &format!("模型目录响应不是有效 JSON：{err}"),
+                Vec::new(),
+            ));
+        }
+    };
+    let models = body
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("id").and_then(Value::as_str))
+                .map(|id| ProviderModel {
+                    id: id.to_string(),
+                    aliases: model_aliases(id),
+                    source: "provider_models_api".to_string(),
+                    recommended_for_codex: is_codex_recommended_model(id),
+                    verified_for_responses: "unknown".to_string(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if models.is_empty() {
+        return Ok(build_model_catalog(
+            provider_id,
+            profile,
+            "empty_models",
+            "provider 返回了空模型列表。",
+            Vec::new(),
+        ));
+    }
+
+    Ok(build_model_catalog(
+        provider_id,
+        profile,
+        "ok",
+        "已刷新中转站实际返回的模型列表；不会自动改写当前模型。",
+        models,
+    ))
 }
 
 fn create_backup() -> Result<PathBuf, SwitcherError> {
@@ -926,6 +1101,32 @@ fn verify_profile(profile_id: String) -> Result<AppState, SwitcherError> {
 }
 
 #[tauri::command]
+fn refresh_models(profile_id: String) -> Result<AppState, SwitcherError> {
+    let mut catalog = load_catalog()?;
+    let value = catalog
+        .profiles
+        .get(&profile_id)
+        .cloned()
+        .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
+    let profile: StoredProfile = serde_json::from_value(value)?;
+    let model_catalog = fetch_provider_models(&profile_id, &profile)?;
+    let ok = model_catalog.status == "ok";
+    catalog
+        .model_catalogs
+        .insert(profile_id.clone(), serde_json::to_value(&model_catalog)?);
+    save_catalog(&catalog)?;
+    app_state_with_activity(
+        if ok {
+            "模型目录已刷新"
+        } else {
+            "模型目录刷新失败"
+        },
+        &model_catalog.status_detail,
+        if ok { "success" } else { "warning" },
+    )
+}
+
+#[tauri::command]
 fn set_default_profile(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let mut display_name = profile_id.clone();
@@ -1023,6 +1224,7 @@ pub fn run() {
             delete_profile,
             switch_profile,
             verify_profile,
+            refresh_models,
             set_default_profile,
             toggle_auto_start,
             restore_latest_backup

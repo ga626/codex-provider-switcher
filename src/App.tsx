@@ -20,6 +20,7 @@ import './App.css'
 import {
   deleteProfile,
   loadState,
+  refreshModels,
   restoreLatestBackup,
   saveProfile,
   setDefaultProfile,
@@ -32,7 +33,7 @@ const emptyProfile: EditableProfile = {
   id: '',
   name: '',
   baseUrl: '',
-  model: 'gpt-5.5',
+  model: '',
   note: '',
   apiKey: '',
 }
@@ -156,6 +157,10 @@ function App() {
   const currentProfile = useMemo(() => {
     return state?.profiles.find((profile) => profile.id === state.currentProfileId)
   }, [state])
+
+  const selectedModelCatalog = useMemo(() => {
+    return state?.modelCatalogs.find((catalog) => catalog.providerId === selectedId)
+  }, [selectedId, state])
 
   const displayChecks = useMemo(() => {
     return [...(state?.checks ?? []), ...profileChecks(selectedProfile, draft)]
@@ -293,6 +298,15 @@ function App() {
               <ShieldCheck size={16} />
               验证配置
             </button>
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => selectedProfile && runAction('refresh-models', () => refreshModels(selectedProfile.id))}
+              disabled={!selectedProfile || busy !== null}
+            >
+              <RefreshCcw size={16} />
+              刷新模型目录
+            </button>
           </div>
         </div>
 
@@ -412,7 +426,11 @@ function App() {
               </label>
               <label>
                 模型
-                <input value={draft.model} onChange={(event) => updateDraft('model', event.target.value)} placeholder="gpt-5.5" />
+                <input
+                  value={draft.model}
+                  onChange={(event) => updateDraft('model', event.target.value)}
+                  placeholder="先刷新模型目录，或手动输入 provider 支持的模型"
+                />
               </label>
               <label className="wide">
                 API 密钥
@@ -430,6 +448,56 @@ function App() {
                 备注
                 <textarea value={draft.note} onChange={(event) => updateDraft('note', event.target.value)} rows={3} />
               </label>
+            </div>
+
+            <div className="model-catalog-panel">
+              <div className="model-catalog-heading">
+                <div>
+                  <strong>模型目录</strong>
+                  <span>
+                    {selectedModelCatalog
+                      ? selectedModelCatalog.statusDetail
+                      : '尚未刷新模型目录；不会自动迁移当前模型。'}
+                  </span>
+                </div>
+                <button
+                  className="ghost-button compact-button"
+                  type="button"
+                  onClick={() => selectedProfile && runAction('refresh-models', () => refreshModels(selectedProfile.id))}
+                  disabled={!selectedProfile || busy !== null}
+                >
+                  <RefreshCcw size={14} />
+                  刷新
+                </button>
+              </div>
+              <div className="model-catalog-meta">
+                <span className={`pill ${selectedModelCatalog?.status === 'ok' ? 'ok' : 'warning'}`}>
+                  {selectedModelCatalog?.status ?? 'not_fetched'}
+                </span>
+                {selectedModelCatalog?.fetchedAt && <span>刷新时间：{selectedModelCatalog.fetchedAt}</span>}
+              </div>
+              {selectedModelCatalog?.models.length ? (
+                <div className="model-option-list">
+                  {selectedModelCatalog.models.map((model) => (
+                    <button
+                      className={`model-option ${draft.model === model.id ? 'selected' : ''}`}
+                      type="button"
+                      key={model.id}
+                      onClick={() => updateDraft('model', model.id)}
+                    >
+                      <span>
+                        <strong>{model.id}</strong>
+                        {model.aliases.length > 0 && <small>别名：{model.aliases.join(', ')}</small>}
+                      </span>
+                      {model.recommendedForCodex && <span className="pill ok">推荐</span>}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-catalog-note">
+                  没有可展示的模型。可以先刷新目录，或手动填写 provider 已确认支持的模型名。
+                </p>
+              )}
             </div>
 
             <div className="action-row">
