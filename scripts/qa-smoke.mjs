@@ -2,7 +2,7 @@ import { chromium } from 'playwright'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
-const url = process.env.QA_URL ?? 'http://127.0.0.1:5173/'
+const url = process.env.QA_URL ?? process.env.QA_BASE_URL ?? 'http://127.0.0.1:5173/'
 const outputDir = process.env.QA_OUTPUT_DIR ?? join(process.env.TEMP ?? process.cwd(), 'codex-switcher-qa')
 const chromePath = process.env.QA_CHROME_PATH
 
@@ -34,13 +34,16 @@ try {
   await desktop.locator('.app-shell').waitFor()
   await desktop.screenshot({ path: join(outputDir, 'desktop.png'), fullPage: true })
 
-  await desktop.getByRole('button', { name: '刷新' }).click()
-  await desktop.getByRole('button', { name: '刷新' }).waitFor({ state: 'visible' })
-  await desktop.getByRole('button', { name: '刷新' }).waitFor({ state: 'attached' })
+  const headerRefresh = desktop.locator('header').getByRole('button', { name: '刷新' })
+  await headerRefresh.click()
+  await headerRefresh.waitFor({ state: 'visible' })
+  await headerRefresh.waitFor({ state: 'attached' })
   await desktop.waitForFunction(() => {
     const buttons = [...document.querySelectorAll('button')]
     return buttons.some((button) => button.textContent?.includes('刷新') && !button.disabled)
   })
+  await desktop.locator('.operations-panel').getByRole('button', { name: '刷新模型目录' }).click()
+  await desktop.getByText('浏览器预览假数据：已返回 6 个样例模型').first().waitFor()
 
   await desktop.getByRole('button', { name: '新增服务商' }).click()
   await desktop.getByLabel('服务商名称').fill('Smoke Test API')
@@ -91,7 +94,7 @@ try {
     url,
     outputDir,
     screenshots: ['desktop.png', 'desktop-after-save.png', 'compact-desktop.png'],
-    interaction: '刷新 -> 新增服务商 -> 保存 -> 验证 -> 切换 -> 复制 -> 删除 -> 设为默认 -> 恢复最近备份',
+    interaction: '刷新 -> 刷新模型目录 -> 新增服务商 -> 保存 -> 验证 -> 切换 -> 复制 -> 删除 -> 设为默认 -> 恢复最近备份',
   }, null, 2))
 } finally {
   await browser.close()

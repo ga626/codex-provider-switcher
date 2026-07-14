@@ -2,7 +2,8 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{
-    fs,
+    collections::BTreeSet,
+    env, fs,
     net::{SocketAddr, TcpStream},
     path::PathBuf,
     process::Command,
@@ -19,11 +20,11 @@ const APP_DIR_NAME: &str = "CodeX Provider Switcher";
 const PROFILES_FILE: &str = "profiles.json";
 const ACTIVITY_FILE: &str = "activity.json";
 const BACKUPS_DIR: &str = "backups";
-const LEGACY_PROFILE_PATH: &str = r"D:\AI Studio\CodeX\Codex Switcher\profiles.json";
+const LEGACY_PROFILE_ENV: &str = "CODEX_PROVIDER_SWITCHER_LEGACY_PROFILES";
 const LEGACY_SWITCHER_PORT: u16 = 47831;
 
 #[derive(Debug, Error)]
-enum SwitcherError {
+pub enum SwitcherError {
     #[error("无法定位用户目录。")]
     MissingHome,
     #[error("文件读写错误：{0}")]
@@ -60,6 +61,27 @@ pub struct ProviderProfile {
     pub has_api_key: bool,
     pub last_switched_at: Option<String>,
     pub last_verified_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderModel {
+    pub id: String,
+    pub aliases: Vec<String>,
+    pub source: String,
+    pub tags: Vec<String>,
+    pub verified_for_responses: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCatalog {
+    pub provider_id: String,
+    pub base_url: String,
+    pub fetched_at: Option<String>,
+    pub status: String,
+    pub status_detail: String,
+    pub models: Vec<ProviderModel>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +141,7 @@ pub struct LegacySwitcherStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppState {
+    pub runtime_mode: String,
     pub current_profile_id: String,
     pub config_path: String,
     pub auth_path: String,
@@ -126,6 +149,7 @@ pub struct AppState {
     pub tray_enabled: bool,
     pub safe_mode: bool,
     pub profiles: Vec<ProviderProfile>,
+    pub model_catalogs: Vec<ModelCatalog>,
     pub checks: Vec<ValidationCheck>,
     pub activity: Vec<ActivityItem>,
     pub backups: Vec<BackupItem>,
@@ -157,6 +181,8 @@ struct StoredCatalog {
     #[serde(default = "default_version")]
     version: String,
     profiles: Map<String, Value>,
+    #[serde(default)]
+    model_catalogs: Map<String, Value>,
     #[serde(default)]
     auto_start: bool,
     #[serde(default)]
@@ -213,8 +239,8 @@ fn backups_dir() -> Result<PathBuf, SwitcherError> {
     Ok(app_data_dir()?.join(BACKUPS_DIR))
 }
 
-fn legacy_profile_path() -> PathBuf {
-    PathBuf::from(LEGACY_PROFILE_PATH)
+fn legacy_profile_path() -> Option<PathBuf> {
+    env::var_os(LEGACY_PROFILE_ENV).map(PathBuf::from)
 }
 
 fn ensure_dirs() -> Result<(), SwitcherError> {
@@ -239,12 +265,11 @@ fn normalize_id(name: &str) -> String {
 }
 
 fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
-    let legacy = legacy_profile_path();
-    if legacy.exists() {
+    if let Some(legacy) = legacy_profile_path().filter(|path| path.exists()) {
         let text = fs::read_to_string(legacy)?;
         let mut catalog: StoredCatalog = serde_json::from_str(&text)?;
         normalize_catalog(&mut catalog);
-        catalog.imported_from_legacy = Some(LEGACY_PROFILE_PATH.to_string());
+        catalog.imported_from_legacy = legacy_profile_path().map(|path| path.display().to_string());
         catalog.imported_at = Some(now_label());
         return Ok(catalog);
     }
@@ -256,7 +281,7 @@ fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
             "name": "OWL",
             "base_url": "https://api.owlai.tech/v1",
             "api_key": "",
-            "model": "gpt-5.5",
+            "model": "",
             "model_reasoning_effort": "high",
             "verified": false,
             "default": true,
@@ -266,6 +291,7 @@ fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
     Ok(StoredCatalog {
         version: default_version(),
         profiles,
+        model_catalogs: Map::new(),
         auto_start: false,
         invariants: default_invariants(),
         imported_from_legacy: None,
@@ -363,6 +389,14 @@ fn catalog_profiles(catalog: &StoredCatalog, current_id: &str) -> Vec<ProviderPr
                     last_verified_at: profile.last_verified_at,
                 })
         })
+        .collect()
+}
+
+fn catalog_model_catalogs(catalog: &StoredCatalog) -> Vec<ModelCatalog> {
+    catalog
+        .model_catalogs
+        .iter()
+        .filter_map(|(_, value)| serde_json::from_value::<ModelCatalog>(value.clone()).ok())
         .collect()
 }
 
@@ -559,9 +593,17 @@ fn legacy_process_running() -> bool {
 
 fn legacy_switcher_status(catalog: &StoredCatalog) -> Result<LegacySwitcherStatus, SwitcherError> {
     let profile_path = legacy_profile_path();
+    let profile_exists = profile_path
+        .as_ref()
+        .map(|path| path.exists())
+        .unwrap_or(false);
+    let profile_path_label = profile_path
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| format!("%{}%", LEGACY_PROFILE_ENV));
     Ok(LegacySwitcherStatus {
-        profile_path: profile_path.display().to_string(),
-        profile_exists: profile_path.exists(),
+        profile_path: profile_path_label,
+        profile_exists,
         process_running: legacy_process_running(),
         port: LEGACY_SWITCHER_PORT,
         port_in_use: legacy_port_in_use(),
@@ -635,6 +677,7 @@ fn app_state() -> Result<AppState, SwitcherError> {
     let profiles = catalog_profiles(&catalog, &current_id);
     let legacy_switcher = legacy_switcher_status(&catalog)?;
     Ok(AppState {
+        runtime_mode: "tauri_native".to_string(),
         current_profile_id: current_id,
         config_path: config_path()?.display().to_string(),
         auth_path: auth_path()?.display().to_string(),
@@ -642,11 +685,244 @@ fn app_state() -> Result<AppState, SwitcherError> {
         tray_enabled: true,
         safe_mode: true,
         profiles,
+        model_catalogs: catalog_model_catalogs(&catalog),
         checks: validation_checks(&config),
         activity: load_activity()?,
         backups: list_backups()?,
         legacy_switcher,
     })
+}
+
+fn model_tags(model_id: &str) -> Vec<String> {
+    let id = model_id.to_ascii_lowercase();
+    let mut tags = Vec::new();
+    if id.contains("embedding") {
+        tags.push("embedding".to_string());
+    }
+    if id.contains("audio") || id.contains("transcribe") || id.contains("tts") {
+        tags.push("audio".to_string());
+    }
+    if id.contains("image") || id.contains("vision") || id.contains("vl") {
+        tags.push("vision".to_string());
+    }
+    if id.contains("reason") || id.contains("thinking") || id.contains("o1") || id.contains("o3") {
+        tags.push("reasoning".to_string());
+    }
+    if id.contains("gpt") || id.contains("chat") || id.contains("codex") {
+        tags.push("responses-candidate".to_string());
+    }
+    tags
+}
+
+fn model_id_from_value(item: &Value) -> Option<String> {
+    item.as_str()
+        .or_else(|| item.get("id").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToString::to_string)
+}
+
+fn parse_provider_models(body: &Value) -> Vec<ProviderModel> {
+    let mut seen = BTreeSet::new();
+    let empty = Vec::new();
+    let items = body
+        .get("data")
+        .and_then(Value::as_array)
+        .or_else(|| body.as_array())
+        .unwrap_or(&empty);
+    let mut models = items
+        .iter()
+        .filter_map(model_id_from_value)
+        .filter(|id| seen.insert(id.to_ascii_lowercase()))
+        .map(|id| ProviderModel {
+            tags: model_tags(&id),
+            id,
+            aliases: Vec::new(),
+            source: "provider_models_api".to_string(),
+            verified_for_responses: "unknown".to_string(),
+        })
+        .collect::<Vec<_>>();
+    models.sort_by(|a, b| a.id.to_ascii_lowercase().cmp(&b.id.to_ascii_lowercase()));
+    models
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_full_openai_compatible_model_list_without_version_filtering() {
+        let body = json!({
+            "object": "list",
+            "data": [
+                { "id": "gpt-5.6-sol", "object": "model" },
+                { "id": "gpt-5.5", "object": "model" },
+                { "id": "gpt-4.1", "object": "model" },
+                { "id": "text-embedding-3-large", "object": "model" },
+                { "id": "qwen3.5-coder", "object": "model" },
+                { "id": "GPT-5.5", "object": "model" },
+                { "object": "model" }
+            ]
+        });
+
+        let models = parse_provider_models(&body);
+        let ids = models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ids,
+            vec![
+                "gpt-4.1",
+                "gpt-5.5",
+                "gpt-5.6-sol",
+                "qwen3.5-coder",
+                "text-embedding-3-large"
+            ]
+        );
+        assert!(models
+            .iter()
+            .find(|model| model.id == "text-embedding-3-large")
+            .expect("embedding model should be kept")
+            .tags
+            .contains(&"embedding".to_string()));
+    }
+
+    #[test]
+    fn parses_provider_array_model_list() {
+        let body = json!(["gpt-5.5-mini", { "id": "vision-model" }, "", { "name": "ignored" }]);
+
+        let models = parse_provider_models(&body);
+        let ids = models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["gpt-5.5-mini", "vision-model"]);
+        assert!(models
+            .iter()
+            .find(|model| model.id == "vision-model")
+            .expect("vision model should be kept")
+            .tags
+            .contains(&"vision".to_string()));
+    }
+}
+
+fn build_model_catalog(
+    provider_id: &str,
+    profile: &StoredProfile,
+    status: &str,
+    detail: &str,
+    models: Vec<ProviderModel>,
+) -> ModelCatalog {
+    ModelCatalog {
+        provider_id: provider_id.to_string(),
+        base_url: profile.base_url.clone(),
+        fetched_at: Some(now_label()),
+        status: status.to_string(),
+        status_detail: detail.to_string(),
+        models,
+    }
+}
+
+fn fetch_provider_models(
+    provider_id: &str,
+    profile: &StoredProfile,
+) -> Result<ModelCatalog, SwitcherError> {
+    if profile.api_key.trim().is_empty() {
+        return Ok(build_model_catalog(
+            provider_id,
+            profile,
+            "missing_key",
+            "缺少 API 密钥，无法刷新模型目录。",
+            Vec::new(),
+        ));
+    }
+
+    let base_url = profile.base_url.trim().trim_end_matches('/');
+    if !base_url.starts_with("http") {
+        return Ok(build_model_catalog(
+            provider_id,
+            profile,
+            "provider_error",
+            "接口地址无效，必须以 http 或 https 开头。",
+            Vec::new(),
+        ));
+    }
+
+    let url = format!("{base_url}/models");
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(18))
+        .build()
+        .map_err(|err| SwitcherError::Message(format!("创建 HTTP client 失败：{err}")))?;
+    let response = match client.get(url).bearer_auth(profile.api_key.trim()).send() {
+        Ok(response) => response,
+        Err(err) => {
+            return Ok(build_model_catalog(
+                provider_id,
+                profile,
+                "network_error",
+                &format!("模型目录请求失败：{err}"),
+                Vec::new(),
+            ));
+        }
+    };
+
+    let status = response.status();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Ok(build_model_catalog(
+            provider_id,
+            profile,
+            "unauthorized",
+            "API key 无效或权限不足，provider 拒绝返回模型列表。",
+            Vec::new(),
+        ));
+    }
+    if !status.is_success() {
+        return Ok(build_model_catalog(
+            provider_id,
+            profile,
+            "provider_error",
+            &format!("provider 返回 HTTP {status}。"),
+            Vec::new(),
+        ));
+    }
+
+    let body: Value = match response.json() {
+        Ok(value) => value,
+        Err(err) => {
+            return Ok(build_model_catalog(
+                provider_id,
+                profile,
+                "provider_error",
+                &format!("模型目录响应不是有效 JSON：{err}"),
+                Vec::new(),
+            ));
+        }
+    };
+    let models = parse_provider_models(&body);
+
+    if models.is_empty() {
+        return Ok(build_model_catalog(
+            provider_id,
+            profile,
+            "empty_models",
+            "provider 返回了空模型列表。",
+            Vec::new(),
+        ));
+    }
+
+    Ok(build_model_catalog(
+        provider_id,
+        profile,
+        "ok",
+        &format!(
+            "已刷新中转站实际返回的 {} 个模型；不会自动改写当前模型。",
+            models.len()
+        ),
+        models,
+    ))
 }
 
 fn create_backup() -> Result<PathBuf, SwitcherError> {
@@ -777,11 +1053,19 @@ fn write_auth_key(api_key: &str) -> Result<(), SwitcherError> {
 
 #[tauri::command]
 fn load_state() -> Result<AppState, SwitcherError> {
+    load_state_core()
+}
+
+pub fn load_state_core() -> Result<AppState, SwitcherError> {
     app_state()
 }
 
 #[tauri::command]
 fn save_profile(profile: EditableProfile) -> Result<AppState, SwitcherError> {
+    save_profile_core(profile)
+}
+
+pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let id = if profile.id.trim().is_empty() {
         normalize_id(&profile.name)
@@ -833,6 +1117,10 @@ fn save_profile(profile: EditableProfile) -> Result<AppState, SwitcherError> {
 
 #[tauri::command]
 fn delete_profile(profile_id: String) -> Result<AppState, SwitcherError> {
+    delete_profile_core(profile_id)
+}
+
+pub fn delete_profile_core(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let config = read_config().unwrap_or_default();
     let current = current_profile_id(&catalog, &config);
@@ -859,6 +1147,10 @@ fn delete_profile(profile_id: String) -> Result<AppState, SwitcherError> {
 
 #[tauri::command]
 fn switch_profile(profile_id: String) -> Result<AppState, SwitcherError> {
+    switch_profile_core(profile_id)
+}
+
+pub fn switch_profile_core(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let value = catalog
         .profiles
@@ -887,6 +1179,10 @@ fn switch_profile(profile_id: String) -> Result<AppState, SwitcherError> {
 
 #[tauri::command]
 fn verify_profile(profile_id: String) -> Result<AppState, SwitcherError> {
+    verify_profile_core(profile_id)
+}
+
+pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let value = catalog
         .profiles
@@ -926,7 +1222,41 @@ fn verify_profile(profile_id: String) -> Result<AppState, SwitcherError> {
 }
 
 #[tauri::command]
+fn refresh_models(profile_id: String) -> Result<AppState, SwitcherError> {
+    refresh_models_core(profile_id)
+}
+
+pub fn refresh_models_core(profile_id: String) -> Result<AppState, SwitcherError> {
+    let mut catalog = load_catalog()?;
+    let value = catalog
+        .profiles
+        .get(&profile_id)
+        .cloned()
+        .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
+    let profile: StoredProfile = serde_json::from_value(value)?;
+    let model_catalog = fetch_provider_models(&profile_id, &profile)?;
+    let ok = model_catalog.status == "ok";
+    catalog
+        .model_catalogs
+        .insert(profile_id.clone(), serde_json::to_value(&model_catalog)?);
+    save_catalog(&catalog)?;
+    app_state_with_activity(
+        if ok {
+            "模型目录已刷新"
+        } else {
+            "模型目录刷新失败"
+        },
+        &model_catalog.status_detail,
+        if ok { "success" } else { "warning" },
+    )
+}
+
+#[tauri::command]
 fn set_default_profile(profile_id: String) -> Result<AppState, SwitcherError> {
+    set_default_profile_core(profile_id)
+}
+
+pub fn set_default_profile_core(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let mut display_name = profile_id.clone();
     for (id, value) in catalog.profiles.clone() {
@@ -946,7 +1276,11 @@ fn set_default_profile(profile_id: String) -> Result<AppState, SwitcherError> {
 }
 
 #[tauri::command]
-fn toggle_auto_start(_enabled: bool) -> Result<AppState, SwitcherError> {
+fn toggle_auto_start(enabled: bool) -> Result<AppState, SwitcherError> {
+    toggle_auto_start_core(enabled)
+}
+
+pub fn toggle_auto_start_core(_enabled: bool) -> Result<AppState, SwitcherError> {
     Err(SwitcherError::Message(
         "开机自启动尚未接入 Windows 启动项读写；当前版本不开放这个主功能。".to_string(),
     ))
@@ -954,6 +1288,10 @@ fn toggle_auto_start(_enabled: bool) -> Result<AppState, SwitcherError> {
 
 #[tauri::command]
 fn restore_latest_backup() -> Result<AppState, SwitcherError> {
+    restore_latest_backup_core()
+}
+
+pub fn restore_latest_backup_core() -> Result<AppState, SwitcherError> {
     let backups = list_backups()?;
     let latest = backups
         .first()
@@ -1023,6 +1361,7 @@ pub fn run() {
             delete_profile,
             switch_profile,
             verify_profile,
+            refresh_models,
             set_default_profile,
             toggle_auto_start,
             restore_latest_backup

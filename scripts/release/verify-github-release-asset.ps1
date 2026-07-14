@@ -32,7 +32,18 @@ function Assert-Command {
 
 function Get-FileSha256Lower {
     param([string]$Path)
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($stream)
+            return (($hashBytes | ForEach-Object { $_.ToString("x2") }) -join "")
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
 }
 
 function Read-TextNormalized {
@@ -102,7 +113,7 @@ try {
 
     $unzip = Join-Path $tmp "unzip"
     Expand-Archive -LiteralPath $remoteZip -DestinationPath $unzip -Force
-    foreach ($required in @("setup.cmd", "setup.ps1", "README.md", "docs\user\installation.zh.md")) {
+        foreach ($required in @("CodeXProviderSwitcher.cmd", "CodeXProviderSwitcher.ps1", "bin\local_backend.exe", "dist\index.html", "README.md", "docs\user\installation.zh.md")) {
         if (-not (Test-Path -LiteralPath (Join-Path $unzip $required) -PathType Leaf)) {
             throw "Remote release zip is missing: $required"
         }

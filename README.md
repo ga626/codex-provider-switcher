@@ -10,15 +10,17 @@
 
 - React/Vite 前端。
 - Tauri/Rust 本地文件、profiles、backup、validation、restore 基础。
-- 浏览器 mock adapter，方便不启动 Tauri 时验收界面。
-- Playwright smoke flow。
+- Provider 模型目录缓存和只读 `/models` 刷新入口。
+- 可下载 alpha zip：包含 `CodeXProviderSwitcher.cmd`、静默本地后端 `local_backend.exe` 和 `dist/` 前端资源。
+- 浏览器 UI-only mock adapter，仅用于不启动后端时检查界面；它不是产品真实运行态。
+- Playwright UI smoke flow。
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
 
 尚未完成：
 
-- 静默本地 Web 后端。
-- 双击启动后无可见 CMD 的最终产品入口。
-- provider 模型目录和 GPT-5.6 系列动态发现。
+- 正式安装器、自动更新器和后台常驻管理。
+- Codex/Responses 与中转站模型名的完整兼容验证策略。
+- Responses API 兼容性验证。
 - 自动更新、备份、恢复、回滚的正式用户闭环。
 - 旧版工具最终 cutover。
 - UI 信息架构重构。
@@ -27,11 +29,7 @@
 
 旧版工具仍然是参考源和回滚源：
 
-```text
-D:\AI Studio\CodeX\Codex Switcher
-```
-
-本仓库不会直接覆盖旧版 `CodeX-Switcher.exe`。只有当新版完成启动、验证、备份、恢复、回滚、模型发现和最终交接包之后，才进入受控替换阶段。
+本仓库不会直接覆盖旧版 `CodeX-Switcher.exe` 或旧版本机目录。只有当新版完成启动、验证、备份、恢复、回滚、模型发现和最终交接包之后，才进入受控替换阶段。
 
 ## 开发命令
 
@@ -80,14 +78,38 @@ npm run verify:doctor
 运行 UI smoke：
 
 ```powershell
-$env:QA_OUTPUT_DIR="D:\Projects\CodeXProviderSwitcher\release\qa-smoke"
 npm run qa:smoke
 ```
+
+UI smoke 默认运行在浏览器预览假数据上，只证明界面流程没有明显断裂。真实本地能力必须通过本地 Web 后端和 release 包验收。
+
+构建并验证本地 Web 后端：
+
+```powershell
+npm run build
+npm run backend:build
+npm run backend:smoke
+```
+
+开发时启动真实本地 Web 后端：
+
+```powershell
+npm run backend:dev -- --port 47832
+```
+
+然后打开：
+
+```text
+http://127.0.0.1:47832/
+```
+
+该入口会服务 `dist/` 前端，并通过同源 `/api/*` 调用本机真实后端；它不同于 `preview:start` 的 UI-only 假数据。
 
 Rust/Tauri 检查：
 
 ```powershell
 cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 Tauri 开发和打包仍可用，但不是当前主路线：
@@ -109,6 +131,12 @@ npm run release:build
 
 ```powershell
 npm run release:build -- -Apply
+```
+
+解压并按普通用户路径验证本地 zip：
+
+```powershell
+npm run release:verify-local
 ```
 
 发布后的远端资产复验：

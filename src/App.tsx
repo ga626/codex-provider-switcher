@@ -20,19 +20,20 @@ import './App.css'
 import {
   deleteProfile,
   loadState,
+  refreshModels,
   restoreLatestBackup,
   saveProfile,
   setDefaultProfile,
   switchProfile,
   verifyProfile,
 } from './adapter'
-import type { AppState, EditableProfile, ProviderProfile } from './types'
+import type { AppState, EditableProfile, ModelCatalog, ProviderProfile, ValidationCheck } from './types'
 
 const emptyProfile: EditableProfile = {
   id: '',
   name: '',
   baseUrl: '',
-  model: 'gpt-5.5',
+  model: '',
   note: '',
   apiKey: '',
 }
@@ -60,7 +61,11 @@ function toEditable(profile: ProviderProfile): EditableProfile {
   }
 }
 
-function profileChecks(profile: ProviderProfile | undefined, draft: EditableProfile) {
+function profileChecks(
+  profile: ProviderProfile | undefined,
+  draft: EditableProfile,
+  modelCatalog: ModelCatalog | undefined
+): ValidationCheck[] {
   if (!profile && !draft.name && !draft.baseUrl) {
     return []
   }
@@ -70,7 +75,7 @@ function profileChecks(profile: ProviderProfile | undefined, draft: EditableProf
   const model = draft.model.trim()
   const hasKey = draft.apiKey.trim().length > 0 || Boolean(profile?.hasApiKey)
 
-  return [
+  const checks: ValidationCheck[] = [
     {
       id: 'profile-name',
       label: '服务商名称',
@@ -100,6 +105,21 @@ function profileChecks(profile: ProviderProfile | undefined, draft: EditableProf
       severity: 'required' as const,
     },
   ]
+
+  if (model.length > 0 && modelCatalog?.status === 'ok') {
+    const modelIds = new Set(modelCatalog.models.map((item) => item.id))
+    checks.push({
+      id: 'profile-model-catalog',
+      label: '模型目录匹配',
+      ok: modelIds.has(model),
+      detail: modelIds.has(model)
+        ? '当前模型存在于最近一次 provider 模型目录。'
+        : '当前模型不在最近一次 provider 模型目录中；可继续手动保存，但切换前需要确认。',
+      severity: 'warning' as const,
+    })
+  }
+
+  return checks
 }
 
 function App() {
@@ -157,9 +177,13 @@ function App() {
     return state?.profiles.find((profile) => profile.id === state.currentProfileId)
   }, [state])
 
+  const selectedModelCatalog = useMemo(() => {
+    return state?.modelCatalogs.find((catalog) => catalog.providerId === selectedId)
+  }, [selectedId, state])
+
   const displayChecks = useMemo(() => {
-    return [...(state?.checks ?? []), ...profileChecks(selectedProfile, draft)]
-  }, [draft, selectedProfile, state])
+    return [...(state?.checks ?? []), ...profileChecks(selectedProfile, draft, selectedModelCatalog)]
+  }, [draft, selectedModelCatalog, selectedProfile, state])
 
   const failingChecks = displayChecks.filter((check) => !check.ok)
   const requiredFailures = failingChecks.filter((check) => check.severity === 'required').length
@@ -244,7 +268,13 @@ function App() {
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Desktop Alpha</p>
+          <p className="eyebrow">
+            {state.runtimeMode === 'browser_preview_mock'
+              ? '浏览器假数据'
+              : state.runtimeMode === 'local_web_backend'
+                ? '本机 Web 后端'
+                : '本机真实后端'}
+          </p>
           <h1>CodeX Provider Switcher</h1>
         </div>
         <div className="topbar-actions">
@@ -292,6 +322,15 @@ function App() {
             >
               <ShieldCheck size={16} />
               验证配置
+            </button>
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => selectedProfile && runAction('refresh-models', () => refreshModels(selectedProfile.id))}
+              disabled={!selectedProfile || busy !== null}
+            >
+              <RefreshCcw size={16} />
+              刷新模型目录
             </button>
           </div>
         </div>
@@ -412,7 +451,11 @@ function App() {
               </label>
               <label>
                 模型
-                <input value={draft.model} onChange={(event) => updateDraft('model', event.target.value)} placeholder="gpt-5.5" />
+                <input
+                  value={draft.model}
+                  onChange={(event) => updateDraft('model', event.target.value)}
+                  placeholder="先刷新模型目录，或手动输入 provider 支持的模型"
+                />
               </label>
               <label className="wide">
                 API 密钥
@@ -430,6 +473,58 @@ function App() {
                 备注
                 <textarea value={draft.note} onChange={(event) => updateDraft('note', event.target.value)} rows={3} />
               </label>
+            </div>
+
+            <div className="model-catalog-panel">
+              <div className="model-catalog-heading">
+                <div>
+                  <strong>模型目录</strong>
+                  <span>
+                    {selectedModelCatalog
+                      ? selectedModelCatalog.statusDetail
+                      : '尚未刷新模型目录；不会自动迁移当前模型。'}
+                  </span>
+                </div>
+                <button
+                  className="ghost-button compact-button"
+                  type="button"
+                  onClick={() => selectedProfile && runAction('refresh-models', () => refreshModels(selectedProfile.id))}
+                  disabled={!selectedProfile || busy !== null}
+                >
+                  <RefreshCcw size={14} />
+                  刷新
+                </button>
+              </div>
+              <div className="model-catalog-meta">
+                <span className={`pill ${selectedModelCatalog?.status === 'ok' ? 'ok' : 'warning'}`}>
+                  {selectedModelCatalog?.status ?? 'not_fetched'}
+                </span>
+                {selectedModelCatalog?.fetchedAt && <span>刷新时间：{selectedModelCatalog.fetchedAt}</span>}
+              </div>
+              {selectedModelCatalog?.models.length ? (
+                <div className="model-option-list">
+                  {selectedModelCatalog.models.map((model) => (
+                    <button
+                      className={`model-option ${draft.model === model.id ? 'selected' : ''}`}
+                      type="button"
+                      key={model.id}
+                      onClick={() => updateDraft('model', model.id)}
+                    >
+                      <span>
+                        <strong>{model.id}</strong>
+                        {model.aliases.length > 0 && <small>别名：{model.aliases.join(', ')}</small>}
+                      </span>
+                      {model.tags.slice(0, 2).map((tag) => (
+                        <span className="pill ok" key={tag}>{tag}</span>
+                      ))}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-catalog-note">
+                  没有可展示的模型。可以先刷新目录，或手动填写 provider 已确认支持的模型名。
+                </p>
+              )}
             </div>
 
             <div className="action-row">

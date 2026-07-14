@@ -7,7 +7,7 @@
 
 - [ ] `AGENTS.md`、`CONTRIBUTING.md`、`SECURITY.md` 已更新。
 - [ ] `.github/pull_request_template.md` 已覆盖验证、安全和用户影响。
-- [ ] GitHub CI 包含 lint、build、Rust check。
+- [ ] GitHub CI 包含 lint、build、Rust check、Rust tests、本地 Web 后端 build 和 smoke。
 - [ ] `.gitignore` 排除日志、构建产物、Release 输出、本机配置和密钥。
 - [ ] `git diff --check` 通过。
 - [ ] 敏感信息扫描无真实密钥。
@@ -28,6 +28,10 @@
 npm run lint
 npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
+npm run backend:build
+npm run backend:smoke
+npm run backend:ui-smoke
 git diff --check
 ```
 
@@ -37,6 +41,23 @@ git diff --check
 npm run preview:start -- --NoOpen
 npm run qa:smoke
 npm run preview:stop
+```
+
+说明：`qa:smoke` 是浏览器 UI-only mock 验证，不能替代真实本地后端或 Tauri/Rust 路径验收。
+
+真实能力验证：
+
+```powershell
+cargo test --manifest-path src-tauri/Cargo.toml
+npm run backend:build
+npm run backend:smoke
+```
+
+可下载 alpha 包必须额外通过解压启动验收：
+
+```powershell
+npm run release:build -- -Apply
+npm run release:verify-local
 ```
 
 ## 4. Release 包层
@@ -53,7 +74,7 @@ Release 包应包含：
 Release 包必须排除：
 
 - `node_modules/`
-- `dist/`
+- 源码根目录和开发脚本。
 - `src-tauri/target/`
 - `logs/`
 - `release/`
@@ -69,7 +90,7 @@ Release 包必须排除：
 发布前必须按普通用户路径确认：
 
 - [ ] 解压 Release 包。
-- [ ] 双击启动入口。
+- [ ] 双击 `CodeXProviderSwitcher.cmd`。
 - [ ] 没有可见 CMD 窗口常驻。
 - [ ] 浏览器打开本地 Web 控制台。
 - [ ] 当前 Codex 配置摘要脱敏显示。

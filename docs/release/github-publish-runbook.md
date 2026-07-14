@@ -85,7 +85,7 @@ checksums.txt
 release-notes.md
 ```
 
-zip 应包含启动器、静默后端、前端静态资源、必要文档和版本信息。不要包含 `logs/`、`release/`、`archive/`、`node_modules/`、`dist/`、`src-tauri/target/`、真实 profiles、auth、config 或备份。
+zip 应包含启动器、静默后端、前端静态资源、必要文档和版本信息。不要包含源码树、开发脚本、`logs/`、`release/`、`archive/`、`node_modules/`、`src-tauri/target/`、真实 profiles、auth、config 或备份。
 
 ## 交付复验
 

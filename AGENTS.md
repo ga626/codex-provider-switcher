@@ -72,3 +72,10 @@ npm run preview:start -- --NoOpen
 npm run qa:smoke
 npm run preview:stop
 ```
+
+## IAB / 网站按钮临时规避
+
+- 在 Codex Desktop Windows 的 in-app browser / site preview / 网站按钮崩溃修复前，本项目不要主动使用 `@Browser`、IAB、`agent.browsers.get("iab")` 或 `agent.browsers.getForUrl(...)` 验收网页。
+- 需要打开或检查本地网页时，优先使用固定端口 `http://127.0.0.1:47832/`、HTTP 探针、release 解压验收脚本、外部 Playwright、系统 Chrome，或把 localhost URL 交给用户在系统浏览器中打开。
+- 不要引导用户点击 Codex UI 底部的“网站/打开网页”按钮；如果必须测试该按钮，应先说明这是复现 IAB/site-preview 崩溃的风险动作。
+- 这是临时项目规则，不是永久禁用官方插件。官方修复并在本机验证后，删除或改写本节。

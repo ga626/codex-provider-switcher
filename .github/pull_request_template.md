@@ -13,7 +13,7 @@
 ## 安全检查
 
 - [ ] 没有提交真实 API key、token、auth 文件、profiles、备份、截图或本机私有日志。
-- [ ] 没有修改旧版 `D:\AI Studio\CodeX\Codex Switcher`。
+- [ ] 没有修改旧版本机工具目录。
 - [ ] 涉及 `config.toml` / `auth.json` 写入时，已经说明备份、恢复和失败路径。
 
 ## 用户影响

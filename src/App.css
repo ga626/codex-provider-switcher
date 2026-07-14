@@ -88,6 +88,12 @@ h2 {
   transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease, border-color 0.16s ease;
 }
 
+.compact-button {
+  min-height: 30px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
 .primary-button {
   color: #fff;
   background: var(--accent);
@@ -449,6 +455,71 @@ textarea {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
+}
+
+.model-catalog-panel {
+  margin-top: 14px;
+  padding: 12px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.model-catalog-heading,
+.model-catalog-meta,
+.model-option {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.model-catalog-heading strong,
+.model-option strong {
+  display: block;
+  font-size: 13px;
+}
+
+.model-catalog-heading span,
+.model-catalog-meta span:not(.pill),
+.model-option small,
+.empty-catalog-note {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.model-catalog-meta {
+  align-items: center;
+  justify-content: flex-start;
+  margin: 10px 0;
+}
+
+.model-option-list {
+  display: grid;
+  gap: 8px;
+}
+
+.model-option {
+  width: 100%;
+  min-height: 48px;
+  padding: 9px 10px;
+  color: var(--text);
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.model-option.selected {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.empty-catalog-note {
+  margin: 0;
 }
 
 .diagnostics-grid {
