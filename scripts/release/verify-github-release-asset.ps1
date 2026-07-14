@@ -113,8 +113,14 @@ try {
 
     $unzip = Join-Path $tmp "unzip"
     Expand-Archive -LiteralPath $remoteZip -DestinationPath $unzip -Force
-        foreach ($required in @("CodeXProviderSwitcher.cmd", "CodeXProviderSwitcher.ps1", "bin\local_backend.exe", "dist\index.html", "README.md", "docs\user\installation.zh.md")) {
-        if (-not (Test-Path -LiteralPath (Join-Path $unzip $required) -PathType Leaf)) {
+
+    $packageRoot = Get-ChildItem -LiteralPath $unzip -Directory | Where-Object { $_.Name -eq $releaseName } | Select-Object -First 1
+    if (-not $packageRoot) {
+        throw "Remote release zip did not contain expected package directory: $releaseName"
+    }
+
+    foreach ($required in @("CodeXProviderSwitcher.cmd", "CodeXProviderSwitcher.ps1", "bin\local_backend.exe", "dist\index.html", "README.md", "docs\user\installation.zh.md")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $packageRoot.FullName $required) -PathType Leaf)) {
             throw "Remote release zip is missing: $required"
         }
     }
