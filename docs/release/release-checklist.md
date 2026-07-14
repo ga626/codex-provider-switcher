@@ -31,6 +31,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run backend:build
 npm run backend:smoke
+npm run backend:ui-smoke
 git diff --check
 ```
 
@@ -52,7 +53,12 @@ npm run backend:build
 npm run backend:smoke
 ```
 
-在静默启动器完成前，不能把本地 Web 后端声明为最终普通用户入口。
+可下载 alpha 包必须额外通过解压启动验收：
+
+```powershell
+npm run release:build -- -Apply
+npm run release:verify-local
+```
 
 ## 4. Release 包层
 
@@ -68,7 +74,7 @@ Release 包应包含：
 Release 包必须排除：
 
 - `node_modules/`
-- `dist/`
+- 源码根目录和开发脚本。
 - `src-tauri/target/`
 - `logs/`
 - `release/`
@@ -84,7 +90,7 @@ Release 包必须排除：
 发布前必须按普通用户路径确认：
 
 - [ ] 解压 Release 包。
-- [ ] 双击启动入口。
+- [ ] 双击 `CodeXProviderSwitcher.cmd`。
 - [ ] 没有可见 CMD 窗口常驻。
 - [ ] 浏览器打开本地 Web 控制台。
 - [ ] 当前 Codex 配置摘要脱敏显示。

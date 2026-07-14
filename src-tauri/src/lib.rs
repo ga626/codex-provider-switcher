@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{
     collections::BTreeSet,
-    fs,
+    env, fs,
     net::{SocketAddr, TcpStream},
     path::PathBuf,
     process::Command,
@@ -20,7 +20,7 @@ const APP_DIR_NAME: &str = "CodeX Provider Switcher";
 const PROFILES_FILE: &str = "profiles.json";
 const ACTIVITY_FILE: &str = "activity.json";
 const BACKUPS_DIR: &str = "backups";
-const LEGACY_PROFILE_PATH: &str = r"D:\AI Studio\CodeX\Codex Switcher\profiles.json";
+const LEGACY_PROFILE_ENV: &str = "CODEX_PROVIDER_SWITCHER_LEGACY_PROFILES";
 const LEGACY_SWITCHER_PORT: u16 = 47831;
 
 #[derive(Debug, Error)]
@@ -239,8 +239,8 @@ fn backups_dir() -> Result<PathBuf, SwitcherError> {
     Ok(app_data_dir()?.join(BACKUPS_DIR))
 }
 
-fn legacy_profile_path() -> PathBuf {
-    PathBuf::from(LEGACY_PROFILE_PATH)
+fn legacy_profile_path() -> Option<PathBuf> {
+    env::var_os(LEGACY_PROFILE_ENV).map(PathBuf::from)
 }
 
 fn ensure_dirs() -> Result<(), SwitcherError> {
@@ -265,12 +265,11 @@ fn normalize_id(name: &str) -> String {
 }
 
 fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
-    let legacy = legacy_profile_path();
-    if legacy.exists() {
+    if let Some(legacy) = legacy_profile_path().filter(|path| path.exists()) {
         let text = fs::read_to_string(legacy)?;
         let mut catalog: StoredCatalog = serde_json::from_str(&text)?;
         normalize_catalog(&mut catalog);
-        catalog.imported_from_legacy = Some(LEGACY_PROFILE_PATH.to_string());
+        catalog.imported_from_legacy = legacy_profile_path().map(|path| path.display().to_string());
         catalog.imported_at = Some(now_label());
         return Ok(catalog);
     }
@@ -594,9 +593,17 @@ fn legacy_process_running() -> bool {
 
 fn legacy_switcher_status(catalog: &StoredCatalog) -> Result<LegacySwitcherStatus, SwitcherError> {
     let profile_path = legacy_profile_path();
+    let profile_exists = profile_path
+        .as_ref()
+        .map(|path| path.exists())
+        .unwrap_or(false);
+    let profile_path_label = profile_path
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| format!("%{}%", LEGACY_PROFILE_ENV));
     Ok(LegacySwitcherStatus {
-        profile_path: profile_path.display().to_string(),
-        profile_exists: profile_path.exists(),
+        profile_path: profile_path_label,
+        profile_exists,
         process_running: legacy_process_running(),
         port: LEGACY_SWITCHER_PORT,
         port_in_use: legacy_port_in_use(),
@@ -759,7 +766,10 @@ mod tests {
         });
 
         let models = parse_provider_models(&body);
-        let ids = models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>();
+        let ids = models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>();
 
         assert_eq!(
             ids,
@@ -784,7 +794,10 @@ mod tests {
         let body = json!(["gpt-5.5-mini", { "id": "vision-model" }, "", { "name": "ignored" }]);
 
         let models = parse_provider_models(&body);
-        let ids = models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>();
+        let ids = models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>();
 
         assert_eq!(ids, vec!["gpt-5.5-mini", "vision-model"]);
         assert!(models
@@ -904,7 +917,10 @@ fn fetch_provider_models(
         provider_id,
         profile,
         "ok",
-        &format!("已刷新中转站实际返回的 {} 个模型；不会自动改写当前模型。", models.len()),
+        &format!(
+            "已刷新中转站实际返回的 {} 个模型；不会自动改写当前模型。",
+            models.len()
+        ),
         models,
     ))
 }

@@ -9,5 +9,6 @@
 | `scripts/local-backend-ui-smoke.mjs` | Open the real local Web backend UI and assert it renders as `本机 Web 后端` without write actions |
 | `scripts/verify/doctor-codex-provider-switcher.ps1` | Repository and release-readiness checks |
 | `scripts/release/build-codex-provider-switcher-release.ps1` | Build the local release zip and checksum |
+| `scripts/release/verify-local-release-package.ps1` | Unpack and smoke-test the runnable local release zip |
 | `scripts/release/publish-github-release-asset.ps1` | Upload and verify GitHub Release assets |
 | `scripts/release/verify-github-release-asset.ps1` | Download and compare GitHub Release assets |

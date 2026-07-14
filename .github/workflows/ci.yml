@@ -41,6 +41,12 @@ jobs:
       - name: Smoke local web backend
         run: npm run backend:smoke
 
+      - name: Build release package
+        run: npm run release:build -- -Apply
+
+      - name: Verify release package
+        run: npm run release:verify-local
+
       - name: Diff whitespace check
         shell: pwsh
         run: git diff --check

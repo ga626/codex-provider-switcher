@@ -116,7 +116,7 @@ Alpha 阶段不做：
 旧版路径：
 
 ```text
-D:\AI Studio\CodeX\Codex Switcher
+旧版工具本机目录
 ```
 
 迁移规则：

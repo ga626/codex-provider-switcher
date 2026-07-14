@@ -3,13 +3,13 @@ import type { AppState } from './types'
 export const initialState: AppState = {
   runtimeMode: 'browser_preview_mock',
   currentProfileId: 'a6api',
-  configPath: String.raw`C:\Users\ga990\.codex\config.toml`,
-  authPath: String.raw`C:\Users\ga990\.codex\auth.json`,
+  configPath: String.raw`C:\Users\<user>\.codex\config.toml`,
+  authPath: String.raw`C:\Users\<user>\.codex\auth.json`,
   autoStart: false,
   trayEnabled: true,
   safeMode: true,
   legacySwitcher: {
-    profilePath: String.raw`D:\AI Studio\CodeX\Codex Switcher\profiles.json`,
+    profilePath: '旧版工具本机 profiles.json',
     profileExists: true,
     processRunning: true,
     port: 47831,

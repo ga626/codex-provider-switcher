@@ -16,6 +16,8 @@ $releaseName = "CodeXProviderSwitcher-windows-x64-$Version"
 $stagePath = Join-Path $outputRootPath $releaseName
 $zipPath = Join-Path $outputRootPath "$releaseName.zip"
 $sha256Path = Join-Path $outputRootPath "$releaseName.zip.sha256"
+$backendExe = Join-Path $projectRoot "src-tauri\target\release\local_backend.exe"
+$distRoot = Join-Path $projectRoot "dist"
 
 function Assert-UnderProject {
     param([string]$Path)
@@ -27,14 +29,16 @@ function Assert-UnderProject {
     }
 }
 
-function Test-BlockedReleasePath {
+function Test-BlockedPackagePath {
     param([string]$RelativePath)
     $normalized = $RelativePath -replace "/", "\"
     if ($normalized -like ".git\*") { return $true }
+    if ($normalized -like ".github\*") { return $true }
     if ($normalized -like ".codex-provider-switcher\*") { return $true }
     if ($normalized -like "node_modules\*") { return $true }
-    if ($normalized -like "dist\*") { return $true }
-    if ($normalized -like "src-tauri\target\*") { return $true }
+    if ($normalized -like "src\*") { return $true }
+    if ($normalized -like "src-tauri\*") { return $true }
+    if ($normalized -like "scripts\*") { return $true }
     if ($normalized -like "logs\*") { return $true }
     if ($normalized -like "release\*") { return $true }
     if ($normalized -like "archive\*") { return $true }
@@ -46,27 +50,30 @@ function Test-BlockedReleasePath {
     return $false
 }
 
-function Copy-ReleaseItem {
-    param([string]$RelativePath)
-    $source = Join-Path $projectRoot $RelativePath
-    if (-not (Test-Path -LiteralPath $source)) {
-        throw "Release item missing: $RelativePath"
+function Copy-FileToPackage {
+    param([string]$Source, [string]$DestinationRelativePath)
+    if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
+        throw "Release input missing: $Source"
     }
-    if (Test-Path -LiteralPath $source -PathType Container) {
-        Get-ChildItem -LiteralPath $source -Recurse -File -Force | ForEach-Object {
-            $sourceRelative = $_.FullName.Substring($projectRoot.Length).TrimStart("\")
-            if (Test-BlockedReleasePath -RelativePath $sourceRelative) { return }
-            $target = Join-Path $stagePath $sourceRelative
-            $targetParent = Split-Path -Parent $target
-            New-Item -ItemType Directory -Path $targetParent -Force | Out-Null
-            Copy-Item -LiteralPath $_.FullName -Destination $target -Force
-        }
-    } else {
-        if (Test-BlockedReleasePath -RelativePath $RelativePath) { return }
-        $target = Join-Path $stagePath $RelativePath
-        $targetParent = Split-Path -Parent $target
-        New-Item -ItemType Directory -Path $targetParent -Force | Out-Null
-        Copy-Item -LiteralPath $source -Destination $target -Force
+    if (Test-BlockedPackagePath -RelativePath $DestinationRelativePath) {
+        throw "Release package destination is blocked: $DestinationRelativePath"
+    }
+    $target = Join-Path $stagePath $DestinationRelativePath
+    $targetParent = Split-Path -Parent $target
+    New-Item -ItemType Directory -Path $targetParent -Force | Out-Null
+    Copy-Item -LiteralPath $Source -Destination $target -Force
+}
+
+function Copy-DirectoryToPackage {
+    param([string]$SourceRoot, [string]$DestinationRelativeRoot)
+    if (-not (Test-Path -LiteralPath $SourceRoot -PathType Container)) {
+        throw "Release input directory missing: $SourceRoot"
+    }
+    Get-ChildItem -LiteralPath $SourceRoot -Recurse -File -Force | ForEach-Object {
+        $relative = $_.FullName.Substring($SourceRoot.Length).TrimStart("\")
+        $destinationRelative = Join-Path $DestinationRelativeRoot $relative
+        if (Test-BlockedPackagePath -RelativePath $destinationRelative) { return }
+        Copy-FileToPackage -Source $_.FullName -DestinationRelativePath $destinationRelative
     }
 }
 
@@ -88,10 +95,46 @@ function Assert-CmdFileUsesCrlf {
     }
 }
 
+function Test-TextAsset {
+    param([string]$Path)
+    $extension = [System.IO.Path]::GetExtension($Path).ToLowerInvariant()
+    return @(
+        ".cmd",
+        ".css",
+        ".html",
+        ".js",
+        ".json",
+        ".md",
+        ".ps1",
+        ".svg",
+        ".txt",
+        ".xml",
+        ".yaml",
+        ".yml"
+    ) -contains $extension
+}
+
+function Get-Sha256Hex {
+    param([string]$Path)
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($stream)
+            return (($hashBytes | ForEach-Object { $_.ToString("x2") }) -join "")
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 function Assert-PublicReleaseTree {
     param([string]$Root)
     $blocked = New-Object System.Collections.Generic.List[string]
     $secretHits = New-Object System.Collections.Generic.List[string]
+    $localPathHits = New-Object System.Collections.Generic.List[string]
     $secretPatterns = @(
         'ghp_[A-Za-z0-9_]{20,}'
         'github_pat_[A-Za-z0-9_]{20,}'
@@ -101,14 +144,33 @@ function Assert-PublicReleaseTree {
 
     Get-ChildItem -LiteralPath $Root -Recurse -File -Force | ForEach-Object {
         $relative = $_.FullName.Substring($Root.Length).TrimStart("\")
-        if (Test-BlockedReleasePath -RelativePath $relative) {
+        if (Test-BlockedPackagePath -RelativePath $relative) {
             $blocked.Add($relative)
         }
-        $text = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
-        foreach ($pattern in $secretPatterns) {
-            if ($text -match $pattern) {
-                $secretHits.Add("$relative :: secret-shaped text")
+        if (Test-TextAsset -Path $_.FullName) {
+            $text = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+            if ($text -match 'D:\\Projects\\|D:\\AI Studio\\|C:\\Users\\ga990\\') {
+                $localPathHits.Add("$relative :: local path marker")
             }
+            foreach ($pattern in $secretPatterns) {
+                if ($text -match $pattern) {
+                    $secretHits.Add("$relative :: secret-shaped text")
+                }
+            }
+        }
+    }
+
+    foreach ($required in @(
+        "CodeXProviderSwitcher.cmd",
+        "CodeXProviderSwitcher.ps1",
+        "bin\local_backend.exe",
+        "dist\index.html",
+        "README.md",
+        "docs\user\installation.zh.md",
+        "docs\release\release-notes-$Version.md"
+    )) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Root $required) -PathType Leaf)) {
+            throw "Release package missing required file: $required"
         }
     }
 
@@ -118,33 +180,10 @@ function Assert-PublicReleaseTree {
     if ($secretHits.Count -gt 0) {
         throw "Release package contains secret-shaped text: $($secretHits -join '; ')"
     }
+    if ($localPathHits.Count -gt 0) {
+        throw "Release package contains local path markers: $($localPathHits -join '; ')"
+    }
 }
-
-$include = @(
-    "README.md",
-    "LICENSE",
-    "CHANGELOG.md",
-    "CONTRIBUTING.md",
-    "SECURITY.md",
-    "AGENTS.md",
-    "setup.cmd",
-    "setup.ps1",
-    "package.json",
-    "package-lock.json",
-    "index.html",
-    "vite.config.ts",
-    "tsconfig.json",
-    "tsconfig.app.json",
-    "tsconfig.node.json",
-    ".gitignore",
-    ".gitattributes",
-    ".github",
-    "docs",
-    "public",
-    "scripts",
-    "src",
-    "src-tauri"
-)
 
 Write-Host "CodeX Provider Switcher release package plan"
 Write-Host "Version: $Version"
@@ -152,8 +191,19 @@ Write-Host "Stage:   $stagePath"
 Write-Host "Zip:     $zipPath"
 Write-Host "SHA256:  $sha256Path"
 Write-Host "Mode:    $(if ($Apply) { 'apply' } else { 'dry-run' })"
+Write-Host "Package: launcher + local_backend.exe + dist/ + public docs"
 
-foreach ($item in $include) {
+foreach ($item in @(
+    "CodeXProviderSwitcher.cmd",
+    "CodeXProviderSwitcher.ps1",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "docs\user\installation.zh.md",
+    "docs\user\troubleshooting.zh.md",
+    "docs\release\release-checklist.md",
+    "docs\release\release-notes-$Version.md"
+)) {
     $path = Join-Path $projectRoot $item
     if (-not (Test-Path -LiteralPath $path)) {
         throw "Required release input missing: $item"
@@ -162,7 +212,7 @@ foreach ($item in $include) {
 
 if (-not $Apply) {
     Write-Host ""
-    Write-Host "Dry run only. Re-run with -Apply to create the release zip."
+    Write-Host "Dry run only. Re-run with -Apply to create the runnable release zip."
     exit 0
 }
 
@@ -172,8 +222,19 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "npm run build failed."
     }
+    cargo build --manifest-path src-tauri/Cargo.toml --release --bin local_backend
+    if ($LASTEXITCODE -ne 0) {
+        throw "release local_backend build failed."
+    }
 } finally {
     Pop-Location
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $distRoot "index.html") -PathType Leaf)) {
+    throw "Frontend dist/index.html missing after build."
+}
+if (-not (Test-Path -LiteralPath $backendExe -PathType Leaf)) {
+    throw "local_backend.exe missing after build."
 }
 
 Assert-UnderProject -Path $outputRootPath
@@ -192,16 +253,29 @@ if (Test-Path -LiteralPath $sha256Path) {
 }
 
 New-Item -ItemType Directory -Path $stagePath -Force | Out-Null
-foreach ($item in $include) {
-    Copy-ReleaseItem -RelativePath $item
+Copy-FileToPackage -Source (Join-Path $projectRoot "CodeXProviderSwitcher.cmd") -DestinationRelativePath "CodeXProviderSwitcher.cmd"
+Copy-FileToPackage -Source (Join-Path $projectRoot "CodeXProviderSwitcher.ps1") -DestinationRelativePath "CodeXProviderSwitcher.ps1"
+Copy-FileToPackage -Source $backendExe -DestinationRelativePath "bin\local_backend.exe"
+Copy-DirectoryToPackage -SourceRoot $distRoot -DestinationRelativeRoot "dist"
+
+foreach ($item in @("README.md", "LICENSE", "CHANGELOG.md")) {
+    Copy-FileToPackage -Source (Join-Path $projectRoot $item) -DestinationRelativePath $item
+}
+foreach ($item in @(
+    "docs\user\installation.zh.md",
+    "docs\user\troubleshooting.zh.md",
+    "docs\release\release-checklist.md",
+    "docs\release\release-notes-$Version.md"
+)) {
+    Copy-FileToPackage -Source (Join-Path $projectRoot $item) -DestinationRelativePath $item
 }
 
-Assert-CmdFileUsesCrlf -Path (Join-Path $stagePath "setup.cmd") -Label "setup.cmd"
+Assert-CmdFileUsesCrlf -Path (Join-Path $stagePath "CodeXProviderSwitcher.cmd") -Label "CodeXProviderSwitcher.cmd"
 Assert-PublicReleaseTree -Root $stagePath
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::CreateFromDirectory($stagePath, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-$hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+[System.IO.Compression.ZipFile]::CreateFromDirectory($stagePath, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $true)
+$hash = Get-Sha256Hex -Path $zipPath
 "$hash  $releaseName.zip" | Set-Content -LiteralPath $sha256Path -Encoding UTF8
 
 Write-Host "[PASS] Release zip created: $zipPath"
