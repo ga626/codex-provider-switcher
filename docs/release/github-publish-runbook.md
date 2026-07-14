@@ -44,6 +44,18 @@ git remote add origin https://github.com/ga626/codex-provider-switcher.git
 
 ## 首次推送
 
+空仓库没有可作为 PR base 的真实主线，因此第一笔 root commit 可以直接创建 `main`。这一步只用于建立仓库主线，不能作为后续开发模式。
+
+`main` 创建并推送成功后，所有后续修改都必须按正常开发流程执行：
+
+```powershell
+git switch main
+git pull --ff-only
+git switch -c codex/<topic>
+```
+
+分支完成验证后推送到 GitHub，再创建 PR 合回 `main`。
+
 首次推送前应完成敏感信息扫描和本地验证：
 
 ```powershell
