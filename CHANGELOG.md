@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Added provider model catalog state, read-only `/models` refresh, model cache display, and manual model selection.
+- Added provider model catalog state, read-only `/models` refresh, full returned-list display, light model tags, and manual model selection.
 - Removed `gpt-5.5` as an application default in source and mock state; existing imported user profiles are not auto-migrated.
+- Marked browser preview state as UI-only mock data and added Rust tests for model-list parsing.
 - Bootstrapped the public repository structure for `CodeX Provider Switcher`.
 - Added project rules, contribution guidance, security policy, GitHub issue/PR templates, CI, release runbook, and release gate checklist.
 - Documented the product direction as a lightweight local Web console with a quiet backend and optional native shell.
@@ -14,7 +15,7 @@ Initial repository baseline.
 
 - React/Vite UI for managing Codex provider profiles.
 - Tauri/Rust local file, profile, backup, validation, and restore foundation.
-- Browser mock adapter and Playwright smoke script for UI validation.
+- Browser UI-only mock adapter and Playwright smoke script for UI validation.
 - Early Codex config/auth switching logic with backup and validation safeguards.
 - Legacy profile import/status direction for the old `CodeX-Switcher.exe` tool.
 

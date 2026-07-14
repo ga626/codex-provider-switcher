@@ -68,7 +68,8 @@ Alpha 阶段不做：
 
 - 使用用户保存的 provider key 调 `/v1/models`。
 - 缓存中转站实际返回的模型列表。
-- 标出官方推荐方向，例如 GPT-5.6 系列。
+- 按 provider 返回结果展示完整模型目录，不把某个版本号写成产品默认真理。
+- 只能做轻量标签，例如 reasoning、embedding、vision、Responses 候选；是否适合 Codex 由后续验证和用户确认决定。
 - 不自动把旧模型迁移到新模型。
 - 如果模型未验证，写入前需要二次确认。
 
@@ -180,7 +181,7 @@ Release 包不得包含：
 
 - 静默本地后端尚未完成。
 - 当前 preview 入口仍依赖 Node/npm。
-- 模型发现和 GPT-5.6 适配尚未实现。
+- 模型发现已有只读 `/v1/models` 基础，Responses/Codex 实际兼容性验证尚未完成。
 - API key 仍需迁移到 Windows Credential Manager、DPAPI 或 Tauri Stronghold。
 - 代码签名、自动更新和正式安装包暂缓。
 - UI 信息架构仍需按正式 Web 控制台重构。

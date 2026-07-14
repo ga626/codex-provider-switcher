@@ -1,6 +1,7 @@
 import type { AppState } from './types'
 
 export const initialState: AppState = {
+  runtimeMode: 'browser_preview_mock',
   currentProfileId: 'a6api',
   configPath: String.raw`C:\Users\ga990\.codex\config.toml`,
   authPath: String.raw`C:\Users\ga990\.codex\auth.json`,

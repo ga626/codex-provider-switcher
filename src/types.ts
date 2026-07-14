@@ -17,7 +17,7 @@ export type ProviderModel = {
   id: string
   aliases: string[]
   source: 'provider_models_api' | 'mock' | 'manual'
-  recommendedForCodex: boolean
+  tags: string[]
   verifiedForResponses: 'unknown' | 'verified' | 'failed'
 }
 
@@ -73,6 +73,7 @@ export type LegacySwitcherStatus = {
 }
 
 export type AppState = {
+  runtimeMode: 'tauri_native' | 'browser_preview_mock'
   currentProfileId: string
   configPath: string
   authPath: string

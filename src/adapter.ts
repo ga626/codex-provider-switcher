@@ -87,20 +87,48 @@ function mockModelCatalog(profileId: string): ModelCatalog {
     baseUrl: profile.baseUrl,
     fetchedAt: nowLabel(),
     status: 'ok',
-    statusDetail: '演示模式已返回 provider 模型目录；真实模式会调用 /v1/models。',
+    statusDetail: '浏览器预览假数据：已返回 6 个样例模型；真实列表只来自本机后端调用 /v1/models。',
     models: [
       {
         id: 'gpt-5.6-sol',
         aliases: ['gpt-5.6'],
         source: 'mock',
-        recommendedForCodex: true,
+        tags: ['reasoning', 'responses-candidate'],
         verifiedForResponses: 'unknown',
       },
       {
         id: 'gpt-5.6-mini',
         aliases: [],
         source: 'mock',
-        recommendedForCodex: false,
+        tags: ['fast', 'responses-candidate'],
+        verifiedForResponses: 'unknown',
+      },
+      {
+        id: 'gpt-5.5',
+        aliases: [],
+        source: 'mock',
+        tags: ['reasoning'],
+        verifiedForResponses: 'unknown',
+      },
+      {
+        id: 'gpt-5.5-mini',
+        aliases: [],
+        source: 'mock',
+        tags: ['fast'],
+        verifiedForResponses: 'unknown',
+      },
+      {
+        id: 'gpt-4.1',
+        aliases: [],
+        source: 'mock',
+        tags: ['chat'],
+        verifiedForResponses: 'unknown',
+      },
+      {
+        id: 'text-embedding-3-large',
+        aliases: [],
+        source: 'mock',
+        tags: ['embedding'],
         verifiedForResponses: 'unknown',
       },
     ],
@@ -120,7 +148,7 @@ export async function refreshModels(profileId: string): Promise<AppState> {
   mockState.activity.unshift({
     id: crypto.randomUUID(),
     time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-    title: catalog.status === 'ok' ? '模型目录已刷新' : '模型目录刷新失败',
+    title: catalog.status === 'ok' ? '预览模型目录已刷新' : '模型目录刷新失败',
     detail: catalog.statusDetail,
     tone: catalog.status === 'ok' ? 'success' : 'warning',
   })
@@ -170,7 +198,7 @@ export async function switchProfile(profileId: string): Promise<AppState> {
     id: crypto.randomUUID(),
     time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
     title: `已切换到 ${target.name}`,
-    detail: '演示模式已更新当前服务商，并生成一条备份记录。',
+    detail: '浏览器预览假数据已更新当前服务商，并生成一条内存备份记录。',
     tone: 'success',
   })
   return structuredClone(mockState)
@@ -237,7 +265,7 @@ export async function toggleAutoStart(enabled: boolean): Promise<AppState> {
     id: crypto.randomUUID(),
     time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
     title: enabled ? '已请求开机启动' : '已关闭开机启动',
-    detail: '演示模式只改变界面状态；原生模式需要核验 Windows 启动项。',
+    detail: '浏览器预览假数据只改变界面状态；真实后端需要核验 Windows 启动项。',
     tone: enabled ? 'warning' : 'info',
   })
   return structuredClone(mockState)
@@ -255,7 +283,7 @@ export async function restoreLatestBackup(): Promise<AppState> {
     id: crypto.randomUUID(),
     time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
     title: '已恢复最近备份',
-    detail: '演示模式已触发恢复动作，并记录本次恢复请求。',
+    detail: '浏览器预览假数据已触发恢复动作，并记录本次恢复请求。',
     tone: 'success',
   })
   return structuredClone(mockState)

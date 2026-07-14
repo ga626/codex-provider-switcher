@@ -2,6 +2,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{
+    collections::BTreeSet,
     fs,
     net::{SocketAddr, TcpStream},
     path::PathBuf,
@@ -68,7 +69,7 @@ pub struct ProviderModel {
     pub id: String,
     pub aliases: Vec<String>,
     pub source: String,
-    pub recommended_for_codex: bool,
+    pub tags: Vec<String>,
     pub verified_for_responses: String,
 }
 
@@ -140,6 +141,7 @@ pub struct LegacySwitcherStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppState {
+    pub runtime_mode: String,
     pub current_profile_id: String,
     pub config_path: String,
     pub auth_path: String,
@@ -668,6 +670,7 @@ fn app_state() -> Result<AppState, SwitcherError> {
     let profiles = catalog_profiles(&catalog, &current_id);
     let legacy_switcher = legacy_switcher_status(&catalog)?;
     Ok(AppState {
+        runtime_mode: "tauri_native".to_string(),
         current_profile_id: current_id,
         config_path: config_path()?.display().to_string(),
         auth_path: auth_path()?.display().to_string(),
@@ -683,16 +686,114 @@ fn app_state() -> Result<AppState, SwitcherError> {
     })
 }
 
-fn model_aliases(model_id: &str) -> Vec<String> {
-    match model_id {
-        "gpt-5.6-sol" => vec!["gpt-5.6".to_string()],
-        "gpt-5.6" => vec!["gpt-5.6-sol".to_string()],
-        _ => Vec::new(),
+fn model_tags(model_id: &str) -> Vec<String> {
+    let id = model_id.to_ascii_lowercase();
+    let mut tags = Vec::new();
+    if id.contains("embedding") {
+        tags.push("embedding".to_string());
     }
+    if id.contains("audio") || id.contains("transcribe") || id.contains("tts") {
+        tags.push("audio".to_string());
+    }
+    if id.contains("image") || id.contains("vision") || id.contains("vl") {
+        tags.push("vision".to_string());
+    }
+    if id.contains("reason") || id.contains("thinking") || id.contains("o1") || id.contains("o3") {
+        tags.push("reasoning".to_string());
+    }
+    if id.contains("gpt") || id.contains("chat") || id.contains("codex") {
+        tags.push("responses-candidate".to_string());
+    }
+    tags
 }
 
-fn is_codex_recommended_model(model_id: &str) -> bool {
-    model_id.contains("gpt-5.6") || model_id.contains("codex")
+fn model_id_from_value(item: &Value) -> Option<String> {
+    item.as_str()
+        .or_else(|| item.get("id").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToString::to_string)
+}
+
+fn parse_provider_models(body: &Value) -> Vec<ProviderModel> {
+    let mut seen = BTreeSet::new();
+    let empty = Vec::new();
+    let items = body
+        .get("data")
+        .and_then(Value::as_array)
+        .or_else(|| body.as_array())
+        .unwrap_or(&empty);
+    let mut models = items
+        .iter()
+        .filter_map(model_id_from_value)
+        .filter(|id| seen.insert(id.to_ascii_lowercase()))
+        .map(|id| ProviderModel {
+            tags: model_tags(&id),
+            id,
+            aliases: Vec::new(),
+            source: "provider_models_api".to_string(),
+            verified_for_responses: "unknown".to_string(),
+        })
+        .collect::<Vec<_>>();
+    models.sort_by(|a, b| a.id.to_ascii_lowercase().cmp(&b.id.to_ascii_lowercase()));
+    models
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_full_openai_compatible_model_list_without_version_filtering() {
+        let body = json!({
+            "object": "list",
+            "data": [
+                { "id": "gpt-5.6-sol", "object": "model" },
+                { "id": "gpt-5.5", "object": "model" },
+                { "id": "gpt-4.1", "object": "model" },
+                { "id": "text-embedding-3-large", "object": "model" },
+                { "id": "qwen3.5-coder", "object": "model" },
+                { "id": "GPT-5.5", "object": "model" },
+                { "object": "model" }
+            ]
+        });
+
+        let models = parse_provider_models(&body);
+        let ids = models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>();
+
+        assert_eq!(
+            ids,
+            vec![
+                "gpt-4.1",
+                "gpt-5.5",
+                "gpt-5.6-sol",
+                "qwen3.5-coder",
+                "text-embedding-3-large"
+            ]
+        );
+        assert!(models
+            .iter()
+            .find(|model| model.id == "text-embedding-3-large")
+            .expect("embedding model should be kept")
+            .tags
+            .contains(&"embedding".to_string()));
+    }
+
+    #[test]
+    fn parses_provider_array_model_list() {
+        let body = json!(["gpt-5.5-mini", { "id": "vision-model" }, "", { "name": "ignored" }]);
+
+        let models = parse_provider_models(&body);
+        let ids = models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["gpt-5.5-mini", "vision-model"]);
+        assert!(models
+            .iter()
+            .find(|model| model.id == "vision-model")
+            .expect("vision model should be kept")
+            .tags
+            .contains(&"vision".to_string()));
+    }
 }
 
 fn build_model_catalog(
@@ -787,23 +888,7 @@ fn fetch_provider_models(
             ));
         }
     };
-    let models = body
-        .get("data")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.get("id").and_then(Value::as_str))
-                .map(|id| ProviderModel {
-                    id: id.to_string(),
-                    aliases: model_aliases(id),
-                    source: "provider_models_api".to_string(),
-                    recommended_for_codex: is_codex_recommended_model(id),
-                    verified_for_responses: "unknown".to_string(),
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let models = parse_provider_models(&body);
 
     if models.is_empty() {
         return Ok(build_model_catalog(
@@ -819,7 +904,7 @@ fn fetch_provider_models(
         provider_id,
         profile,
         "ok",
-        "已刷新中转站实际返回的模型列表；不会自动改写当前模型。",
+        &format!("已刷新中转站实际返回的 {} 个模型；不会自动改写当前模型。", models.len()),
         models,
     ))
 }

@@ -7,7 +7,7 @@
 
 - [ ] `AGENTS.md`、`CONTRIBUTING.md`、`SECURITY.md` 已更新。
 - [ ] `.github/pull_request_template.md` 已覆盖验证、安全和用户影响。
-- [ ] GitHub CI 包含 lint、build、Rust check。
+- [ ] GitHub CI 包含 lint、build、Rust check 和 Rust tests。
 - [ ] `.gitignore` 排除日志、构建产物、Release 输出、本机配置和密钥。
 - [ ] `git diff --check` 通过。
 - [ ] 敏感信息扫描无真实密钥。
@@ -28,6 +28,7 @@
 npm run lint
 npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
 git diff --check
 ```
 
@@ -38,6 +39,16 @@ npm run preview:start -- --NoOpen
 npm run qa:smoke
 npm run preview:stop
 ```
+
+说明：`qa:smoke` 是浏览器 UI-only mock 验证，不能替代真实本地后端或 Tauri/Rust 路径验收。
+
+真实能力验证：
+
+```powershell
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+在静默本地 Web 后端完成前，不能把浏览器预览结果声明为产品真实后端已可用。
 
 ## 4. Release 包层
 

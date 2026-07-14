@@ -27,7 +27,7 @@ import {
   switchProfile,
   verifyProfile,
 } from './adapter'
-import type { AppState, EditableProfile, ProviderProfile } from './types'
+import type { AppState, EditableProfile, ModelCatalog, ProviderProfile, ValidationCheck } from './types'
 
 const emptyProfile: EditableProfile = {
   id: '',
@@ -61,7 +61,11 @@ function toEditable(profile: ProviderProfile): EditableProfile {
   }
 }
 
-function profileChecks(profile: ProviderProfile | undefined, draft: EditableProfile) {
+function profileChecks(
+  profile: ProviderProfile | undefined,
+  draft: EditableProfile,
+  modelCatalog: ModelCatalog | undefined
+): ValidationCheck[] {
   if (!profile && !draft.name && !draft.baseUrl) {
     return []
   }
@@ -71,7 +75,7 @@ function profileChecks(profile: ProviderProfile | undefined, draft: EditableProf
   const model = draft.model.trim()
   const hasKey = draft.apiKey.trim().length > 0 || Boolean(profile?.hasApiKey)
 
-  return [
+  const checks: ValidationCheck[] = [
     {
       id: 'profile-name',
       label: '服务商名称',
@@ -101,6 +105,21 @@ function profileChecks(profile: ProviderProfile | undefined, draft: EditableProf
       severity: 'required' as const,
     },
   ]
+
+  if (model.length > 0 && modelCatalog?.status === 'ok') {
+    const modelIds = new Set(modelCatalog.models.map((item) => item.id))
+    checks.push({
+      id: 'profile-model-catalog',
+      label: '模型目录匹配',
+      ok: modelIds.has(model),
+      detail: modelIds.has(model)
+        ? '当前模型存在于最近一次 provider 模型目录。'
+        : '当前模型不在最近一次 provider 模型目录中；可继续手动保存，但切换前需要确认。',
+      severity: 'warning' as const,
+    })
+  }
+
+  return checks
 }
 
 function App() {
@@ -163,8 +182,8 @@ function App() {
   }, [selectedId, state])
 
   const displayChecks = useMemo(() => {
-    return [...(state?.checks ?? []), ...profileChecks(selectedProfile, draft)]
-  }, [draft, selectedProfile, state])
+    return [...(state?.checks ?? []), ...profileChecks(selectedProfile, draft, selectedModelCatalog)]
+  }, [draft, selectedModelCatalog, selectedProfile, state])
 
   const failingChecks = displayChecks.filter((check) => !check.ok)
   const requiredFailures = failingChecks.filter((check) => check.severity === 'required').length
@@ -249,7 +268,9 @@ function App() {
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Desktop Alpha</p>
+          <p className="eyebrow">
+            {state.runtimeMode === 'tauri_native' ? '本机真实后端' : '浏览器假数据'}
+          </p>
           <h1>CodeX Provider Switcher</h1>
         </div>
         <div className="topbar-actions">
@@ -489,7 +510,9 @@ function App() {
                         <strong>{model.id}</strong>
                         {model.aliases.length > 0 && <small>别名：{model.aliases.join(', ')}</small>}
                       </span>
-                      {model.recommendedForCodex && <span className="pill ok">推荐</span>}
+                      {model.tags.slice(0, 2).map((tag) => (
+                        <span className="pill ok" key={tag}>{tag}</span>
+                      ))}
                     </button>
                   ))}
                 </div>

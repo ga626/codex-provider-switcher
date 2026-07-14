@@ -10,16 +10,16 @@
 
 - React/Vite 前端。
 - Tauri/Rust 本地文件、profiles、backup、validation、restore 基础。
-- Provider 模型目录缓存和只读刷新入口。
-- 浏览器 mock adapter，方便不启动 Tauri 时验收界面。
-- Playwright smoke flow。
+- Provider 模型目录缓存和只读 `/models` 刷新入口。
+- 浏览器 UI-only mock adapter，仅用于不启动后端时检查界面；它不是产品真实运行态。
+- Playwright UI smoke flow。
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
 
 尚未完成：
 
 - 静默本地 Web 后端。
 - 双击启动后无可见 CMD 的最终产品入口。
-- GPT-5.6 系列和中转站模型名的完整兼容策略。
+- Codex/Responses 与中转站模型名的完整兼容验证策略。
 - Responses API 兼容性验证。
 - 自动更新、备份、恢复、回滚的正式用户闭环。
 - 旧版工具最终 cutover。
@@ -86,10 +86,13 @@ $env:QA_OUTPUT_DIR="D:\Projects\CodeXProviderSwitcher\release\qa-smoke"
 npm run qa:smoke
 ```
 
+UI smoke 默认运行在浏览器预览假数据上，只证明界面流程没有明显断裂。真实本地能力必须通过 Tauri/Rust 路径、后端测试或后续静默本地 Web 后端验收。
+
 Rust/Tauri 检查：
 
 ```powershell
 cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 Tauri 开发和打包仍可用，但不是当前主路线：
