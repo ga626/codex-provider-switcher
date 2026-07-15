@@ -49,7 +49,6 @@ try {
         "README.md",
         "LICENSE",
         "CHANGELOG.md",
-        "AGENTS.md",
         "CONTRIBUTING.md",
         "SECURITY.md",
         ".gitignore",
@@ -106,7 +105,7 @@ try {
     }
 
     $gitignore = Get-Content -LiteralPath (Join-Path $projectRoot ".gitignore") -Raw -Encoding UTF8
-    foreach ($ignored in @("node_modules", "dist", "src-tauri/target", "logs/", "release/", "archive/", "project_status/", ".codex-provider-switcher/", "auth.json", "profiles.json")) {
+    foreach ($ignored in @("AGENTS.md", ".agents/", ".codex/", "node_modules", "dist", "src-tauri/target", "logs/", "release/", "archive/", "project_status/", ".codex-provider-switcher/", "auth.json", "profiles.json")) {
         if ($gitignore -notlike "*$ignored*") {
             Add-Failure ".gitignore missing: $ignored"
         }
@@ -116,6 +115,9 @@ try {
         $trackedCandidates = & git ls-files --others --cached --exclude-standard
         $blocked = @($trackedCandidates | Where-Object {
             $_ -like "project_status/*" -or
+            $_ -ieq "AGENTS.md" -or
+            $_ -like ".agents/*" -or
+            $_ -like ".codex/*" -or
             $_ -like "logs/*" -or
             $_ -like "release/*" -or
             $_ -like "archive/*" -or

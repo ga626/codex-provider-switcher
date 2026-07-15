@@ -25,6 +25,11 @@ src-tauri/target
 *.tmp
 *.bak
 
+# Local developer/agent instructions
+/AGENTS.md
+/.agents/
+/.codex/
+
 # Local secrets and Codex/user state
 auth.json
 profiles.json

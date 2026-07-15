@@ -19,11 +19,12 @@
 - `logs/`：本地预览和后端日志
 - `.codex-provider-switcher/`：release 构建、解压和远端验收输出
 - `project_status/`：本地阶段状态、决策和交接材料
+- `AGENTS.md`、`.agents/`、`.codex/`：本机 Codex/Agent 开发规则和工具状态
 - `archive/`：历史材料、旧版证据、废弃方案
 - `release/`：旧式本地发布草稿；当前正式发布资料在 `docs/release/`
 
 ## 保留原则
 
-- 保留源码、文档、状态、脚本、原生资源。
-- 不保留 `dist/`、`node_modules/`、`logs/`、`src-tauri/target/`、`.codex-provider-switcher/`。
+- 保留产品源码、用户文档、发布脚本、CI、原生资源和公开协作文件。
+- 不保留 `AGENTS.md`、`.agents/`、`.codex/`、`project_status/`、`dist/`、`node_modules/`、`logs/`、`src-tauri/target/`、`.codex-provider-switcher/`。
 - 旧版 `D:\AI Studio\CodeX\Codex Switcher` 只作为历史参考，不作为主仓库。

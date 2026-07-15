@@ -10,7 +10,7 @@
 
 - 不把 GitHub Personal Access Token 粘贴到 Codex、文档、日志、Issue 或 PR。
 - 优先使用 GitHub CLI 的浏览器/设备码登录。
-- 第一次公开 push、tag 或 Release 前，必须确认没有真实 API key、auth 文件、profiles、备份、截图或本机私有日志。
+- 第一次公开 push、tag 或 Release 前，必须确认没有真实 API key、auth 文件、profiles、备份、截图、本机私有日志、`AGENTS.md`、`.agents/`、`.codex/` 或 `project_status/`。
 - Codex 可以创建分支、提交、推送和准备 PR；用户负责 GitHub 上的合并、账号权限和发布审批。
 - 影响真实用户入口的合并，必须更新 Release 资产并从下载包复验。
 
@@ -60,6 +60,7 @@ git switch -c codex/<topic>
 
 ```powershell
 rg -n "ghp_|sk-[A-Za-z0-9]|Authorization: Bearer [A-Za-z0-9]" --glob "!node_modules/**" --glob "!dist/**" --glob "!src-tauri/target/**" .
+npm run verify:doctor
 git add .
 git commit -m "Bootstrap GitHub release workflow"
 git push -u origin codex/bootstrap-github-release-flow
@@ -84,7 +85,7 @@ CodeXProviderSwitcher-windows-x64-<version>.zip
 CodeXProviderSwitcher-windows-x64-<version>.zip.sha256
 ```
 
-zip 应包含 `CodeXProviderSwitcher.cmd`、`CodeXProviderSwitcher.ps1`、`bin/local_backend.exe`、`dist/` 前端静态资源、必要用户文档、发布说明和版本信息。不要包含源码树、开发脚本、`logs/`、`release/`、`archive/`、`node_modules/`、`src-tauri/target/`、真实 profiles、auth、config 或备份。
+zip 应包含 `CodeXProviderSwitcher.cmd`、`CodeXProviderSwitcher.ps1`、`bin/local_backend.exe`、`dist/` 前端静态资源、必要用户文档、发布说明和版本信息。不要包含源码树、开发脚本、`AGENTS.md`、`.agents/`、`.codex/`、`project_status/`、`logs/`、`release/`、`archive/`、`node_modules/`、`src-tauri/target/`、真实 profiles、auth、config 或备份。
 
 ## 交付复验
 

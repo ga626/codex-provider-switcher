@@ -5,7 +5,8 @@
 
 ## 1. 仓库层
 
-- [ ] `AGENTS.md`、`CONTRIBUTING.md`、`SECURITY.md` 已更新。
+- [ ] `CONTRIBUTING.md`、`SECURITY.md` 和用户可见文档已更新。
+- [ ] `AGENTS.md`、`.agents/`、`.codex/`、`project_status/` 等本机开发/Agent 状态未进入 Git 跟踪。
 - [ ] `.github/pull_request_template.md` 已覆盖验证、安全和用户影响。
 - [ ] GitHub CI 包含 lint、build、Rust check、Rust tests、本地 Web 后端 build 和 smoke。
 - [ ] `.gitignore` 排除日志、构建产物、Release 输出、本机配置和密钥。
@@ -73,6 +74,10 @@ Release 包应包含：
 
 Release 包必须排除：
 
+- `AGENTS.md`
+- `.agents/`
+- `.codex/`
+- `project_status/`
 - `node_modules/`
 - 源码根目录和开发脚本。
 - `src-tauri/target/`

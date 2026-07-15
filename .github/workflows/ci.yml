@@ -20,6 +20,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Repository hygiene doctor
+        run: npm run verify:doctor
+
       - name: Lint
         run: npm run lint
 
