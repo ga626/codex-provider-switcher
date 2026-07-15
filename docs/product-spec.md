@@ -1,14 +1,14 @@
 # CodeX Provider Switcher 产品规格
 
-状态：`0.1.0-alpha` 产品化基线
-目标：Windows 优先的本地 Web 控制台
-日期：2026-07-14
+状态：`0.2.0-alpha` 桌面 GUI 基座
+目标：Windows 优先的轻量桌面 GUI
+日期：2026-07-15
 
 ## 产品形态
 
-`CodeX Provider Switcher` 是一个本地优先的 Codex provider 切换控制台。它的主交付形态应当轻：用户双击启动入口，后台静默启动本地服务，浏览器打开 `127.0.0.1` 控制台。
+`CodeX Provider Switcher` 是一个本地优先的 Codex provider 切换控制台。它的主交付形态应当轻：用户从桌面图标或开始菜单启动，一个正常桌面窗口打开；默认不弹常驻 CMD、不打开外部浏览器、不要求用户理解 `127.0.0.1`。
 
-Tauri/Rust 保留为原生能力来源和未来安装包路线。当前不把 Tauri 桌面壳作为唯一主路线。
+Tauri/Rust 是桌面 GUI 和本地能力主路线。本地 Web 控制台保留为开发、诊断和 fallback 路线。
 
 产品要解决的问题：
 
@@ -36,7 +36,7 @@ Alpha 阶段不做：
 
 ## 信息架构
 
-正式 Web 控制台应分为六个区域：
+正式桌面控制台应分为六个区域：
 
 | 区域 | 作用 |
 |---|---|
@@ -151,8 +151,10 @@ React 负责：
 Tauri/Rust 负责或保留：
 
 - 原生文件/系统能力。
-- 托盘和未来安装包。
-- 未来开机启动和自动更新集成。
+- 桌面窗口、安装包和系统 WebView 边界。
+- 未来显式托盘、开机启动和自动更新集成。
+
+当前桌面 GUI 不默认启用托盘或开机自启动。关闭窗口应退出应用。
 
 ## 发布边界
 
@@ -161,6 +163,8 @@ Tauri/Rust 负责或保留：
 ```text
 CodeXProviderSwitcher-windows-x64-<version>.zip
 CodeXProviderSwitcher-windows-x64-<version>.zip.sha256
+CodeXProviderSwitcher-windows-x64-<version>-setup.exe
+CodeXProviderSwitcher-windows-x64-<version>-setup.exe.sha256
 ```
 
 Release 包不得包含：
@@ -178,9 +182,9 @@ Release 包不得包含：
 
 ## 已知 alpha 缺口
 
-- 当前交付是可运行 zip 和脚本启动器，还不是正式安装器。
+- 当前交付开始提供桌面安装资产，但仍是 alpha。
 - 源码树 `setup.cmd` 仍依赖 Node/npm/Rust 构建环境；Release 包用户入口不依赖这些开发工具。
 - 模型发现已有只读 `/v1/models` 基础，Responses/Codex 实际兼容性验证尚未完成。
 - API key 仍需迁移到 Windows Credential Manager、DPAPI 或 Tauri Stronghold。
 - 代码签名、自动更新和正式安装包暂缓。
-- UI 信息架构仍需按正式 Web 控制台重构。
+- UI 信息架构仍需按正式桌面控制台重构。

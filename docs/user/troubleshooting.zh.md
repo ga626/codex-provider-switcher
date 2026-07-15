@@ -1,8 +1,18 @@
 # 排错指南
 
-## 页面打不开
+## 桌面应用打不开
 
-如果你是从 Release 包启动，先确认是在解压出的 `CodeXProviderSwitcher-windows-x64-0.1.0-alpha` 目录里双击 `CodeXProviderSwitcher.cmd`。
+如果你安装了桌面版，先从开始菜单或桌面图标启动 `CodeX Provider Switcher`。预期行为是打开一个正常桌面窗口，不需要浏览器和端口。
+
+如果窗口没有出现：
+
+- 确认下载的是 `CodeXProviderSwitcher-windows-x64-0.2.0-alpha-setup.exe`。
+- 确认 Windows WebView2 Runtime 可用。多数 Windows 11/新版 Windows 10 已内置；缺失时需要安装 Microsoft Edge WebView2 Evergreen Runtime。
+- 如果安装器被拦截，改用 fallback zip。
+
+## fallback Web 页面打不开
+
+如果你是从 fallback zip 启动，先确认是在解压出的 `CodeXProviderSwitcher-windows-x64-0.2.0-alpha` 目录里双击 `CodeXProviderSwitcher.cmd`。
 
 固定入口是：
 
@@ -79,6 +89,7 @@ npm run build
 ```powershell
 cargo --version
 cargo check --manifest-path src-tauri/Cargo.toml
+npm run tauri:desktop-boundary:smoke
 ```
 
 ## provider 切换失败

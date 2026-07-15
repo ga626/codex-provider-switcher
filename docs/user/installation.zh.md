@@ -1,22 +1,30 @@
 # 安装与启动
 
-`CodeX Provider Switcher` 当前是 alpha 项目。正式产品路线是轻量本地 Web 控制台：启动器静默启动本地后端，浏览器打开控制台页面。
+`CodeX Provider Switcher` 当前是 alpha 项目。正式产品路线是 Windows-first 轻量桌面 GUI：桌面安装包启动一个正常应用窗口，默认不弹常驻 CMD、不打开外部浏览器、不要求用户理解端口。
 
-当前 `0.1.0-alpha` 提供 Windows zip 包：解压后双击启动脚本，脚本会静默启动本地后端并打开浏览器控制台。它还不是正式安装器，也不会自动替换旧版工具。
+当前 `0.2.0-alpha` 提供 Windows setup exe 和 fallback zip。桌面安装包是推荐入口；fallback zip 保留给排障、开发和本地 Web 诊断。它不会自动替换旧版工具。
 
-## Release 包启动
+## 桌面安装包启动
 
 1. 打开 GitHub Release 页面：
 
 ```text
-https://github.com/ga626/codex-provider-switcher/releases/tag/v0.1.0-alpha
+https://github.com/ga626/codex-provider-switcher/releases/tag/v0.2.0-alpha
 ```
 
-2. 下载 `CodeXProviderSwitcher-windows-x64-0.1.0-alpha.zip` 和对应 `.sha256`。
-3. 解压 zip 到一个普通目录。
-4. 进入解压出的 `CodeXProviderSwitcher-windows-x64-0.1.0-alpha` 目录。
-5. 双击 `CodeXProviderSwitcher.cmd`。
-6. 浏览器会打开：
+2. 优先下载 `CodeXProviderSwitcher-windows-x64-0.2.0-alpha-setup.exe` 和对应 `.sha256`。
+3. 安装后从开始菜单或桌面图标打开 `CodeX Provider Switcher`。
+4. 预期行为：打开一个桌面窗口，不弹常驻 CMD，不自动打开外部浏览器。
+
+## fallback zip 启动
+
+fallback zip 用于排障和本地 Web 诊断，不是推荐入口。
+
+1. 下载 `CodeXProviderSwitcher-windows-x64-0.2.0-alpha.zip` 和对应 `.sha256`。
+2. 解压 zip 到一个普通目录。
+3. 进入解压出的 `CodeXProviderSwitcher-windows-x64-0.2.0-alpha` 目录。
+4. 双击 `CodeXProviderSwitcher.cmd`。
+5. 浏览器会打开：
 
 ```text
 http://127.0.0.1:47832/
@@ -94,9 +102,9 @@ npm run backend:ui-smoke
 
 Windows Release 包提供：
 
-- 双击启动入口。
-- 静默本地后端。
-- 浏览器本地控制台。
+- 桌面 setup exe。
+- 单窗口桌面 GUI。
+- fallback Web zip、启动脚本和静默本地后端。
 - 基础备份、恢复、验证和回滚入口。
 - 版本说明和校验文件。
 

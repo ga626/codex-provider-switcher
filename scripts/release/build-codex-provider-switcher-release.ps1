@@ -1,6 +1,7 @@
 param(
-    [string]$Version = "0.1.0-alpha",
+    [string]$Version = "0.2.0-alpha",
     [string]$OutputRoot = ".codex-provider-switcher\releases",
+    [switch]$SkipDesktopBundle,
     [switch]$Apply
 )
 
@@ -16,8 +17,11 @@ $releaseName = "CodeXProviderSwitcher-windows-x64-$Version"
 $stagePath = Join-Path $outputRootPath $releaseName
 $zipPath = Join-Path $outputRootPath "$releaseName.zip"
 $sha256Path = Join-Path $outputRootPath "$releaseName.zip.sha256"
+$desktopSetupName = "CodeXProviderSwitcher-windows-x64-$Version-setup.exe"
+$desktopSetupPath = Join-Path $outputRootPath $desktopSetupName
 $backendExe = Join-Path $projectRoot "src-tauri\target\release\local_backend.exe"
 $distRoot = Join-Path $projectRoot "dist"
+$tauriBundleRoot = Join-Path $projectRoot "src-tauri\target\release\bundle"
 
 function Assert-UnderProject {
     param([string]$Path)
@@ -133,6 +137,26 @@ function Get-Sha256Hex {
     }
 }
 
+function Write-Sha256File {
+    param([string]$Path)
+    $hash = Get-Sha256Hex -Path $Path
+    "$hash  $([System.IO.Path]::GetFileName($Path))" | Set-Content -LiteralPath "$Path.sha256" -Encoding UTF8
+    return $hash
+}
+
+function Find-TauriBundleAsset {
+    param([string]$Pattern, [string]$Label)
+    $matches = @(
+        Get-ChildItem -LiteralPath $tauriBundleRoot -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like $Pattern } |
+            Sort-Object LastWriteTime -Descending
+    )
+    if ($matches.Count -eq 0) {
+        throw "Tauri bundle output missing: $Label ($Pattern)"
+    }
+    return $matches[0].FullName
+}
+
 function Assert-PublicReleaseTree {
     param([string]$Root)
     $blocked = New-Object System.Collections.Generic.List[string]
@@ -193,8 +217,9 @@ Write-Host "Version: $Version"
 Write-Host "Stage:   $stagePath"
 Write-Host "Zip:     $zipPath"
 Write-Host "SHA256:  $sha256Path"
+Write-Host "Setup:   $desktopSetupPath"
 Write-Host "Mode:    $(if ($Apply) { 'apply' } else { 'dry-run' })"
-Write-Host "Package: launcher + local_backend.exe + dist/ + public docs"
+Write-Host "Package: desktop setup + launcher/local_backend fallback zip + public docs"
 
 foreach ($item in @(
     "CodeXProviderSwitcher.cmd",
@@ -225,6 +250,12 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "npm run build failed."
     }
+    if (-not $SkipDesktopBundle) {
+        npm run tauri:build
+        if ($LASTEXITCODE -ne 0) {
+            throw "tauri desktop bundle build failed."
+        }
+    }
     cargo build --manifest-path src-tauri/Cargo.toml --release --bin local_backend
     if ($LASTEXITCODE -ne 0) {
         throw "release local_backend build failed."
@@ -254,6 +285,11 @@ if (Test-Path -LiteralPath $zipPath) {
 if (Test-Path -LiteralPath $sha256Path) {
     Remove-Item -LiteralPath $sha256Path -Force
 }
+foreach ($assetPath in @($desktopSetupPath, "$desktopSetupPath.sha256")) {
+    if (Test-Path -LiteralPath $assetPath) {
+        Remove-Item -LiteralPath $assetPath -Force
+    }
+}
 
 New-Item -ItemType Directory -Path $stagePath -Force | Out-Null
 Copy-FileToPackage -Source (Join-Path $projectRoot "CodeXProviderSwitcher.cmd") -DestinationRelativePath "CodeXProviderSwitcher.cmd"
@@ -278,8 +314,15 @@ Assert-PublicReleaseTree -Root $stagePath
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($stagePath, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $true)
-$hash = Get-Sha256Hex -Path $zipPath
-"$hash  $releaseName.zip" | Set-Content -LiteralPath $sha256Path -Encoding UTF8
+$hash = Write-Sha256File -Path $zipPath
 
 Write-Host "[PASS] Release zip created: $zipPath"
 Write-Host "[PASS] SHA256: $hash"
+
+if (-not $SkipDesktopBundle) {
+    $setupSource = Find-TauriBundleAsset -Pattern "*setup*.exe" -Label "NSIS setup exe"
+    Copy-Item -LiteralPath $setupSource -Destination $desktopSetupPath -Force
+    $setupHash = Write-Sha256File -Path $desktopSetupPath
+    Write-Host "[PASS] Desktop setup copied: $desktopSetupPath"
+    Write-Host "[PASS] Desktop setup SHA256: $setupHash"
+}

@@ -15,8 +15,8 @@
 
 ## 2. 产品层
 
-- [ ] README 写清当前主路线是本地 Web 控制台。
-- [ ] Tauri 被描述为可选原生外壳/未来安装包路线。
+- [ ] README 写清当前主路线是轻量桌面 GUI。
+- [ ] 本地 Web 控制台被描述为开发、诊断和 fallback 路线。
 - [ ] 旧版工具只作为参考源和回滚源。
 - [ ] 不承诺自动替换旧工具。
 - [ ] 不把 `gpt-5.5` 或任何单一模型写成永久默认。
@@ -39,6 +39,7 @@
 npm run lint
 npm run build
 npm run runtime-boundary:smoke
+npm run tauri:desktop-boundary:smoke
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run backend:build
@@ -76,9 +77,10 @@ npm run release:verify-local
 
 Release 包应包含：
 
-- 启动器或启动脚本。
-- 静默本地后端。
-- 前端静态资源。
+- 桌面 setup exe。
+- fallback 启动器或启动脚本。
+- fallback 静默本地后端。
+- fallback 前端静态资源。
 - README。
 - Release notes。
 - checksums。
@@ -105,10 +107,13 @@ Release 包必须排除：
 
 发布前必须按普通用户路径确认：
 
-- [ ] 解压 Release 包。
-- [ ] 双击 `CodeXProviderSwitcher.cmd`。
+- [ ] 下载桌面 setup exe。
+- [ ] 启动 `CodeX Provider Switcher` 桌面应用。
 - [ ] 没有可见 CMD 窗口常驻。
-- [ ] 浏览器打开本地 Web 控制台。
+- [ ] 不自动打开外部浏览器。
+- [ ] 关闭窗口后进程退出。
+- [ ] fallback zip 可解压并双击 `CodeXProviderSwitcher.cmd`。
+- [ ] fallback 浏览器打开本地 Web 控制台。
 - [ ] 当前 Codex 配置摘要脱敏显示。
 - [ ] provider 和模型状态能看懂。
 - [ ] 写入前能看到备份/恢复路径。

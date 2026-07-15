@@ -9,11 +9,6 @@ use std::{
     process::Command,
     time::Duration,
 };
-use tauri::{
-    menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
-    Manager,
-};
 use thiserror::Error;
 
 const APP_DIR_NAME: &str = "CodeX Provider Switcher";
@@ -682,7 +677,7 @@ fn app_state() -> Result<AppState, SwitcherError> {
         config_path: config_path()?.display().to_string(),
         auth_path: auth_path()?.display().to_string(),
         auto_start: catalog.auto_start,
-        tray_enabled: true,
+        tray_enabled: false,
         safe_mode: true,
         profiles,
         model_catalogs: catalog_model_catalogs(&catalog),
@@ -1323,38 +1318,9 @@ pub fn restore_latest_backup_core() -> Result<AppState, SwitcherError> {
     )
 }
 
-fn install_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
-    let _tray = TrayIconBuilder::new()
-        .menu(&menu)
-        .show_menu_on_left_click(true)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-            }
-            "quit" => app.exit(0),
-            _ => {}
-        })
-        .build(app)?;
-    Ok(())
-}
-
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec!["--hidden"]),
-        ))
-        .setup(|app| {
-            install_tray(app)?;
-            Ok(())
-        })
         .invoke_handler(tauri::generate_handler![
             load_state,
             save_profile,
