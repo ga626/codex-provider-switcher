@@ -6,6 +6,28 @@
   color: var(--muted);
 }
 
+.runtime-error-shell {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px;
+  text-align: left;
+}
+
+.runtime-error-shell > div {
+  display: grid;
+  gap: 6px;
+}
+
+.runtime-error-shell strong {
+  color: var(--text);
+  font-size: 1.08rem;
+}
+
+.runtime-error-shell span {
+  max-width: 620px;
+  line-height: 1.65;
+}
+
 .spin {
   animation: spin 0.9s linear infinite;
 }

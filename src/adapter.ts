@@ -3,9 +3,15 @@ import { initialState } from './mockData'
 import type { AppState, EditableProfile, ModelCatalog } from './types'
 
 const isTauri = '__TAURI_INTERNALS__' in window
+const allowBrowserMock = import.meta.env.VITE_CODEX_PROVIDER_SWITCHER_ALLOW_MOCK === 'true'
 
 let mockState: AppState = structuredClone(initialState)
 let webBackendAvailable: boolean | null = null
+
+function backendUnavailableMessage(err?: unknown) {
+  const detail = err instanceof Error ? ` 原始错误：${err.message}` : ''
+  return `无法连接真实本地 Web 后端。产品入口不会回落到浏览器假数据；请通过 CodeXProviderSwitcher.cmd、setup.cmd 或 local_backend.exe 启动 http://127.0.0.1:47832/。${detail}`
+}
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -28,6 +34,9 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
 async function tryWebBackend<T>(path: string, init?: RequestInit): Promise<T | null> {
   if (webBackendAvailable === false) {
+    if (!allowBrowserMock) {
+      throw new Error(backendUnavailableMessage())
+    }
     return null
   }
   try {
@@ -39,6 +48,9 @@ async function tryWebBackend<T>(path: string, init?: RequestInit): Promise<T | n
       throw err
     }
     webBackendAvailable = false
+    if (!allowBrowserMock) {
+      throw new Error(backendUnavailableMessage(err))
+    }
     return null
   }
 }

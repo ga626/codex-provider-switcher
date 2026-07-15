@@ -255,6 +255,22 @@ function App() {
     })
   }
 
+  if (!state && error) {
+    return (
+      <main className="loading-shell runtime-error-shell">
+        <AlertTriangle className="danger-icon" size={28} />
+        <div>
+          <strong>真实本地后端不可用</strong>
+          <span>{error}</span>
+        </div>
+        <button className="ghost-button" type="button" onClick={refresh} disabled={busy !== null}>
+          <RefreshCcw size={16} />
+          重试
+        </button>
+      </main>
+    )
+  }
+
   if (!state) {
     return (
       <main className="loading-shell">

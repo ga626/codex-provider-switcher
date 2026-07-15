@@ -13,8 +13,15 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 if (-not $NoBuild) {
   Push-Location $ProjectRoot
   try {
+    $previousMockFlag = $env:VITE_CODEX_PROVIDER_SWITCHER_ALLOW_MOCK
+    $env:VITE_CODEX_PROVIDER_SWITCHER_ALLOW_MOCK = "true"
     npm run build
   } finally {
+    if ($null -eq $previousMockFlag) {
+      Remove-Item Env:\VITE_CODEX_PROVIDER_SWITCHER_ALLOW_MOCK -ErrorAction SilentlyContinue
+    } else {
+      $env:VITE_CODEX_PROVIDER_SWITCHER_ALLOW_MOCK = $previousMockFlag
+    }
     Pop-Location
   }
 }
