@@ -76,6 +76,19 @@ git push -u origin codex/bootstrap-github-release-flow
 - README、产品规格和 release checklist 与当前产品形态一致。
 - 如果改动会影响用户启动入口，Release 复验计划已写清楚。
 
+用户看当前开发成果时默认走开发版验收：
+
+```powershell
+npm run qa:dev-desktop
+```
+
+只有安装器、Release 包、版本号、启动入口、升级/卸载路径或用户下载入口变化时，才进入安装发布验收：
+
+```powershell
+npm run release:build -- -Apply
+npm run qa:install-release -- -Collect
+```
+
 ## Release 资产
 
 桌面 GUI 版本优先发布桌面安装资产，同时保留 fallback zip：

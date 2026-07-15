@@ -23,6 +23,15 @@
 
 ## 3. 验证层
 
+用户验收状态只分两类：
+
+| 状态 | 适用场景 | 命令 | 是否安装 |
+| --- | --- | --- | --- |
+| 开发版验收 | 普通功能、UI、布局、文案、配置流程改动 | `npm run qa:dev-desktop` | 否 |
+| 安装发布验收 | 安装器、Release 包、版本号、启动入口、升级/卸载路径、用户下载入口改动 | `npm run release:build -- -Apply` 后 `npm run qa:install-release -- -Collect` | 是 |
+
+说明：`preview:start`、`qa:smoke` 和本地 Web 后端 smoke 是自动化/诊断证据，不是用户要区分的验收状态。用户说“看一下状态”时，默认提供开发版桌面窗口；只有发布影响 PR 才要求安装发布验收。
+
 变更影响面检查：
 
 | 改动类型 | 必须同步检查 |
@@ -51,12 +60,14 @@ git diff --check
 界面流程验证：
 
 ```powershell
+npm run qa:dev-desktop -- -ExplainOnly
+npm run qa:install-release -- -ExplainOnly
 npm run preview:start -- --NoOpen
 npm run qa:smoke
 npm run preview:stop
 ```
 
-说明：`qa:smoke` 是浏览器 UI-only mock 验证，不能替代真实本地后端或 Tauri/Rust 路径验收。`runtime-boundary:smoke` 用于确认生产构建在缺少本地后端时显示明确错误，而不是展示假 provider 或假模型。
+说明：两个 `ExplainOnly` 命令只检查验收入口说明，不启动长驻 dev 进程，也不要求本机已有 release 资产。真正需要用户看界面时运行 `npm run qa:dev-desktop`。`qa:smoke` 是浏览器 UI-only mock 验证，不能替代开发版桌面验收、真实本地后端或 Tauri/Rust 路径验收。`runtime-boundary:smoke` 用于确认生产构建在缺少本地后端时显示明确错误，而不是展示假 provider 或假模型。
 
 真实能力验证：
 
@@ -70,6 +81,7 @@ npm run backend:smoke
 
 ```powershell
 npm run release:build -- -Apply
+npm run qa:install-release -- -Collect
 npm run release:verify-local
 ```
 

@@ -11,6 +11,8 @@
     "preview:start": "powershell -ExecutionPolicy Bypass -File scripts/start-preview.ps1",
     "preview:stop": "powershell -ExecutionPolicy Bypass -File scripts/stop-preview.ps1",
     "qa:smoke": "node scripts/qa-smoke.mjs",
+    "qa:dev-desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/start-dev-desktop.ps1",
+    "qa:install-release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/prepare-install-release-qa.ps1",
     "backend:build": "cargo build --manifest-path src-tauri/Cargo.toml --bin local_backend",
     "backend:smoke": "node scripts/local-backend-smoke.mjs",
     "backend:ui-smoke": "node scripts/local-backend-ui-smoke.mjs",
