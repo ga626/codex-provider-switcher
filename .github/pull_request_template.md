@@ -1,22 +1,20 @@
-## 修改内容
+## 摘要
 
-- TODO
+说明这个 PR 解决什么问题、把项目推进到什么状态。
+
+## 主要改动
+
+- 改动 1
+- 改动 2
 
 ## 验证
 
-- [ ] `npm run lint`
-- [ ] `npm run build`
-- [ ] `git diff --check`
-- [ ] 如果改到 Rust/Tauri：`cargo check --manifest-path src-tauri/Cargo.toml`
-- [ ] 如果改到界面流程：已运行本地预览和 `npm run qa:smoke`
+写明实际跑过的高信号命令和结论，例如 `npm run lint`、`npm run build`、`cargo test --manifest-path src-tauri/Cargo.toml`、release 包验收、GitHub Actions。
 
-## 安全检查
+## 风险和边界
 
-- [ ] 没有提交真实 API key、token、auth 文件、profiles、备份、截图或本机私有日志。
-- [ ] 没有修改旧版本机工具目录。
-- [ ] 涉及 `config.toml` / `auth.json` 写入时，已经说明备份、恢复和失败路径。
+说明没有覆盖的功能、仍需后续 PR 处理的边界，以及是否涉及 `config.toml`、`auth.json`、旧工具 cutover 或 Release 资产。
 
 ## 用户影响
 
-- [ ] 说明了是否影响用户启动入口、Release 资产或旧工具替换路径。
-- [ ] 文档已同步更新。
+说明用户入口、下载包、旧工具回滚路径、文档或配置安全边界是否改变。

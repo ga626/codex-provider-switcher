@@ -2,6 +2,8 @@
 
 | Path | Purpose |
 |---|---|
+| `setup.ps1` / root `setup.cmd` | Source-tree convenience launcher that builds frontend/backend and starts the real local Web backend |
+| `CodeXProviderSwitcher.ps1` / root `CodeXProviderSwitcher.cmd` | Release/source launcher for the real local Web backend on `127.0.0.1` |
 | `scripts/start-preview.ps1` | Build and start a local preview server on `127.0.0.1` |
 | `scripts/stop-preview.ps1` | Stop the preview server recorded in `logs/preview-state.json` |
 | `scripts/qa-smoke.mjs` | Playwright UI smoke flow |

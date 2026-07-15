@@ -755,12 +755,12 @@ mod tests {
         let body = json!({
             "object": "list",
             "data": [
-                { "id": "gpt-5.6-sol", "object": "model" },
-                { "id": "gpt-5.5", "object": "model" },
-                { "id": "gpt-4.1", "object": "model" },
-                { "id": "text-embedding-3-large", "object": "model" },
-                { "id": "qwen3.5-coder", "object": "model" },
-                { "id": "GPT-5.5", "object": "model" },
+                { "id": "provider-reasoning-current", "object": "model" },
+                { "id": "provider-reasoning-legacy", "object": "model" },
+                { "id": "provider-chat-compatible", "object": "model" },
+                { "id": "provider-embedding-large", "object": "model" },
+                { "id": "provider-coder", "object": "model" },
+                { "id": "PROVIDER-REASONING-LEGACY", "object": "model" },
                 { "object": "model" }
             ]
         });
@@ -774,16 +774,16 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "gpt-4.1",
-                "gpt-5.5",
-                "gpt-5.6-sol",
-                "qwen3.5-coder",
-                "text-embedding-3-large"
+                "provider-chat-compatible",
+                "provider-coder",
+                "provider-embedding-large",
+                "provider-reasoning-current",
+                "provider-reasoning-legacy"
             ]
         );
         assert!(models
             .iter()
-            .find(|model| model.id == "text-embedding-3-large")
+            .find(|model| model.id == "provider-embedding-large")
             .expect("embedding model should be kept")
             .tags
             .contains(&"embedding".to_string()));
@@ -791,7 +791,7 @@ mod tests {
 
     #[test]
     fn parses_provider_array_model_list() {
-        let body = json!(["gpt-5.5-mini", { "id": "vision-model" }, "", { "name": "ignored" }]);
+        let body = json!(["provider-fast-legacy", { "id": "vision-model" }, "", { "name": "ignored" }]);
 
         let models = parse_provider_models(&body);
         let ids = models
@@ -799,7 +799,7 @@ mod tests {
             .map(|model| model.id.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(ids, vec!["gpt-5.5-mini", "vision-model"]);
+        assert_eq!(ids, vec!["provider-fast-legacy", "vision-model"]);
         assert!(models
             .iter()
             .find(|model| model.id == "vision-model")

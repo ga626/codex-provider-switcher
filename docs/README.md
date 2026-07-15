@@ -10,4 +10,4 @@
 | `docs/release/github-publish-runbook.md` | GitHub repository and publication process |
 | `docs/release/release-checklist.md` | Release gate and user-path verification |
 
-Internal archaeology and handoff files stay under `project_status/` and are not part of the public release package.
+Internal archaeology and handoff files may exist locally under `project_status/`; they are ignored and are not part of the public release package.

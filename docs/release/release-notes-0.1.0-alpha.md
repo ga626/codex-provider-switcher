@@ -21,6 +21,11 @@
 - 模型目录已有 Tauri/Rust 只读 `/models` 解析基础，但真实 provider 兼容性验证、更新器、稳定 cutover 和 UI 信息架构重构仍在后续阶段完成。
 - 旧版工具仍作为参考源和回滚源，不在本版本中退役。
 
+## 发布后补充
+
+- 源码树 `setup.cmd` / `setup.ps1` 已对齐真实本地 Web 后端启动入口，不再启动 UI-only mock 预览。
+- GitHub Release 资产复验脚本已支持带顶级目录的 zip 结构。
+
 ## 验证建议
 
 ```powershell

@@ -3,7 +3,8 @@ param(
     [string]$Tag = "",
     [string]$Repository = "ga626/codex-provider-switcher",
     [string]$OutputRoot = ".codex-provider-switcher\releases",
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$RemoteStructureOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,6 +55,10 @@ function Read-TextNormalized {
 
 Assert-Command gh
 
+if ($RemoteStructureOnly) {
+    $SkipBuild = $true
+}
+
 if (-not $SkipBuild) {
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scriptDir "build-codex-provider-switcher-release.ps1") -Version $Version -OutputRoot $OutputRoot -Apply
     if ($LASTEXITCODE -ne 0) {
@@ -61,14 +66,16 @@ if (-not $SkipBuild) {
     }
 }
 
-if (-not (Test-Path -LiteralPath $localZip -PathType Leaf)) {
-    throw "Local release zip missing: $localZip"
-}
-if (-not (Test-Path -LiteralPath $localSha -PathType Leaf)) {
-    throw "Local release SHA256 file missing: $localSha"
-}
-if (-not (Test-Path -LiteralPath $localNotes -PathType Leaf)) {
-    throw "Local release notes missing: $localNotes"
+if (-not $RemoteStructureOnly) {
+    if (-not (Test-Path -LiteralPath $localZip -PathType Leaf)) {
+        throw "Local release zip missing: $localZip"
+    }
+    if (-not (Test-Path -LiteralPath $localSha -PathType Leaf)) {
+        throw "Local release SHA256 file missing: $localSha"
+    }
+    if (-not (Test-Path -LiteralPath $localNotes -PathType Leaf)) {
+        throw "Local release notes missing: $localNotes"
+    }
 }
 
 $releaseJson = & gh release view $Tag --repo $Repository --json tagName,isDraft,isPrerelease,assets,body 2>&1
@@ -94,34 +101,50 @@ try {
 
     $remoteZip = Join-Path $tmp "$releaseName.zip"
     $remoteSha = Join-Path $tmp "$releaseName.zip.sha256"
-    $localZipHash = Get-FileSha256Lower -Path $localZip
     $remoteZipHash = Get-FileSha256Lower -Path $remoteZip
-    if ($localZipHash -ne $remoteZipHash) {
-        throw "Remote release zip is stale or different. Local=$localZipHash Remote=$remoteZipHash"
+    if (-not $RemoteStructureOnly) {
+        $localZipHash = Get-FileSha256Lower -Path $localZip
+        if ($localZipHash -ne $remoteZipHash) {
+            throw "Remote release zip is stale or different. Local=$localZipHash Remote=$remoteZipHash"
+        }
     }
 
     $remoteShaText = Read-TextNormalized -Path $remoteSha
-    if ($remoteShaText -notlike "$localZipHash*") {
-        throw "Remote SHA256 file does not match the remote/local zip hash."
+    if ($remoteShaText -notlike "$remoteZipHash*") {
+        throw "Remote SHA256 file does not match the remote zip hash."
     }
 
-    $localNotesText = Read-TextNormalized -Path $localNotes
-    $remoteNotesText = ([string]$release.body -replace "`r`n", "`n").Trim()
-    if ($localNotesText -ne $remoteNotesText) {
-        throw "GitHub Release notes differ from local release notes: $localNotes"
+    if (-not $RemoteStructureOnly) {
+        $localNotesText = Read-TextNormalized -Path $localNotes
+        $remoteNotesText = ([string]$release.body -replace "`r`n", "`n").Trim()
+        if ($localNotesText -ne $remoteNotesText) {
+            throw "GitHub Release notes differ from local release notes: $localNotes"
+        }
     }
 
     $unzip = Join-Path $tmp "unzip"
     Expand-Archive -LiteralPath $remoteZip -DestinationPath $unzip -Force
-        foreach ($required in @("CodeXProviderSwitcher.cmd", "CodeXProviderSwitcher.ps1", "bin\local_backend.exe", "dist\index.html", "README.md", "docs\user\installation.zh.md")) {
-        if (-not (Test-Path -LiteralPath (Join-Path $unzip $required) -PathType Leaf)) {
+
+    $packageRoot = Get-ChildItem -LiteralPath $unzip -Directory | Where-Object { $_.Name -eq $releaseName } | Select-Object -First 1
+    if (-not $packageRoot) {
+        throw "Remote release zip did not contain expected package directory: $releaseName"
+    }
+
+    foreach ($required in @("CodeXProviderSwitcher.cmd", "CodeXProviderSwitcher.ps1", "bin\local_backend.exe", "dist\index.html", "README.md", "docs\user\installation.zh.md")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $packageRoot.FullName $required) -PathType Leaf)) {
             throw "Remote release zip is missing: $required"
         }
     }
 
-    Write-Host "[PASS] GitHub Release zip matches the local build: $remoteZipHash"
+    if ($RemoteStructureOnly) {
+        Write-Host "[PASS] GitHub Release zip was downloaded and unpacked: $remoteZipHash"
+    } else {
+        Write-Host "[PASS] GitHub Release zip matches the local build: $remoteZipHash"
+    }
     Write-Host "[PASS] GitHub Release SHA256 file matches."
-    Write-Host "[PASS] GitHub Release notes match local release notes."
+    if (-not $RemoteStructureOnly) {
+        Write-Host "[PASS] GitHub Release notes match local release notes."
+    }
     Write-Host "[PASS] Downloaded remote zip contains the expected startup and user docs."
 } finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue

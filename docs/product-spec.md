@@ -166,7 +166,6 @@ CodeXProviderSwitcher-windows-x64-<version>.zip.sha256
 Release 包不得包含：
 
 - `node_modules/`
-- `dist/`
 - `src-tauri/target/`
 - `logs/`
 - `release/`
@@ -179,8 +178,8 @@ Release 包不得包含：
 
 ## 已知 alpha 缺口
 
-- 静默本地后端已有开发态 API 入口；无可见 CMD 的产品化启动器尚未完成。
-- 当前 preview 入口仍依赖 Node/npm。
+- 当前交付是可运行 zip 和脚本启动器，还不是正式安装器。
+- 源码树 `setup.cmd` 仍依赖 Node/npm/Rust 构建环境；Release 包用户入口不依赖这些开发工具。
 - 模型发现已有只读 `/v1/models` 基础，Responses/Codex 实际兼容性验证尚未完成。
 - API key 仍需迁移到 Windows Credential Manager、DPAPI 或 Tauri Stronghold。
 - 代码签名、自动更新和正式安装包暂缓。
