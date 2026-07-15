@@ -32,6 +32,9 @@ jobs:
       - name: Smoke runtime boundary
         run: npm run runtime-boundary:smoke
 
+      - name: Smoke Tauri desktop boundary
+        run: npm run tauri:desktop-boundary:smoke
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 

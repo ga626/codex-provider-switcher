@@ -6,7 +6,7 @@ export const initialState: AppState = {
   configPath: String.raw`C:\Users\<user>\.codex\config.toml`,
   authPath: String.raw`C:\Users\<user>\.codex\auth.json`,
   autoStart: false,
-  trayEnabled: true,
+  trayEnabled: false,
   safeMode: true,
   legacySwitcher: {
     profilePath: '旧版工具本机 profiles.json',

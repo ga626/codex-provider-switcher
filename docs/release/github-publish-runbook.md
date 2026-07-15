@@ -78,14 +78,16 @@ git push -u origin codex/bootstrap-github-release-flow
 
 ## Release 资产
 
-早期建议发布可运行 zip，不急于发布安装包：
+桌面 GUI 版本优先发布桌面安装资产，同时保留 fallback zip：
 
 ```text
+CodeXProviderSwitcher-windows-x64-<version>-setup.exe
+CodeXProviderSwitcher-windows-x64-<version>-setup.exe.sha256
 CodeXProviderSwitcher-windows-x64-<version>.zip
 CodeXProviderSwitcher-windows-x64-<version>.zip.sha256
 ```
 
-zip 应包含 `CodeXProviderSwitcher.cmd`、`CodeXProviderSwitcher.ps1`、`bin/local_backend.exe`、`dist/` 前端静态资源、必要用户文档、发布说明和版本信息。不要包含源码树、开发脚本、`AGENTS.md`、`.agents/`、`.codex/`、`project_status/`、`logs/`、`release/`、`archive/`、`node_modules/`、`src-tauri/target/`、真实 profiles、auth、config 或备份。
+fallback zip 应包含 `CodeXProviderSwitcher.cmd`、`CodeXProviderSwitcher.ps1`、`bin/local_backend.exe`、`dist/` 前端静态资源、必要用户文档、发布说明和版本信息。不要包含源码树、开发脚本、`AGENTS.md`、`.agents/`、`.codex/`、`project_status/`、`logs/`、`release/`、`archive/`、`node_modules/`、`src-tauri/target/`、真实 profiles、auth、config 或备份。
 
 ## 交付复验
 
@@ -93,13 +95,14 @@ zip 应包含 `CodeXProviderSwitcher.cmd`、`CodeXProviderSwitcher.ps1`、`bin/l
 
 1. 切回最新主线并拉取。
 2. 重新构建 Release 资产。
-3. 从 GitHub Release 下载 zip。
-4. 解压到干净目录。
-5. 双击启动入口。
-6. 打开本地 Web 控制台。
-7. 读取当前 Codex 配置摘要。
-8. 做一次 dry-run 验证。
-9. 确认备份和恢复入口可见。
+3. 从 GitHub Release 下载 setup exe。
+4. 校验 SHA256。
+5. 安装并从开始菜单或桌面图标启动。
+6. 确认打开桌面窗口，不弹常驻 CMD，不打开外部浏览器。
+7. 关闭窗口后确认进程退出。
+8. 下载 fallback zip，解压到干净目录。
+9. 双击 fallback 启动入口。
+10. 确认本地 Web 控制台、端口、后端、UI 和文档一致。
 
 只有完成这条路径，才能说产品已交付。
 

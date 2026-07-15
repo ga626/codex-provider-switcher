@@ -2,25 +2,26 @@
 
 `CodeX Provider Switcher` is a local-first tool for managing Codex provider profiles, validating configuration, and switching safely with backups and recovery.
 
-当前主路线是轻量本地 Web 控制台：双击启动器，静默启动本地后端，只监听 `127.0.0.1`，浏览器打开控制台页面。Tauri/Rust 保留为原生能力和未来安装包路线，但不再把“重桌面壳”作为当前唯一交付形态。
+当前主路线是 Windows-first 轻量桌面 GUI：通过桌面安装包启动一个正常应用窗口，默认不弹常驻 CMD、不打开外部浏览器、不要求用户理解端口。原本的本地 Web 控制台继续保留为开发、诊断和 fallback 入口。
 
 ## 当前状态
 
-这是 `0.1.0-alpha` 仓库基线：
+这是 `0.2.0-alpha` 桌面 GUI 基座：
 
 - React/Vite 前端。
-- Tauri/Rust 本地文件、profiles、backup、validation、restore 基础。
+- Tauri/Rust 桌面窗口、本地文件、profiles、backup、validation、restore 基础。
 - Provider 模型目录缓存和只读 `/models` 刷新入口。
-- 可下载 alpha zip：包含 `CodeXProviderSwitcher.cmd`、静默本地后端 `local_backend.exe` 和 `dist/` 前端资源。
+- Windows 桌面安装资产：setup exe。
+- fallback alpha zip：包含 `CodeXProviderSwitcher.cmd`、静默本地后端 `local_backend.exe` 和 `dist/` 前端资源。
 - 浏览器 UI-only mock adapter，仅用于 `preview:start` 这种显式开发预览；Release 包和真实本地后端入口不会静默回落到假数据。
 - Playwright UI smoke flow。
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
 
-[下载 0.1.0-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.1.0-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
+[下载 0.2.0-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.2.0-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
 
 尚未完成：
 
-- 正式安装器、自动更新器和后台常驻管理。
+- 自动更新器和可选后台/托盘管理。
 - Codex/Responses 与中转站模型名的完整兼容验证策略。
 - Responses API 兼容性验证。
 - 自动更新、备份、恢复、回滚的正式用户闭环。
@@ -48,6 +49,18 @@ npm install
 ```
 
 该入口会在需要时构建前端和 `local_backend`，然后调用 `CodeXProviderSwitcher.ps1`，固定打开 `http://127.0.0.1:47832/`。它不是 UI-only mock 预览。
+
+启动 Tauri 桌面应用：
+
+```powershell
+npm run tauri:dev
+```
+
+打包桌面安装资产：
+
+```powershell
+npm run tauri:build
+```
 
 启动并打开本地预览：
 
@@ -128,14 +141,10 @@ Rust/Tauri 检查：
 ```powershell
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
+npm run tauri:desktop-boundary:smoke
 ```
 
-Tauri 开发和打包仍可用，但不是当前主路线：
-
-```powershell
-npm run tauri:dev
-npm run tauri:build
-```
+桌面应用必须保持单窗口、默认无托盘、无开机自启动、关闭即退出。本地 Web 后端入口只作为开发、诊断和 fallback。
 
 ## Release 脚本
 
@@ -145,7 +154,7 @@ npm run tauri:build
 npm run release:build
 ```
 
-实际构建本地 zip 和 SHA256：
+实际构建桌面安装资产、fallback zip 和 SHA256：
 
 ```powershell
 npm run release:build -- -Apply

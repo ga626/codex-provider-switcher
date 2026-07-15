@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Promoted the next alpha line to `0.2.0-alpha` for the lightweight desktop GUI baseline.
+- Removed default Tauri tray/autostart wiring so the app opens as one normal window and exits on close.
+- Added `tauri:desktop-boundary:smoke` to guard against accidental tray/autostart/mock regressions.
+- Extended release scripts to build and publish a desktop setup asset alongside the fallback Web zip.
+- Updated public docs, installation, troubleshooting, product spec, release checklist, and CI for the desktop-first shape.
+
+## 0.2.0-alpha - 2026-07-15
+
+- Lightweight desktop GUI baseline.
+- Tauri app now reports `tauri_native`, keeps a single normal window, and does not install a default tray icon.
+- Default autostart plugin wiring is removed; auto start remains a future explicit advanced option.
+- Release output now includes Windows setup exe, fallback Web zip, and SHA256 files.
+- Local Web console remains available as a fallback and diagnostic path.
+
+## 0.1.1-alpha - 2026-07-15
+
 - Aligned root `setup.cmd` / `setup.ps1` with the real local Web backend instead of the UI-only preview path.
 - Fixed GitHub Release asset verification for zip files that contain a top-level package directory.
 - Updated public README, installation, troubleshooting, structure, and PR template wording to match the released local Web Alpha shape.

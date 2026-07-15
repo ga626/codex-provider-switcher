@@ -29,6 +29,7 @@ src-tauri/target
 /AGENTS.md
 /.agents/
 /.codex/
+/.codex-praetor/
 
 # Local secrets and Codex/user state
 auth.json

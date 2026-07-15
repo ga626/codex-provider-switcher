@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.1.0-alpha",
+    [string]$Version = "0.2.0-alpha",
     [string]$Tag = "",
     [string]$Repository = "ga626/codex-provider-switcher",
     [string]$OutputRoot = ".codex-provider-switcher\releases",
@@ -22,6 +22,8 @@ $releaseName = "CodeXProviderSwitcher-windows-x64-$Version"
 $outputRootPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputRoot))
 $localZip = Join-Path $outputRootPath "$releaseName.zip"
 $localSha = Join-Path $outputRootPath "$releaseName.zip.sha256"
+$localSetup = Join-Path $outputRootPath "CodeXProviderSwitcher-windows-x64-$Version-setup.exe"
+$localSetupSha = "$localSetup.sha256"
 $localNotes = Join-Path $projectRoot "docs\release\release-notes-$Version.md"
 
 function Assert-Command {
@@ -76,6 +78,11 @@ if (-not $RemoteStructureOnly) {
     if (-not (Test-Path -LiteralPath $localNotes -PathType Leaf)) {
         throw "Local release notes missing: $localNotes"
     }
+    foreach ($localAsset in @($localSetup, $localSetupSha)) {
+        if (-not (Test-Path -LiteralPath $localAsset -PathType Leaf)) {
+            throw "Local desktop release asset missing: $localAsset"
+        }
+    }
 }
 
 $releaseJson = & gh release view $Tag --repo $Repository --json tagName,isDraft,isPrerelease,assets,body 2>&1
@@ -89,6 +96,16 @@ if ($assetNames -notcontains "$releaseName.zip") {
 }
 if ($assetNames -notcontains "$releaseName.zip.sha256") {
     throw "GitHub Release is missing asset: $releaseName.zip.sha256"
+}
+
+$desktopAssetNames = @(
+    "CodeXProviderSwitcher-windows-x64-$Version-setup.exe",
+    "CodeXProviderSwitcher-windows-x64-$Version-setup.exe.sha256"
+)
+foreach ($assetName in $desktopAssetNames) {
+    if ($assetNames -notcontains $assetName) {
+        throw "GitHub Release is missing desktop asset: $assetName"
+    }
 }
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-provider-switcher-release-verify-" + [Guid]::NewGuid().ToString("N"))
@@ -112,6 +129,29 @@ try {
     $remoteShaText = Read-TextNormalized -Path $remoteSha
     if ($remoteShaText -notlike "$remoteZipHash*") {
         throw "Remote SHA256 file does not match the remote zip hash."
+    }
+
+    foreach ($assetName in ($desktopAssetNames | Where-Object { $_ -notlike "*.sha256" })) {
+        & gh release download $Tag --repo $Repository --pattern $assetName --dir $tmp
+        if ($LASTEXITCODE -ne 0) { throw "Failed to download remote desktop asset: $assetName" }
+        & gh release download $Tag --repo $Repository --pattern "$assetName.sha256" --dir $tmp
+        if ($LASTEXITCODE -ne 0) { throw "Failed to download remote desktop SHA256: $assetName.sha256" }
+        $remoteAsset = Join-Path $tmp $assetName
+        $remoteAssetSha = Join-Path $tmp "$assetName.sha256"
+        $remoteAssetHash = Get-FileSha256Lower -Path $remoteAsset
+        $remoteAssetShaText = Read-TextNormalized -Path $remoteAssetSha
+        if ($remoteAssetShaText -notlike "$remoteAssetHash*") {
+            throw "Remote desktop SHA256 file does not match asset hash: $assetName"
+        }
+        if (-not $RemoteStructureOnly) {
+            $localAsset = switch -Wildcard ($assetName) {
+                "*setup.exe" { $localSetup; break }
+            }
+            $localAssetHash = Get-FileSha256Lower -Path $localAsset
+            if ($localAssetHash -ne $remoteAssetHash) {
+                throw "Remote desktop asset is stale or different. Asset=$assetName Local=$localAssetHash Remote=$remoteAssetHash"
+            }
+        }
     }
 
     if (-not $RemoteStructureOnly) {
@@ -142,6 +182,7 @@ try {
         Write-Host "[PASS] GitHub Release zip matches the local build: $remoteZipHash"
     }
     Write-Host "[PASS] GitHub Release SHA256 file matches."
+    Write-Host "[PASS] Desktop release assets and SHA256 files are present."
     if (-not $RemoteStructureOnly) {
         Write-Host "[PASS] GitHub Release notes match local release notes."
     }
