@@ -19,6 +19,28 @@
 
 [下载 0.2.0-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.2.0-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
 
+## 开发验收方式
+
+本项目把用户验收压缩成两种状态：
+
+- 开发版验收：看当前源码树里的桌面应用，不安装、不卸载、不走 Release 包。普通功能、UI、布局、文案、配置流程改动默认用这个状态。
+- 安装发布验收：只在安装器、Release 包、版本号、启动入口、升级/卸载路径或用户下载入口变化时使用。这个状态才运行 setup exe。
+
+开发版验收命令：
+
+```powershell
+npm run qa:dev-desktop
+```
+
+安装发布验收准备命令：
+
+```powershell
+npm run release:build -- -Apply
+npm run qa:install-release -- -Collect
+```
+
+`.codex-provider-switcher\qa\latest\` 会放置本机临时验收资产，属于本地输出目录，不进入 Git。普通开发过程中不需要反复安装；当用户说“看一下状态”时，默认应打开开发版桌面窗口。
+
 尚未完成：
 
 - 自动更新器和可选后台/托盘管理。
@@ -53,8 +75,10 @@ npm install
 启动 Tauri 桌面应用：
 
 ```powershell
-npm run tauri:dev
+npm run qa:dev-desktop
 ```
+
+该入口用于开发版验收：直接打开当前源码树的桌面窗口，不安装、不升级、不卸载。
 
 打包桌面安装资产：
 
@@ -106,7 +130,7 @@ npm run verify:doctor
 npm run qa:smoke
 ```
 
-UI smoke 默认运行在浏览器预览假数据上，只证明界面流程没有明显断裂。真实本地能力必须通过本地 Web 后端和 release 包验收。
+UI smoke 默认运行在浏览器预览假数据上，只证明界面流程没有明显断裂。它不能替代开发版桌面验收；真实本地能力还要通过本地 Web 后端、Tauri/Rust 检查或 release 包验收。
 
 验证生产构建不会在后端缺失时回落假数据：
 
@@ -158,6 +182,7 @@ npm run release:build
 
 ```powershell
 npm run release:build -- -Apply
+npm run qa:install-release -- -Collect
 ```
 
 解压并按普通用户路径验证本地 zip：

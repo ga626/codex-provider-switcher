@@ -4,6 +4,14 @@
 
 如果你安装了桌面版，先从开始菜单或桌面图标启动 `CodeX Provider Switcher`。预期行为是打开一个正常桌面窗口，不需要浏览器和端口。
 
+如果你是在开发中看当前 PR 或本地改动，先不要重新安装。运行：
+
+```powershell
+npm run qa:dev-desktop
+```
+
+这会打开当前源码树的桌面应用，用于开发版验收。只有安装器、Release 包、版本号、启动入口、升级/卸载路径变化时，才需要重新构建并运行 setup exe。
+
 如果窗口没有出现：
 
 - 确认下载的是 `CodeXProviderSwitcher-windows-x64-0.2.0-alpha-setup.exe`。
@@ -38,6 +46,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\CodeXProviderSwitcher.ps1
 ```powershell
 npm run preview:start
 ```
+
+这不是桌面产品验收，只用于浏览器 mock 调试。
 
 如果端口被占用，脚本会尝试 `5173`、`5174`、`5175`、`5180`、`3000`、`3001`。
 

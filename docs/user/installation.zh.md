@@ -4,6 +4,18 @@
 
 当前 `0.2.0-alpha` 提供 Windows setup exe 和 fallback zip。桌面安装包是推荐入口；fallback zip 保留给排障、开发和本地 Web 诊断。它不会自动替换旧版工具。
 
+## 开发中怎么看当前版本
+
+如果你参与开发，通常不需要每个 PR 都下载安装包。普通功能、UI、布局和文案验收应直接打开当前源码树里的桌面应用：
+
+```powershell
+npm run qa:dev-desktop
+```
+
+这个状态叫“开发版验收”：它不安装、不卸载、不升级，也不会使用 GitHub Release 包。预期行为仍然是打开一个 `CodeX Provider Switcher` 桌面窗口，不弹常驻 CMD，不自动打开外部浏览器。
+
+只有安装器、Release 包、版本号、启动入口、升级/卸载路径或用户下载入口变化时，才进入“安装发布验收”。
+
 ## 桌面安装包启动
 
 1. 打开 GitHub Release 页面：
@@ -38,7 +50,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\CodeXProviderSwitcher.ps1 
 
 ## 开发预览
 
-开发预览使用浏览器 UI-only 假数据，不会连接真实本地后端，也不会代表最终产品体验。
+开发预览使用浏览器 UI-only 假数据，不会连接真实本地后端，也不会代表最终产品体验。它只用于界面 smoke 或调试，不能替代开发版桌面验收。
 
 安装依赖：
 
