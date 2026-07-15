@@ -34,6 +34,9 @@ function Test-BlockedPackagePath {
     $normalized = $RelativePath -replace "/", "\"
     if ($normalized -like ".git\*") { return $true }
     if ($normalized -like ".github\*") { return $true }
+    if ($normalized -ieq "AGENTS.md") { return $true }
+    if ($normalized -like ".agents\*") { return $true }
+    if ($normalized -like ".codex\*") { return $true }
     if ($normalized -like ".codex-provider-switcher\*") { return $true }
     if ($normalized -like "node_modules\*") { return $true }
     if ($normalized -like "src\*") { return $true }
