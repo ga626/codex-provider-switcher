@@ -23,6 +23,16 @@
 
 ## 3. 验证层
 
+变更影响面检查：
+
+| 改动类型 | 必须同步检查 |
+| --- | --- |
+| 用户入口、端口、启动器、后端运行方式 | README、安装文档、故障排查、release checklist、PR 用户影响 |
+| mock、真实后端、模型刷新、配置写入边界 | README、产品规格、故障排查、验证命令、PR 风险边界 |
+| Release 包内容或发布命令 | release checklist、GitHub 发布 Runbook、release notes、verify-local 脚本 |
+| CI、smoke、构建或验证命令 | README、release checklist、PR 验证段、GitHub Actions |
+| 旧工具 cutover、备份、恢复、回滚 | 产品规格、用户文档、release checklist、PR 风险边界 |
+
 基础验证：
 
 ```powershell
