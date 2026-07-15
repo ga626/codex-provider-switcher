@@ -28,6 +28,7 @@
 ```powershell
 npm run lint
 npm run build
+npm run runtime-boundary:smoke
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run backend:build
@@ -44,7 +45,7 @@ npm run qa:smoke
 npm run preview:stop
 ```
 
-说明：`qa:smoke` 是浏览器 UI-only mock 验证，不能替代真实本地后端或 Tauri/Rust 路径验收。
+说明：`qa:smoke` 是浏览器 UI-only mock 验证，不能替代真实本地后端或 Tauri/Rust 路径验收。`runtime-boundary:smoke` 用于确认生产构建在缺少本地后端时显示明确错误，而不是展示假 provider 或假模型。
 
 真实能力验证：
 

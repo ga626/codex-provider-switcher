@@ -12,7 +12,7 @@
 - Tauri/Rust 本地文件、profiles、backup、validation、restore 基础。
 - Provider 模型目录缓存和只读 `/models` 刷新入口。
 - 可下载 alpha zip：包含 `CodeXProviderSwitcher.cmd`、静默本地后端 `local_backend.exe` 和 `dist/` 前端资源。
-- 浏览器 UI-only mock adapter，仅用于不启动后端时检查界面；它不是产品真实运行态。
+- 浏览器 UI-only mock adapter，仅用于 `preview:start` 这种显式开发预览；Release 包和真实本地后端入口不会静默回落到假数据。
 - Playwright UI smoke flow。
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
 
@@ -55,7 +55,7 @@ npm install
 npm run preview:start
 ```
 
-该入口只用于开发阶段检查 UI mock，不代表真实产品运行态。
+该入口只用于开发阶段检查 UI mock，不代表真实产品运行态。真实产品入口如果连不上本地后端，会显示明确错误，不会展示假 provider 或假模型。
 
 停止预览：
 
@@ -94,6 +94,12 @@ npm run qa:smoke
 ```
 
 UI smoke 默认运行在浏览器预览假数据上，只证明界面流程没有明显断裂。真实本地能力必须通过本地 Web 后端和 release 包验收。
+
+验证生产构建不会在后端缺失时回落假数据：
+
+```powershell
+npm run runtime-boundary:smoke
+```
 
 构建并验证本地 Web 后端：
 

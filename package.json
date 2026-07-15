@@ -14,6 +14,7 @@
     "backend:build": "cargo build --manifest-path src-tauri/Cargo.toml --bin local_backend",
     "backend:smoke": "node scripts/local-backend-smoke.mjs",
     "backend:ui-smoke": "node scripts/local-backend-ui-smoke.mjs",
+    "runtime-boundary:smoke": "node scripts/runtime-boundary-smoke.mjs",
     "backend:dev": "cargo run --manifest-path src-tauri/Cargo.toml --bin local_backend --",
     "verify:doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/doctor-codex-provider-switcher.ps1 -PublicRelease",
     "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/build-codex-provider-switcher-release.ps1",
