@@ -1,16 +1,16 @@
 import { invoke } from '@tauri-apps/api/core'
 import { initialState } from './mockData'
-import type { AppState, EditableProfile, ModelCatalog } from './types'
+import type { AppState, EditableProfile, ModelCatalog, ProviderProfile, UpdateInfo } from './types'
 
 const isTauri = '__TAURI_INTERNALS__' in window
 const allowBrowserMock = import.meta.env.VITE_CODEX_PROVIDER_SWITCHER_ALLOW_MOCK === 'true'
 
 let mockState: AppState = structuredClone(initialState)
 let webBackendAvailable: boolean | null = null
+let pendingTauriUpdate: { version: string; date?: string | null; downloadAndInstall: () => Promise<void> } | null = null
 
-function backendUnavailableMessage(err?: unknown) {
-  const detail = err instanceof Error ? ` 原始错误：${err.message}` : ''
-  return `无法连接真实本地 Web 后端。产品入口不会回落到浏览器假数据；请通过 CodeXProviderSwitcher.cmd、setup.cmd 或 local_backend.exe 启动 http://127.0.0.1:47832/。${detail}`
+function backendUnavailableMessage() {
+  return '应用的连接服务未能启动。请重新打开 CodeX Provider Switcher；如果问题持续，请查看故障排查。'
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -49,7 +49,7 @@ async function tryWebBackend<T>(path: string, init?: RequestInit): Promise<T | n
     }
     webBackendAvailable = false
     if (!allowBrowserMock) {
-      throw new Error(backendUnavailableMessage(err))
+      throw new Error(backendUnavailableMessage())
     }
     return null
   }
@@ -90,6 +90,71 @@ export async function loadState(): Promise<AppState> {
   return structuredClone(mockState)
 }
 
+export async function checkForUpdate(): Promise<UpdateInfo> {
+  if (isTauri) {
+    if (__CODEX_RELEASE_CHANNEL__ !== 'stable') {
+      pendingTauriUpdate = null
+      return {
+        currentVersion: __APP_VERSION__,
+        latestVersion: __APP_VERSION__,
+        available: false,
+        releaseUrl: 'https://github.com/ga626/codex-provider-switcher/releases',
+      }
+    }
+    const { check } = await import('@tauri-apps/plugin-updater')
+    const update = await check()
+    if (!update) {
+      pendingTauriUpdate = null
+      return {
+        currentVersion: __APP_VERSION__,
+        latestVersion: __APP_VERSION__,
+        available: false,
+        releaseUrl: 'https://github.com/ga626/codex-provider-switcher/releases',
+      }
+    }
+    pendingTauriUpdate = update
+    return {
+      currentVersion: __APP_VERSION__,
+      latestVersion: update.version,
+      available: true,
+      releaseUrl: 'https://github.com/ga626/codex-provider-switcher/releases',
+      publishedAt: update.date ?? undefined,
+    }
+  }
+  const webResult = await tryWebBackend<UpdateInfo>('/api/update/check')
+  if (webResult) {
+    return webResult
+  }
+  await mockDelay()
+  return {
+    currentVersion: __APP_VERSION__,
+    latestVersion: __APP_VERSION__,
+    available: false,
+    releaseUrl: 'https://github.com/ga626/codex-provider-switcher/releases',
+  }
+}
+
+export async function openUpdate(url: string): Promise<void> {
+  if (!/^https:\/\/github\.com\/ga626\/codex-provider-switcher\/releases\//i.test(url)) {
+    throw new Error('更新地址不是受信任的项目 Release 地址。')
+  }
+  if (isTauri) {
+    if (pendingTauriUpdate) {
+      await pendingTauriUpdate.downloadAndInstall()
+      const { relaunch } = await import('@tauri-apps/plugin-process')
+      await relaunch()
+      return
+    }
+    const { openUrl } = await import('@tauri-apps/plugin-opener')
+    await openUrl(url)
+    return
+  }
+  const opened = window.open(url, '_blank', 'noopener,noreferrer')
+  if (!opened) {
+    throw new Error('浏览器阻止了更新下载窗口。')
+  }
+}
+
 export async function saveProfile(profile: EditableProfile): Promise<AppState> {
   if (isTauri) {
     return invoke<AppState>('save_profile', { profile })
@@ -101,7 +166,7 @@ export async function saveProfile(profile: EditableProfile): Promise<AppState> {
   await mockDelay()
   const id = profile.id || normalizeId(profile.name)
   const existingIndex = mockState.profiles.findIndex((item) => item.id === id)
-  const nextProfile = {
+  const nextProfile: ProviderProfile = {
     id,
     name: profile.name.trim(),
     baseUrl: profile.baseUrl.trim(),
@@ -109,10 +174,12 @@ export async function saveProfile(profile: EditableProfile): Promise<AppState> {
     reasoningEffort: existingIndex >= 0 ? mockState.profiles[existingIndex].reasoningEffort : 'high',
     note: profile.note.trim(),
     verified: false,
+    verificationStatus: 'not_checked',
     isDefault: existingIndex >= 0 ? mockState.profiles[existingIndex].isDefault : false,
     active: mockState.currentProfileId === id,
     hasApiKey: profile.apiKey.trim().length > 0 || (existingIndex >= 0 && mockState.profiles[existingIndex].hasApiKey),
     lastVerifiedAt: '编辑后尚未验证',
+    lastVerificationDetail: '开发预览不会连接真实服务商。',
     lastSwitchedAt: existingIndex >= 0 ? mockState.profiles[existingIndex].lastSwitchedAt : undefined,
   }
   if (existingIndex >= 0) {
@@ -151,7 +218,7 @@ function mockModelCatalog(profileId: string): ModelCatalog {
     baseUrl: profile.baseUrl,
     fetchedAt: nowLabel(),
     status: 'ok',
-    statusDetail: '浏览器预览假数据：已返回 6 个样例模型；真实列表只来自本机后端调用 /v1/models。',
+    statusDetail: '已返回 6 个示例模型。',
     models: [
       {
         id: 'provider-reasoning-current',
@@ -168,14 +235,14 @@ function mockModelCatalog(profileId: string): ModelCatalog {
         verifiedForResponses: 'unknown',
       },
       {
-        id: 'provider-reasoning-legacy',
+        id: 'provider-reasoning-stable',
         aliases: [],
         source: 'mock',
         tags: ['reasoning'],
         verifiedForResponses: 'unknown',
       },
       {
-        id: 'provider-fast-legacy',
+        id: 'provider-fast-stable',
         aliases: [],
         source: 'mock',
         tags: ['fast'],
@@ -216,7 +283,7 @@ export async function refreshModels(profileId: string): Promise<AppState> {
   mockState.activity.unshift({
     id: crypto.randomUUID(),
     time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-    title: catalog.status === 'ok' ? '预览模型目录已刷新' : '模型目录刷新失败',
+    title: catalog.status === 'ok' ? '模型目录已刷新' : '模型目录刷新失败',
     detail: catalog.statusDetail,
     tone: catalog.status === 'ok' ? 'success' : 'warning',
   })
@@ -255,29 +322,7 @@ export async function switchProfile(profileId: string): Promise<AppState> {
   if (webState) {
     return webState
   }
-  await mockDelay()
-  const target = mockState.profiles.find((profile) => profile.id === profileId)
-  if (!target) throw new Error('未找到服务商配置。')
-  mockState.currentProfileId = profileId
-  mockState.profiles = mockState.profiles.map((profile) => ({
-    ...profile,
-    active: profile.id === profileId,
-    lastSwitchedAt: profile.id === profileId ? nowLabel() : profile.lastSwitchedAt,
-  }))
-  mockState.backups.unshift({
-    id: crypto.randomUUID(),
-    time: nowLabel(),
-    label: `before-${new Date().toISOString().slice(0, 19).replace(/\D/g, '')}`,
-    files: 2,
-  })
-  mockState.activity.unshift({
-    id: crypto.randomUUID(),
-    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-    title: `已切换到 ${target.name}`,
-    detail: '浏览器预览假数据已更新当前服务商，并生成一条内存备份记录。',
-    tone: 'success',
-  })
-  return structuredClone(mockState)
+  throw new Error('开发预览不执行服务商切换。请使用桌面开发版或本机后端进行真实验证。')
 }
 
 export async function verifyProfile(profileId: string): Promise<AppState> {
@@ -290,27 +335,23 @@ export async function verifyProfile(profileId: string): Promise<AppState> {
   }
   await mockDelay()
   const target = mockState.profiles.find((profile) => profile.id === profileId)
-  const requiredChecksOk = mockState.checks.every((check) => check.ok || check.severity !== 'required')
-  const profileReady = Boolean(
-    target &&
-      target.hasApiKey &&
-      target.model.trim().length > 0 &&
-      /^https?:\/\/\S+/i.test(target.baseUrl)
-  )
-  const verified = requiredChecksOk && profileReady
   mockState.profiles = mockState.profiles.map((profile) => (
     profile.id === profileId
-      ? { ...profile, verified, lastVerifiedAt: nowLabel() }
+      ? {
+          ...profile,
+          verified: false,
+          verificationStatus: 'not_checked',
+          lastVerifiedAt: nowLabel(),
+          lastVerificationDetail: '开发预览不会发送真实服务商请求。',
+        }
       : profile
   ))
   mockState.activity.unshift({
     id: crypto.randomUUID(),
     time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-    title: verified ? '验证完成' : '验证未通过',
-    detail: verified
-      ? `${target?.name ?? '服务商'} 的本地配置和必填项已通过。`
-      : `${target?.name ?? '服务商'} 缺少接口地址、模型、API 密钥，或 Codex 当前配置存在阻断项。`,
-    tone: verified ? 'success' : 'warning',
+    title: '预览未执行验证',
+    detail: `${target?.name ?? '服务商'} 没有连接远端服务商；请使用桌面开发版执行真实检查。`,
+    tone: 'warning',
   })
   return structuredClone(mockState)
 }
@@ -335,48 +376,6 @@ export async function setDefaultProfile(profileId: string): Promise<AppState> {
     title: `${target?.name ?? '服务商'} 已设为默认`,
     detail: '默认标记已更新；不会立即改写当前 Codex 服务商。',
     tone: 'info',
-  })
-  return structuredClone(mockState)
-}
-
-export async function toggleAutoStart(enabled: boolean): Promise<AppState> {
-  if (isTauri) {
-    return invoke<AppState>('toggle_auto_start', { enabled })
-  }
-  const webState = await tryWebBackend<AppState>('/api/auto-start', apiPost({ enabled }))
-  if (webState) {
-    return webState
-  }
-  await mockDelay()
-  mockState.autoStart = enabled
-  mockState.activity.unshift({
-    id: crypto.randomUUID(),
-    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-    title: enabled ? '已请求开机启动' : '已关闭开机启动',
-    detail: '浏览器预览假数据只改变界面状态；真实后端需要核验 Windows 启动项。',
-    tone: enabled ? 'warning' : 'info',
-  })
-  return structuredClone(mockState)
-}
-
-export async function restoreLatestBackup(): Promise<AppState> {
-  if (isTauri) {
-    return invoke<AppState>('restore_latest_backup')
-  }
-  const webState = await tryWebBackend<AppState>('/api/backup/restore-latest', apiPost())
-  if (webState) {
-    return webState
-  }
-  await mockDelay()
-  if (mockState.backups.length === 0) {
-    throw new Error('当前没有可恢复的备份。')
-  }
-  mockState.activity.unshift({
-    id: crypto.randomUUID(),
-    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-    title: '已恢复最近备份',
-    detail: '浏览器预览假数据已触发恢复动作，并记录本次恢复请求。',
-    tone: 'success',
   })
   return structuredClone(mockState)
 }

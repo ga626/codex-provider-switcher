@@ -6,25 +6,27 @@
 
 ## 当前状态
 
-这是 `0.2.0-alpha` 桌面 GUI 基座：
+这是 `0.3.0-alpha`：可稳定安装、可按 GitHub Release 更新的桌面 Alpha 基线：
 
 - React/Vite 前端。
 - Tauri/Rust 桌面窗口、本地文件、profiles、backup、validation、restore 基础。
 - Provider 模型目录缓存和只读 `/models` 刷新入口。
 - Windows 桌面安装资产：setup exe。
+- Tauri 签名更新通道：正式 Release 生成 `latest.json`、签名 setup 更新包和 `.sig` 文件；没有发布私钥时不会生成可冒充正式版的更新资产。
 - fallback alpha zip：包含 `CodeXProviderSwitcher.cmd`、静默本地后端 `local_backend.exe` 和 `dist/` 前端资源。
 - 浏览器 UI-only mock adapter，仅用于 `preview:start` 这种显式开发预览；Release 包和真实本地后端入口不会静默回落到假数据。
 - Playwright UI smoke flow。
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
 
-[下载 0.2.0-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.2.0-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
+[下载 0.3.0-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.3.0-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
 
 ## 开发验收方式
 
-本项目把用户验收压缩成两种状态：
+本项目固定使用三种状态：
 
-- 开发版验收：看当前源码树里的桌面应用，不安装、不卸载、不走 Release 包。普通功能、UI、布局、文案、配置流程改动默认用这个状态。
-- 安装发布验收：只在安装器、Release 包、版本号、启动入口、升级/卸载路径或用户下载入口变化时使用。这个状态才运行 setup exe。
+- 开发版：当前源码树里的桌面应用，不安装、不升级、不跟随 GitHub Release，普通功能和 UI 验收使用它。
+- 候选版：`release-assets/` 下的本地构建产物，只用于 Codex 的结构、哈希和安装 QA，不是稳定产品入口。
+- 稳定版：从 GitHub Release 下载并安装到本机固定目录 `D:\Software\CodeX Provider Switcher`；只有合并后的新版本 Release 才能更新它。
 
 开发版验收命令：
 
@@ -37,16 +39,14 @@ npm run qa:dev-desktop
 ```powershell
 npm run release:build -- -Apply
 npm run qa:install-release -- -Collect
+npm run qa:stable-install -- -ExplainOnly
 ```
 
 `.codex-provider-switcher\qa\latest\` 会放置本机临时验收资产，属于本地输出目录，不进入 Git。普通开发过程中不需要反复安装；当用户说“看一下状态”时，默认应打开开发版桌面窗口。
 
-尚未完成：
+本版本明确保留的后续边界：
 
-- 自动更新器和可选后台/托盘管理。
-- Codex/Responses 与中转站模型名的完整兼容验证策略。
-- Responses API 兼容性验证。
-- 自动更新、备份、恢复、回滚的正式用户闭环。
+- Codex/Responses 与中转站模型名的完整行为兼容验证策略。
 - 旧版工具最终 cutover。
 - UI 信息架构重构。
 
@@ -130,7 +130,7 @@ npm run verify:doctor
 npm run qa:smoke
 ```
 
-UI smoke 默认运行在浏览器预览假数据上，只证明界面流程没有明显断裂。它不能替代开发版桌面验收；真实本地能力还要通过本地 Web 后端、Tauri/Rust 检查或 release 包验收。
+UI smoke 默认运行在浏览器预览假数据上，只证明界面流程没有明显断裂；预览会明确标注它不会连接、验证或切换真实服务商。它不能替代开发版桌面验收；真实本地能力还要通过本地 Web 后端、Tauri/Rust 检查或 release 包验收。
 
 验证生产构建不会在后端缺失时回落假数据：
 
@@ -144,6 +144,12 @@ npm run runtime-boundary:smoke
 npm run build
 npm run backend:build
 npm run backend:smoke
+```
+
+运行隔离的真实功能 smoke。它会调用测试服务商的已认证 `/models` 探针，并用 DasuAPI 类请求夹具验证额度不足时不会误判或写入 Codex 配置；A6/OWL 探针不依赖当前模型：
+
+```powershell
+npm run backend:functional-smoke
 ```
 
 开发时启动真实本地 Web 后端：
@@ -178,7 +184,7 @@ npm run tauri:desktop-boundary:smoke
 npm run release:build
 ```
 
-实际构建桌面安装资产、fallback zip 和 SHA256：
+实际构建桌面安装资产、签名更新资产、fallback zip 和 SHA256。该命令要求 `TAURI_SIGNING_PRIVATE_KEY_PATH` 或 `TAURI_SIGNING_PRIVATE_KEY` 已在本机/CI secret 中配置：
 
 ```powershell
 npm run release:build -- -Apply
@@ -190,6 +196,21 @@ npm run qa:install-release -- -Collect
 ```powershell
 npm run release:verify-local
 ```
+
+稳定安装 QA（默认只解释，不启动安装器）：
+
+```powershell
+npm run qa:stable-install -- -ExplainOnly
+npm run qa:stable-install -- -Apply
+```
+
+升级时对同一安装目录再次执行同一版本的 setup 入口；卸载使用：
+
+```powershell
+npm run qa:stable-install -- -Uninstall -Apply
+```
+
+卸载脚本只验证程序目录移除，不删除 `%LOCALAPPDATA%\CodeX Provider Switcher` 中的 profiles、备份和活动数据。
 
 发布后的远端资产复验：
 
@@ -204,6 +225,7 @@ Alpha 应用状态：
 ```text
 %LOCALAPPDATA%\CodeX Provider Switcher\profiles.json
 %LOCALAPPDATA%\CodeX Provider Switcher\backups\
+%LOCALAPPDATA%\CodeX Provider Switcher\update-cache\
 ```
 
 切换时会触碰的 Codex 文件：
@@ -240,3 +262,4 @@ C:\Users\<user>\.codex\auth.json
 - `docs/user/troubleshooting.zh.md`
 - `docs/release/github-publish-runbook.md`
 - `docs/release/release-checklist.md`
+- `release-assets/`：本地发布资产目录（被 Git 忽略）

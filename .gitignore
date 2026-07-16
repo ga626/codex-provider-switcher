@@ -19,6 +19,8 @@ src-tauri/target
 # Local runtime/output
 /logs/
 /release/
+/release-assets/*
+!/release-assets/.gitkeep
 /archive/
 /project_status/
 /.codex-provider-switcher/

@@ -14,13 +14,21 @@ npm run qa:dev-desktop
 
 如果窗口没有出现：
 
-- 确认下载的是 `CodeXProviderSwitcher-windows-x64-0.2.0-alpha-setup.exe`。
+- 确认下载的是当前 Release 对应的 `CodeXProviderSwitcher-windows-x64-<version>-setup.exe`。
 - 确认 Windows WebView2 Runtime 可用。多数 Windows 11/新版 Windows 10 已内置；缺失时需要安装 Microsoft Edge WebView2 Evergreen Runtime。
 - 如果安装器被拦截，改用 fallback zip。
 
 ## fallback Web 页面打不开
 
-如果你是从 fallback zip 启动，先确认是在解压出的 `CodeXProviderSwitcher-windows-x64-0.2.0-alpha` 目录里双击 `CodeXProviderSwitcher.cmd`。
+如果你是从 fallback zip 启动，先确认是在解压出的 `CodeXProviderSwitcher-windows-x64-<version>` 目录里双击 `CodeXProviderSwitcher.cmd`。
+
+## 检查更新失败
+
+开发版不会使用稳定更新通道，这是预期行为。稳定版如果提示更新失败，先确认网络可以访问 GitHub Release，并检查当前版本对应的 `latest.json`、setup exe 和 `*-setup.exe.sig` 仍在同一个 Release 中。签名校验失败时不要手动替换程序目录，回到上一版稳定安装并向项目报告 Release 资产问题。
+
+## 卸载后数据还在
+
+卸载程序文件不会删除 `%LOCALAPPDATA%\CodeX Provider Switcher`。这是设计好的恢复边界，便于重新安装和升级。如果确实需要清空用户数据，应先备份 `profiles.json` 和 `backups\`，再由用户手动删除该目录。
 
 固定入口是：
 

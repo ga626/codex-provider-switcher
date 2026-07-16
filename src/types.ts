@@ -6,11 +6,32 @@ export type ProviderProfile = {
   reasoningEffort: 'minimal' | 'low' | 'medium' | 'high'
   note: string
   verified: boolean
+  verificationStatus:
+    | 'not_checked'
+    | 'verified'
+    | 'missing_key'
+    | 'invalid_profile'
+    | 'unauthorized'
+    | 'billing_unavailable'
+    | 'rate_limited'
+    | 'model_unavailable'
+    | 'endpoint_or_model_unavailable'
+    | 'request_incompatible'
+    | 'protocol_incompatible'
+    | 'service_error'
+    | 'timeout'
+    | 'network_error'
+    | 'transport_error'
+    | 'provider_error'
   isDefault: boolean
   active: boolean
   hasApiKey: boolean
   lastSwitchedAt?: string
   lastVerifiedAt?: string
+  lastVerificationDetail?: string
+  lastVerificationStage?: string
+  lastVerificationHttpStatus?: number
+  lastVerificationProviderCode?: string
 }
 
 export type ProviderModel = {
@@ -58,6 +79,15 @@ export type BackupItem = {
   time: string
   label: string
   files: number
+}
+
+export type UpdateInfo = {
+  currentVersion: string
+  latestVersion: string
+  available: boolean
+  releaseUrl: string
+  downloadUrl?: string
+  publishedAt?: string
 }
 
 export type LegacySwitcherStatus = {

@@ -4,6 +4,10 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.0.0-dev'),
+    __CODEX_RELEASE_CHANNEL__: JSON.stringify(process.env.CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL ?? 'stable'),
+  },
   build: {
     minify: 'esbuild',
   },

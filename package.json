@@ -1,7 +1,7 @@
 {
   "name": "codex-provider-switcher",
   "private": true,
-  "version": "0.2.0-alpha",
+  "version": "0.3.0-alpha",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,8 +13,10 @@
     "qa:smoke": "node scripts/qa-smoke.mjs",
     "qa:dev-desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/start-dev-desktop.ps1",
     "qa:install-release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/prepare-install-release-qa.ps1",
+    "qa:stable-install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/stable-install.ps1",
     "backend:build": "cargo build --manifest-path src-tauri/Cargo.toml --bin local_backend",
     "backend:smoke": "node scripts/local-backend-smoke.mjs",
+    "backend:functional-smoke": "node scripts/local-backend-functional-smoke.mjs",
     "backend:ui-smoke": "node scripts/local-backend-ui-smoke.mjs",
     "runtime-boundary:smoke": "node scripts/runtime-boundary-smoke.mjs",
     "tauri:desktop-boundary:smoke": "node scripts/tauri-desktop-boundary-smoke.mjs",
@@ -22,11 +24,14 @@
     "verify:doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/doctor-codex-provider-switcher.ps1 -PublicRelease",
     "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/build-codex-provider-switcher-release.ps1",
     "release:verify-local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-local-release-package.ps1",
-    "tauri:dev": "tauri dev -- --bin codex-provider-switcher",
+    "tauri:dev": "powershell -NoProfile -Command \"$env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL='development'; npx tauri dev -- --bin codex-provider-switcher\"",
     "tauri:build": "tauri build -- --bin codex-provider-switcher"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-opener": "^2.5.4",
+    "@tauri-apps/plugin-process": "^2.3.0",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"

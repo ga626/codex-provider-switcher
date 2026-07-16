@@ -1,6 +1,6 @@
 # CodeX Provider Switcher 产品规格
 
-状态：`0.2.0-alpha` 桌面 GUI 基座
+状态：`0.3.0-alpha` 稳定安装和签名更新基线
 目标：Windows 优先的轻量桌面 GUI
 日期：2026-07-15
 
@@ -30,7 +30,7 @@ Alpha 阶段不做：
 - 不做多账号云端系统。
 - 不自动读取 provider 账号数据库。
 - 不替用户判断 provider 余额或权益。
-- 不在未完成签名和发布复验前承诺自动更新。
+- 不在签名私钥、更新 manifest 和远端下载复验齐全前宣称产品已交付。
 - 不直接废弃旧版工具。
 - 不让当前 Codex 会话直接执行最终 provider cutover。
 
@@ -96,7 +96,11 @@ Alpha 阶段不做：
 - `disable_response_storage = true`。
 - 当前 custom provider `base_url`。
 - 当前 custom provider key 存在状态。
-- 所选 provider 的接口地址、模型和 API key 就绪状态。
+- 所选 provider 的接口地址和 API key 就绪状态。
+- 通过已认证的 `/v1/models` 服务端探针确认 provider 可用；该探针不依赖当前模型，也不写入 Codex 配置。
+- 对需要实际扣费才能暴露账户状态的 provider（当前为 DasuAPI），使用已认证的 Responses 请求探针确认额度；该路径只用于验证，不执行切换。
+- 探针结果在切换界面统一归类为可用、额度不足、鉴权失败或网络失败；HTTP 状态和服务商错误码仅在安全检查诊断中展示。
+- 切换写入前仍要求模型名称非空。
 - 当前模型是否在 provider 返回列表中。
 
 ### 备份和恢复
@@ -180,11 +184,18 @@ Release 包不得包含：
 - 真实 `config.toml`
 - 备份目录和本机活动日志。
 
+稳定安装目录和更新边界：
+
+- 本机标准稳定安装 QA 目录为 `D:\Software\CodeX Provider Switcher`，公开安装器仍保持 `currentUser` 和 NSIS 可选路径，不把本机路径编译为产品硬编码。
+- 程序文件与用户可变数据分离。profiles、备份、活动记录和更新缓存位于 `%LOCALAPPDATA%\CodeX Provider Switcher`。
+- 稳定版只从 GitHub Release 的签名 `latest.json` 检查更新；更新下载、签名校验、退出后替换和重启由 Tauri updater 处理。
+- 发布资产必须使用新版本和新 tag；禁止用旧 tag 或 `--clobber` 覆盖已发布资产。
+
 ## 已知 alpha 缺口
 
 - 当前交付开始提供桌面安装资产，但仍是 alpha。
 - 源码树 `setup.cmd` 仍依赖 Node/npm/Rust 构建环境；Release 包用户入口不依赖这些开发工具。
-- 模型发现已有只读 `/v1/models` 基础，Responses/Codex 实际兼容性验证尚未完成。
+- 已提供与模型选择解耦的已认证服务端探针；完整的 Responses/Codex 行为兼容性仍需在最终 cutover 前按实际模型单独验证。
 - API key 仍需迁移到 Windows Credential Manager、DPAPI 或 Tauri Stronghold。
-- 代码签名、自动更新和正式安装包暂缓。
+- 代码签名仍不是本版本承诺的 Windows Authenticode 能力；Tauri 更新签名私钥必须留在本机/CI secret。
 - UI 信息架构仍需按正式桌面控制台重构。

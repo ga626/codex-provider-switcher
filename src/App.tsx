@@ -1,14 +1,18 @@
 import {
   AlertTriangle,
-  ArchiveRestore,
+  Boxes,
   CheckCircle2,
   Copy,
+  Activity,
+  Download,
+  GitCompareArrows,
   KeyRound,
-  PanelRightOpen,
+  LayoutDashboard,
   PlugZap,
   Plus,
   RefreshCcw,
   Save,
+  Server,
   ShieldCheck,
   Star,
   Trash2,
@@ -19,15 +23,18 @@ import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import {
   deleteProfile,
+  checkForUpdate,
   loadState,
+  openUpdate,
   refreshModels,
-  restoreLatestBackup,
   saveProfile,
   setDefaultProfile,
   switchProfile,
   verifyProfile,
 } from './adapter'
-import type { AppState, EditableProfile, ModelCatalog, ProviderProfile, ValidationCheck } from './types'
+import type { AppState, EditableProfile, ModelCatalog, ProviderProfile, UpdateInfo, ValidationCheck } from './types'
+
+type ViewId = 'providers' | 'models' | 'safety' | 'timeline'
 
 const emptyProfile: EditableProfile = {
   id: '',
@@ -36,18 +43,6 @@ const emptyProfile: EditableProfile = {
   model: '',
   note: '',
   apiKey: '',
-}
-
-function getCheckVisual(check: { ok: boolean; severity: 'required' | 'warning' | 'info' }) {
-  if (check.ok) {
-    return { icon: <CheckCircle2 className="ok-icon" size={18} />, className: 'check-ok' }
-  }
-
-  if (check.severity === 'warning' || check.severity === 'info') {
-    return { icon: <AlertTriangle className="warn-icon" size={18} />, className: 'check-warn' }
-  }
-
-  return { icon: <XCircle className="danger-icon" size={18} />, className: 'check-bad' }
 }
 
 function toEditable(profile: ProviderProfile): EditableProfile {
@@ -59,6 +54,18 @@ function toEditable(profile: ProviderProfile): EditableProfile {
     note: profile.note,
     apiKey: '',
   }
+}
+
+function getCheckVisual(check: { ok: boolean; severity: 'required' | 'warning' | 'info' }) {
+  if (check.ok) {
+    return { icon: <CheckCircle2 size={16} />, className: 'ok' }
+  }
+
+  if (check.severity === 'warning' || check.severity === 'info') {
+    return { icon: <AlertTriangle size={16} />, className: 'warning' }
+  }
+
+  return { icon: <XCircle size={16} />, className: 'danger' }
 }
 
 function profileChecks(
@@ -81,30 +88,39 @@ function profileChecks(
       label: '服务商名称',
       ok: name.length > 0,
       detail: name.length > 0 ? `当前选择：${name}` : '需要填写服务商名称。',
-      severity: 'required' as const,
+      severity: 'required',
     },
     {
       id: 'profile-base-url',
       label: '接口地址',
       ok: /^https?:\/\/\S+/i.test(baseUrl),
       detail: /^https?:\/\/\S+/i.test(baseUrl) ? baseUrl : '需要填写 http 或 https 开头的接口地址。',
-      severity: 'required' as const,
+      severity: 'required',
     },
     {
       id: 'profile-model',
       label: '模型名称',
       ok: model.length > 0,
       detail: model.length > 0 ? model : '需要填写 Codex 使用的模型名称。',
-      severity: 'required' as const,
+      severity: 'required',
     },
     {
       id: 'profile-api-key',
       label: 'API 密钥',
       ok: hasKey,
       detail: hasKey ? '已保存密钥或本次已输入新密钥。' : '切换前必须保存 API 密钥。',
-      severity: 'required' as const,
+      severity: 'required',
     },
   ]
+
+  const verificationStatus = profile?.verificationStatus ?? 'not_checked'
+  checks.push({
+    id: 'provider-auth-probe',
+    label: '已认证服务端探针',
+    ok: verificationStatus === 'verified' && Boolean(profile?.verified),
+    detail: verificationDetail(profile),
+    severity: 'required',
+  })
 
   if (model.length > 0 && modelCatalog?.status === 'ok') {
     const modelIds = new Set(modelCatalog.models.map((item) => item.id))
@@ -113,21 +129,73 @@ function profileChecks(
       label: '模型目录匹配',
       ok: modelIds.has(model),
       detail: modelIds.has(model)
-        ? '当前模型存在于最近一次 provider 模型目录。'
-        : '当前模型不在最近一次 provider 模型目录中；可继续手动保存，但切换前需要确认。',
-      severity: 'warning' as const,
+        ? '当前模型存在于最近一次服务商模型目录。'
+        : '当前模型不在最近一次服务商模型目录中；可继续手动保存，但切换前需要确认。',
+      severity: 'warning',
     })
   }
 
   return checks
 }
 
+function verificationDetail(profile: ProviderProfile | undefined) {
+  if (!profile?.lastVerificationDetail) {
+    return '请先保存服务商，然后运行一次真实服务商检查。'
+  }
+
+  const diagnostics = [
+    profile.lastVerificationHttpStatus ? `HTTP ${profile.lastVerificationHttpStatus}` : '',
+    profile.lastVerificationProviderCode ? `服务商代码：${profile.lastVerificationProviderCode}` : '',
+  ].filter(Boolean)
+
+  return diagnostics.length > 0
+    ? `${profile.lastVerificationDetail}（${diagnostics.join('，')}）`
+    : profile.lastVerificationDetail
+}
+
+function verificationLabel(profile: ProviderProfile | undefined) {
+  if (!profile) return '未保存'
+  if (profile.verified && profile.verificationStatus === 'verified') return '可用'
+  const labels: Record<Exclude<ProviderProfile['verificationStatus'], 'verified'>, string> = {
+    not_checked: '待验证',
+    missing_key: '鉴权失败',
+    invalid_profile: '鉴权失败',
+    unauthorized: '鉴权失败',
+    billing_unavailable: '额度不足',
+    rate_limited: '网络失败',
+    model_unavailable: '网络失败',
+    endpoint_or_model_unavailable: '网络失败',
+    request_incompatible: '网络失败',
+    protocol_incompatible: '网络失败',
+    service_error: '网络失败',
+    timeout: '网络失败',
+    network_error: '网络失败',
+    transport_error: '网络失败',
+    provider_error: '网络失败',
+  }
+  return labels[profile.verificationStatus] ?? '待验证'
+}
+
+function draftMatchesProfile(draft: EditableProfile, profile: ProviderProfile | undefined) {
+  if (!profile) return !draft.name && !draft.baseUrl && !draft.model && !draft.note && !draft.apiKey
+  return (
+    draft.name.trim() === profile.name &&
+    draft.baseUrl.trim() === profile.baseUrl &&
+    draft.model.trim() === profile.model &&
+    draft.note.trim() === profile.note &&
+    draft.apiKey.trim().length === 0
+  )
+}
+
 function App() {
   const [state, setState] = useState<AppState | null>(null)
   const [selectedId, setSelectedId] = useState('a6api')
+  const [activeView, setActiveView] = useState<ViewId>('providers')
   const [draft, setDraft] = useState<EditableProfile>(emptyProfile)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [updateBusy, setUpdateBusy] = useState(false)
 
   useEffect(() => {
     async function loadInitialState() {
@@ -173,23 +241,26 @@ function App() {
     return state?.profiles.find((profile) => profile.id === selectedId)
   }, [selectedId, state])
 
-  const currentProfile = useMemo(() => {
-    return state?.profiles.find((profile) => profile.id === state.currentProfileId)
-  }, [state])
-
   const selectedModelCatalog = useMemo(() => {
     return state?.modelCatalogs.find((catalog) => catalog.providerId === selectedId)
   }, [selectedId, state])
 
-  const displayChecks = useMemo(() => {
-    return [...(state?.checks ?? []), ...profileChecks(selectedProfile, draft, selectedModelCatalog)]
-  }, [draft, selectedModelCatalog, selectedProfile, state])
-
-  const failingChecks = displayChecks.filter((check) => !check.ok)
-  const requiredFailures = failingChecks.filter((check) => check.severity === 'required').length
+  const providerChecks = useMemo(() => {
+    return profileChecks(selectedProfile, draft, selectedModelCatalog)
+  }, [draft, selectedModelCatalog, selectedProfile])
+  const configChecks = state?.checks ?? []
+  const displayChecks = [...configChecks, ...providerChecks]
+  const requiredFailures = displayChecks.filter((check) => !check.ok && check.severity === 'required').length
+  const hasUnsavedChanges = !draftMatchesProfile(draft, selectedProfile)
   const latestActivity = state?.activity[0]
-  const legacyActive = Boolean(state?.legacySwitcher.processRunning || state?.legacySwitcher.portInUse)
-  const legacyImported = Boolean(state?.legacySwitcher.imported)
+  const canSwitch = Boolean(
+    selectedProfile &&
+      !selectedProfile.active &&
+      selectedProfile.verified &&
+      !hasUnsavedChanges &&
+      requiredFailures === 0 &&
+      busy === null
+  )
 
   function updateDraft<K extends keyof EditableProfile>(key: K, value: EditableProfile[K]) {
     setDraft((current) => ({ ...current, [key]: value }))
@@ -207,23 +278,27 @@ function App() {
       }
       setError(null)
     } catch (err) {
+      try {
+        const latest = await loadState()
+        setState(latest)
+      } catch {
+        // Preserve the operation error when the follow-up state refresh also fails.
+      }
       setError(err instanceof Error ? err.message : '操作失败。')
     } finally {
       setBusy(null)
     }
   }
 
-  async function saveCurrentProfile() {
-    setBusy('save')
+  async function saveEditableProfile(nextDraft: EditableProfile, busyLabel: string) {
+    setBusy(busyLabel)
     try {
-      const next = await saveProfile(draft)
+      const next = await saveProfile(nextDraft)
       setState(next)
       const saved =
-        next.profiles.find((profile) => draft.id && profile.id === draft.id) ??
+        next.profiles.find((profile) => nextDraft.id && profile.id === nextDraft.id) ??
         next.profiles.find(
-          (profile) =>
-            profile.name === draft.name.trim() &&
-            profile.baseUrl === draft.baseUrl.trim()
+          (profile) => profile.name === nextDraft.name.trim() && profile.baseUrl === nextDraft.baseUrl.trim()
         ) ??
         next.profiles.find((profile) => profile.id === selectedId) ??
         next.profiles[0]
@@ -239,9 +314,23 @@ function App() {
     }
   }
 
+  async function saveCurrentProfile() {
+    await saveEditableProfile(draft, 'save')
+  }
+
+  async function selectModel(model: string) {
+    await saveEditableProfile({ ...draft, model }, 'save-model')
+  }
+
+  function selectProfile(profile: ProviderProfile) {
+    setSelectedId(profile.id)
+    setDraft(toEditable(profile))
+  }
+
   function startNewProfile() {
     setSelectedId('')
     setDraft(emptyProfile)
+    setActiveView('providers')
   }
 
   function duplicateProfile() {
@@ -253,6 +342,30 @@ function App() {
       name: `${selectedProfile.name} 副本`,
       apiKey: '',
     })
+    setActiveView('providers')
+  }
+
+  async function handleUpdate() {
+    if (updateInfo?.available) {
+      try {
+        await openUpdate(updateInfo.downloadUrl ?? updateInfo.releaseUrl)
+        setError(null)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '无法打开更新下载。')
+      }
+      return
+    }
+
+    setUpdateBusy(true)
+    try {
+      const next = await checkForUpdate()
+      setUpdateInfo(next)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '检查更新失败。')
+    } finally {
+      setUpdateBusy(false)
+    }
   }
 
   if (!state && error) {
@@ -260,7 +373,7 @@ function App() {
       <main className="loading-shell runtime-error-shell">
         <AlertTriangle className="danger-icon" size={28} />
         <div>
-          <strong>真实本地后端不可用</strong>
+          <strong>连接服务未启动</strong>
           <span>{error}</span>
         </div>
         <button className="ghost-button" type="button" onClick={refresh} disabled={busy !== null}>
@@ -280,26 +393,56 @@ function App() {
     )
   }
 
+  const navItems: Array<{ id: ViewId; label: string; note: string; icon: React.ReactNode }> = [
+    { id: 'providers', label: '服务商', note: `${state.profiles.length} 个配置`, icon: <LayoutDashboard size={17} /> },
+    { id: 'models', label: '模型目录', note: selectedModelCatalog?.status === 'ok' ? '已同步' : '待刷新', icon: <Boxes size={17} /> },
+    { id: 'safety', label: '安全检查', note: hasUnsavedChanges ? '请先保存' : requiredFailures === 0 ? '可以切换' : `${requiredFailures} 个待处理`, icon: <ShieldCheck size={17} /> },
+    { id: 'timeline', label: '活动记录', note: latestActivity?.time ?? '暂无记录', icon: <Activity size={17} /> },
+  ]
+  const selectedIsCurrent = Boolean(selectedProfile?.active)
+  const switchCardState = selectedIsCurrent ? 'current' : hasUnsavedChanges || requiredFailures > 0 ? 'blocked' : 'ready'
+  const updateLabel = updateBusy
+    ? '正在检查'
+    : updateInfo?.available
+      ? `下载 v${updateInfo.latestVersion}`
+      : updateInfo
+        ? '已是最新版'
+        : '检查更新'
+
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">
-            {state.runtimeMode === 'browser_preview_mock'
-              ? '浏览器假数据'
-              : state.runtimeMode === 'local_web_backend'
-                ? '本机 Web 后端'
-                : '本机真实后端'}
-          </p>
-          <h1>CodeX Provider Switcher</h1>
+    <main className="app-shell" data-view={activeView}>
+      <header className="app-titlebar">
+        <div className="brand-lockup">
+          <span className="brand-mark"><GitCompareArrows size={20} /></span>
+          <div>
+            <h1>CodeX Provider Switcher</h1>
+            <p>服务商连接管理</p>
+          </div>
         </div>
-        <div className="topbar-actions">
-          <button className="ghost-button" type="button" onClick={refresh} disabled={busy !== null}>
-            <RefreshCcw size={16} />
-            刷新
+        <div className="title-actions">
+          <button
+            className="ghost-button update-button"
+            type="button"
+            onClick={handleUpdate}
+            disabled={updateBusy}
+            title={updateInfo?.available ? `下载 ${updateInfo.latestVersion} 安装包` : '检查 GitHub Release 更新'}
+          >
+            {updateBusy
+              ? <RefreshCcw className="spin" size={15} />
+              : updateInfo && !updateInfo.available
+                ? <CheckCircle2 size={15} />
+                : <Download size={15} />}
+            {updateLabel}
           </button>
         </div>
       </header>
+
+      {state.runtimeMode === 'browser_preview_mock' && (
+        <section className="error-banner preview-banner">
+          <AlertTriangle size={18} />
+          <span>开发预览不读取本机配置，也不会连接、验证或切换真实服务商。</span>
+        </section>
+      )}
 
       {error && (
         <section className="error-banner">
@@ -311,364 +454,547 @@ function App() {
         </section>
       )}
 
-      <section className="operations-panel">
-        <div className="operations-main">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">常用操作</p>
-              <h2>切换 / 验证</h2>
-              <p className="section-note">当前状态和高频动作放在同一层，减少来回扫视。</p>
+      <section className="workbench">
+        <aside className="navigation-pane">
+          <section className="sidebar-workspaces" aria-labelledby="workspace-nav-title">
+            <div className="nav-group-label" id="workspace-nav-title">工作区</div>
+            <nav className="nav-list" aria-label="主导航">
+              {navItems.map((item) => (
+                <button
+                  key={item.id}
+                  className={`nav-item ${activeView === item.id ? 'selected' : ''}`}
+                  type="button"
+                  onClick={() => setActiveView(item.id)}
+                >
+                  {item.icon}
+                  <span>
+                    <strong>{item.label}</strong>
+                    <small>{item.note}</small>
+                  </span>
+                </button>
+              ))}
+            </nav>
+          </section>
+
+          <section className="sidebar-connections" aria-labelledby="saved-connections-title">
+            <div className="sidebar-section-title">
+              <span id="saved-connections-title">服务商列表</span>
+              <button type="button" onClick={startNewProfile} disabled={busy !== null} aria-label="新增服务商">
+                <Plus size={15} />
+              </button>
             </div>
+
+            <div className="provider-list" aria-label="服务商列表">
+              {state.profiles.map((profile) => (
+                <button
+                  key={profile.id}
+                  className={`provider-row ${profile.id === selectedId ? 'selected' : ''} ${profile.active ? 'active' : ''}`}
+                  type="button"
+                  disabled={busy !== null}
+                  onClick={() => selectProfile(profile)}
+                >
+                  <span className="provider-symbol" aria-hidden="true"><Server size={16} /></span>
+                  <span className="provider-row-main">
+                    <strong>
+                      {profile.name}
+                      {profile.isDefault && <Star size={12} />}
+                    </strong>
+                    <small>{profile.baseUrl}</small>
+                  </span>
+                  <span className={`row-state ${profile.verified ? 'ok' : 'warning'}`} />
+                </button>
+              ))}
+            </div>
+          </section>
+
+        </aside>
+
+        <section className="workspace-panel">
+          <WorkspaceHeader
+            activeView={activeView}
+            selectedProfile={selectedProfile}
+            requiredFailures={requiredFailures}
+            selectedModelCatalog={selectedModelCatalog}
+          />
+          <div className="workspace-scroll">
+            {activeView === 'providers' && (
+              <ProviderWorkspace
+                draft={draft}
+                selectedProfile={selectedProfile}
+                busy={busy}
+                updateDraft={updateDraft}
+                saveCurrentProfile={saveCurrentProfile}
+                duplicateProfile={duplicateProfile}
+                runAction={runAction}
+              />
+            )}
+            {activeView === 'models' && (
+              <ModelsWorkspace
+                selectedProfile={selectedProfile}
+                selectedModelCatalog={selectedModelCatalog}
+                busy={busy}
+                selectModel={selectModel}
+                runAction={runAction}
+              />
+            )}
+            {activeView === 'safety' && (
+              <SafetyWorkspace
+                providerChecks={providerChecks}
+                configChecks={configChecks}
+                safeMode={state.safeMode}
+                selectedProfile={selectedProfile}
+                busy={busy}
+                hasUnsavedChanges={hasUnsavedChanges}
+                runAction={runAction}
+              />
+            )}
+            {activeView === 'timeline' && <TimelineWorkspace state={state} />}
           </div>
-          <div className="operations-row">
+        </section>
+
+        <aside className="inspector-panel">
+          <div className="inspector-section current-object">
+            <div className="panel-heading">
+              <span>当前目标</span>
+              <strong>{selectedProfile?.name ?? '新增服务商'}</strong>
+            </div>
+            <dl className="inspector-facts">
+              <div>
+                <dt>状态</dt>
+                <dd className={selectedProfile?.active ? 'value-good' : ''}>{selectedProfile?.active ? '运行中' : '未启用'}</dd>
+              </div>
+              <div>
+                <dt>验证</dt>
+                <dd className={selectedProfile?.verified ? 'value-good' : ''}>{verificationLabel(selectedProfile)}</dd>
+              </div>
+              <div>
+                <dt>模型</dt>
+                <dd>{draft.model || '未设置'}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div className={`switch-card ${switchCardState}`}>
+            <div>
+              <div className="switch-card-heading">
+                <span className="switch-icon"><ShieldCheck size={16} /></span>
+                <span>
+                  {selectedIsCurrent
+                    ? '当前连接'
+                    : hasUnsavedChanges
+                      ? '请先保存更改'
+                    : requiredFailures === 0
+                      ? '安全检查已通过'
+                      : '需要处理安全项'}
+                </span>
+              </div>
+              <strong>
+                {selectedIsCurrent
+                  ? '当前已启用'
+                  : hasUnsavedChanges
+                    ? '尚未保存'
+                  : requiredFailures === 0
+                    ? '可以切换'
+                    : `${requiredFailures} 个阻断项`}
+              </strong>
+              <p>
+                {selectedIsCurrent
+                  ? '选择其他连接后可执行切换。'
+                  : hasUnsavedChanges
+                    ? '保存后需要运行真实服务商检查。'
+                  : requiredFailures === 0
+                    ? '切换前会自动生成恢复点。'
+                    : '先处理必填项，再执行服务商切换。'}
+              </p>
+            </div>
             <button
               className="primary-button"
               type="button"
               onClick={() => selectedProfile && runAction('switch', () => switchProfile(selectedProfile.id))}
-              disabled={!selectedProfile || selectedProfile.active || busy !== null}
+              disabled={!canSwitch}
             >
               <PlugZap size={16} />
-              切换到此服务商
-            </button>
-            <button
-              className="ghost-button"
-              type="button"
-              onClick={() => selectedProfile && runAction('verify', () => verifyProfile(selectedProfile.id))}
-              disabled={!selectedProfile || busy !== null}
-            >
-              <ShieldCheck size={16} />
-              验证配置
-            </button>
-            <button
-              className="ghost-button"
-              type="button"
-              onClick={() => selectedProfile && runAction('refresh-models', () => refreshModels(selectedProfile.id))}
-              disabled={!selectedProfile || busy !== null}
-            >
-              <RefreshCcw size={16} />
-              刷新模型目录
+              {selectedIsCurrent ? '当前使用中' : `切换到 ${selectedProfile?.name ?? '此服务商'}`}
             </button>
           </div>
-        </div>
 
-        <div className="quick-status-grid">
-          <article className="status-card current">
-            <div className="status-icon">
-              <PlugZap size={20} />
+          <div className="inspector-section checks-mini">
+            <div className="panel-heading">
+              <span>切换检查</span>
+              <strong>{displayChecks.length} 项</strong>
             </div>
-            <div>
-              <span>当前服务商</span>
-              <strong>{currentProfile?.name ?? '未知'}</strong>
-              <small>{currentProfile?.baseUrl}</small>
+            <div className="mini-check-list">
+              {displayChecks.slice(0, 7).map((check) => {
+                const visual = getCheckVisual(check)
+                return (
+                  <div className={`mini-check ${visual.className}`} key={check.id}>
+                    {visual.icon}
+                    <span>{check.label}</span>
+                  </div>
+                )
+              })}
             </div>
-          </article>
-          <article className="status-card">
-            <div className={requiredFailures === 0 ? 'status-icon ok' : 'status-icon danger'}>
-              {requiredFailures === 0 ? <ShieldCheck size={20} /> : <AlertTriangle size={20} />}
+          </div>
+
+          <div className="inspector-section">
+            <div className="panel-heading">
+              <span>最近活动</span>
+              <strong>{latestActivity?.time ?? '暂无'}</strong>
             </div>
-            <div>
-              <span>安全门禁</span>
-              <strong>{requiredFailures === 0 ? '可切换' : `${requiredFailures} 个阻断项`}</strong>
-              <small>{requiredFailures === 0 ? `${displayChecks.length} 项检查通过` : '请先处理红色检查项'}</small>
+            <p className="inspector-note">{latestActivity?.detail ?? '完成检查或切换后会更新。'}</p>
+          </div>
+        </aside>
+      </section>
+
+      <footer className="statusbar">
+        <span>{busy ? `正在执行：${busy}` : '就绪'}</span>
+        <span>{state.safeMode ? '安全模式开启' : '安全模式关闭'}</span>
+        <span>凭据仅保存在此设备</span>
+      </footer>
+    </main>
+  )
+}
+
+function WorkspaceHeader({
+  activeView,
+  selectedProfile,
+  requiredFailures,
+  selectedModelCatalog,
+}: {
+  activeView: ViewId
+  selectedProfile: ProviderProfile | undefined
+  requiredFailures: number
+  selectedModelCatalog: ModelCatalog | undefined
+}) {
+  const copy: Record<ViewId, { title: string; note: string }> = {
+    providers: {
+      title: selectedProfile ? `编辑 ${selectedProfile.name}` : '新增服务商',
+      note: '管理连接配置、默认项和安全操作。',
+    },
+    models: {
+      title: '模型目录',
+      note: selectedModelCatalog?.statusDetail ?? '尚未同步模型目录。',
+    },
+    safety: {
+      title: '安全检查',
+      note: requiredFailures === 0 ? '当前配置满足切换前置条件。' : '还有必填检查未通过。',
+    },
+    timeline: {
+      title: '活动记录',
+      note: '切换、检查和配置变更按时间记录。',
+    },
+  }
+
+  return (
+    <header className="workspace-header">
+      <div>
+        <h2>{copy[activeView].title}</h2>
+        <p>{copy[activeView].note}</p>
+      </div>
+      <span className={`workspace-badge ${requiredFailures === 0 ? 'ok' : 'warning'}`}>
+        {requiredFailures === 0 ? '安全门禁通过' : `${requiredFailures} 个阻断项`}
+      </span>
+    </header>
+  )
+}
+
+function ProviderWorkspace({
+  draft,
+  selectedProfile,
+  busy,
+  updateDraft,
+  saveCurrentProfile,
+  duplicateProfile,
+  runAction,
+}: {
+  draft: EditableProfile
+  selectedProfile: ProviderProfile | undefined
+  busy: string | null
+  updateDraft: <K extends keyof EditableProfile>(key: K, value: EditableProfile[K]) => void
+  saveCurrentProfile: () => Promise<void>
+  duplicateProfile: () => void
+  runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
+}) {
+  return (
+    <div className="workspace-stack">
+      <section className="connection-banner">
+        <div className="connection-status-icon"><PlugZap size={20} /></div>
+        <div className="connection-copy">
+          <span>连接配置</span>
+          <strong>{selectedProfile?.name ?? '新建服务商'}</strong>
+          <small>{draft.baseUrl || '填写接口地址后检查连接'}</small>
+        </div>
+        <div className={`connection-state ${selectedProfile?.active ? 'active' : ''}`}>
+          <span className="status-dot" />
+          {selectedProfile?.active ? '当前使用中' : '未启用'}
+        </div>
+      </section>
+      <section className="surface-panel">
+        <div className="section-heading-row">
+          <div>
+            <span className="eyebrow">服务商设置</span>
+            <h3>基础配置</h3>
+          </div>
+           <span className="section-meta">凭据仅保存在此设备</span>
+        </div>
+        <div className="form-grid">
+          <label>
+            服务商名称
+            <input value={draft.name} onChange={(event) => updateDraft('name', event.target.value)} placeholder="示例 API" />
+          </label>
+          <label>
+            接口地址
+            <input value={draft.baseUrl} onChange={(event) => updateDraft('baseUrl', event.target.value)} placeholder="https://example.com/v1" />
+          </label>
+          <label>
+            默认模型
+            <input
+              value={draft.model}
+              onChange={(event) => updateDraft('model', event.target.value)}
+              placeholder="先刷新模型目录，或手动输入服务商支持的模型"
+            />
+          </label>
+          <label>
+            API 密钥
+            <div className="key-field">
+              <KeyRound size={15} />
+              <input
+                value={draft.apiKey}
+                onChange={(event) => updateDraft('apiKey', event.target.value)}
+                placeholder={selectedProfile?.hasApiKey ? '已保存密钥。如需替换请重新输入。' : '粘贴 API 密钥'}
+                type="password"
+              />
             </div>
-          </article>
-          <article className="status-card">
-            <div className="status-icon muted">
-              <CheckCircle2 size={20} />
-            </div>
-            <div>
-              <span>最近结果</span>
-              <strong>{latestActivity?.title ?? '暂无操作'}</strong>
-              <small>{latestActivity?.detail ?? '完成切换或验证后会更新。'}</small>
-            </div>
-          </article>
-          <article className="status-card">
-            <div className={legacyActive ? 'status-icon warning' : 'status-icon ok'}>
-              {legacyActive ? <AlertTriangle size={20} /> : <CheckCircle2 size={20} />}
-            </div>
-            <div>
-              <span>旧版交接</span>
-              <strong>{legacyActive ? '旧版仍在运行' : '未检测到占用'}</strong>
-              <small>
-                {legacyImported
-                  ? `已导入：${state.legacySwitcher.importedAt ?? '时间未知'}`
-                  : state.legacySwitcher.profileExists
-                    ? `待导入：端口 ${state.legacySwitcher.port}`
-                    : '未发现旧版配置'}
-              </small>
-            </div>
-          </article>
+          </label>
+          <label className="wide">
+            备注
+            <textarea value={draft.note} onChange={(event) => updateDraft('note', event.target.value)} rows={3} placeholder="用于识别这条连接" />
+          </label>
+        </div>
+        <div className="command-row">
+          <button className="primary-button" type="button" disabled={!draft.name || !draft.baseUrl || busy !== null} onClick={saveCurrentProfile}>
+            <Save size={16} />
+            保存更改
+          </button>
+          <button className="ghost-button" type="button" onClick={duplicateProfile} disabled={!selectedProfile || busy !== null}>
+            <Copy size={16} />
+            复制配置
+          </button>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => selectedProfile && runAction('default', () => setDefaultProfile(selectedProfile.id))}
+            disabled={!selectedProfile || selectedProfile.isDefault || busy !== null}
+          >
+            <Star size={16} />
+            设为默认
+          </button>
+          <button
+            className="danger-button"
+            type="button"
+            onClick={() => selectedProfile && runAction('delete', () => deleteProfile(selectedProfile.id))}
+            disabled={!selectedProfile || selectedProfile.active || selectedProfile.isDefault || busy !== null}
+          >
+            <Trash2 size={16} />
+            删除服务商
+          </button>
         </div>
       </section>
 
-      <section className="management-grid">
-        <aside className="provider-panel">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">服务商</p>
-              <h2>切换目录</h2>
-              <p className="section-note">选择一个服务商进行切换或编辑。</p>
-            </div>
-            <span>{state.profiles.length}</span>
+    </div>
+  )
+}
+
+function ModelsWorkspace({
+  selectedProfile,
+  selectedModelCatalog,
+  busy,
+  selectModel,
+  runAction,
+}: {
+  selectedProfile: ProviderProfile | undefined
+  selectedModelCatalog: ModelCatalog | undefined
+  busy: string | null
+  selectModel: (model: string) => Promise<void>
+  runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
+}) {
+  const visibleModels = Array.from(
+    new Map((selectedModelCatalog?.models ?? []).map((model) => [model.id, model])).values()
+  )
+
+  return (
+    <div className="workspace-stack">
+      <section className="surface-panel model-toolbar">
+        <div>
+          <span>当前服务商</span>
+          <strong>{selectedProfile?.name ?? '未选择'}</strong>
+          <small>{selectedProfile?.baseUrl ?? '选择左侧服务商后刷新模型目录'}</small>
+        </div>
+        <button
+          className="primary-button"
+          type="button"
+          onClick={() => selectedProfile && runAction('refresh-models', () => refreshModels(selectedProfile.id))}
+          disabled={!selectedProfile || busy !== null}
+        >
+          <RefreshCcw size={16} />
+          刷新模型目录
+        </button>
+      </section>
+
+      <section className="surface-panel">
+        <div className="model-table">
+          <div className="model-table-head">
+            <span>模型</span>
+            <span>选择</span>
           </div>
-          <button className="primary-button add-provider-button" type="button" onClick={startNewProfile} disabled={busy !== null}>
-            <Plus size={16} />
-            新增服务商
-          </button>
-          <div className="provider-list">
-            {state.profiles.map((profile) => (
-              <button
-                key={profile.id}
-                className={`provider-card ${profile.id === selectedId ? 'selected' : ''} ${profile.active ? 'active' : ''}`}
-                type="button"
-                disabled={busy !== null}
-                onClick={() => {
-                  setSelectedId(profile.id)
-                  setDraft(toEditable(profile))
-                }}
-              >
-                <div className="provider-main">
-                  <div className="provider-name">
-                    <strong>{profile.name}</strong>
-                    {profile.isDefault && <Star size={14} />}
-                  </div>
-                  <span>{profile.baseUrl}</span>
-                </div>
-                <div className="provider-meta">
-                  <span className={profile.verified ? 'pill ok' : 'pill warning'}>
-                    {profile.verified ? '已验证' : '待检查'}
-                  </span>
-                  {profile.active && <span className="pill active">当前</span>}
-                </div>
-              </button>
-            ))}
-          </div>
-        </aside>
-
-        <div className="right-stack">
-          <section className="detail-panel">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">编辑</p>
-                <h2>{draft.id ? `编辑 ${draft.name}` : '新增服务商'}</h2>
-                <p className="section-note">保存后不会明文展示 API 密钥；留空表示沿用已保存密钥。</p>
-              </div>
-              <PanelRightOpen size={20} />
-            </div>
-
-            <div className="form-grid">
-              <label>
-                服务商名称
-                <input value={draft.name} onChange={(event) => updateDraft('name', event.target.value)} placeholder="示例 API" />
-              </label>
-              <label>
-                接口地址
-                <input value={draft.baseUrl} onChange={(event) => updateDraft('baseUrl', event.target.value)} placeholder="https://example.com/v1" />
-              </label>
-              <label>
-                模型
-                <input
-                  value={draft.model}
-                  onChange={(event) => updateDraft('model', event.target.value)}
-                  placeholder="先刷新模型目录，或手动输入 provider 支持的模型"
-                />
-              </label>
-              <label className="wide">
-                API 密钥
-                <div className="key-field">
-                  <KeyRound size={16} />
-                  <input
-                    value={draft.apiKey}
-                    onChange={(event) => updateDraft('apiKey', event.target.value)}
-                    placeholder={selectedProfile?.hasApiKey ? '已保存密钥。如需替换请重新输入。' : '粘贴 API 密钥'}
-                    type="password"
-                  />
-                </div>
-              </label>
-              <label className="wide">
-                备注
-                <textarea value={draft.note} onChange={(event) => updateDraft('note', event.target.value)} rows={3} />
-              </label>
-            </div>
-
-            <div className="model-catalog-panel">
-              <div className="model-catalog-heading">
-                <div>
-                  <strong>模型目录</strong>
-                  <span>
-                    {selectedModelCatalog
-                      ? selectedModelCatalog.statusDetail
-                      : '尚未刷新模型目录；不会自动迁移当前模型。'}
-                  </span>
-                </div>
+          {visibleModels.length ? (
+            visibleModels.map((model) => (
+              <div className={`model-row ${selectedProfile?.model === model.id ? 'selected' : ''}`} key={model.id}>
+                <span>
+                  <strong>{model.id}</strong>
+                  {model.aliases.length > 0 && <small>别名：{model.aliases.join(', ')}</small>}
+                </span>
                 <button
                   className="ghost-button compact-button"
                   type="button"
-                  onClick={() => selectedProfile && runAction('refresh-models', () => refreshModels(selectedProfile.id))}
-                  disabled={!selectedProfile || busy !== null}
+                  onClick={() => selectModel(model.id)}
+                  disabled={busy !== null || selectedProfile?.model === model.id}
                 >
-                  <RefreshCcw size={14} />
-                  刷新
+                  {selectedProfile?.model === model.id ? '当前模型' : '使用'}
                 </button>
               </div>
-              <div className="model-catalog-meta">
-                <span className={`pill ${selectedModelCatalog?.status === 'ok' ? 'ok' : 'warning'}`}>
-                  {selectedModelCatalog?.status ?? 'not_fetched'}
-                </span>
-                {selectedModelCatalog?.fetchedAt && <span>刷新时间：{selectedModelCatalog.fetchedAt}</span>}
-              </div>
-              {selectedModelCatalog?.models.length ? (
-                <div className="model-option-list">
-                  {selectedModelCatalog.models.map((model) => (
-                    <button
-                      className={`model-option ${draft.model === model.id ? 'selected' : ''}`}
-                      type="button"
-                      key={model.id}
-                      onClick={() => updateDraft('model', model.id)}
-                    >
-                      <span>
-                        <strong>{model.id}</strong>
-                        {model.aliases.length > 0 && <small>别名：{model.aliases.join(', ')}</small>}
-                      </span>
-                      {model.tags.slice(0, 2).map((tag) => (
-                        <span className="pill ok" key={tag}>{tag}</span>
-                      ))}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="empty-catalog-note">
-                  没有可展示的模型。可以先刷新目录，或手动填写 provider 已确认支持的模型名。
-                </p>
-              )}
+            ))
+          ) : (
+            <div className="empty-state">
+              <Boxes size={28} />
+              <strong>还没有可展示的模型</strong>
+              <span>{selectedModelCatalog?.statusDetail ?? '刷新后只展示服务商实际返回的模型列表。'}</span>
             </div>
-
-            <div className="action-row">
-              <button
-                className="primary-button"
-                type="button"
-                disabled={!draft.name || !draft.baseUrl || busy !== null}
-                onClick={saveCurrentProfile}
-              >
-                <Save size={16} />
-                保存配置
-              </button>
-              <button className="ghost-button" type="button" onClick={duplicateProfile} disabled={!selectedProfile}>
-                <Copy size={16} />
-                复制
-              </button>
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() => selectedProfile && runAction('default', () => setDefaultProfile(selectedProfile.id))}
-                disabled={!selectedProfile || selectedProfile.isDefault}
-              >
-                <Star size={16} />
-                设为默认
-              </button>
-              <button
-                className="danger-button"
-                type="button"
-                onClick={() => selectedProfile && runAction('delete', () => deleteProfile(selectedProfile.id))}
-                disabled={!selectedProfile || selectedProfile.active || selectedProfile.isDefault}
-              >
-                <Trash2 size={16} />
-                删除
-              </button>
-            </div>
-          </section>
-
-          <section className="diagnostics-grid">
-            <article className="check-panel">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">验证</p>
-                  <h2>配置安全</h2>
-                  <p className="section-note">点击“验证配置”会刷新当前服务商状态，并把结果写入时间线。</p>
-                </div>
-              </div>
-              <div className="check-list">
-                {displayChecks.map((check) => (
-                  <div className={`check-row ${getCheckVisual(check).className}`} key={check.id}>
-                    {getCheckVisual(check).icon}
-                    <div>
-                      <strong>{check.label}</strong>
-                      <span>{check.detail}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </article>
-
-            <article className="activity-panel">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">时间线</p>
-                  <h2>最近活动</h2>
-                </div>
-              </div>
-              <div className="activity-list">
-                {state.activity.slice(0, 4).map((item) => (
-                  <div className={`activity-item ${item.tone}`} key={item.id}>
-                    <time>{item.time}</time>
-                    <div>
-                      <strong>{item.title}</strong>
-                      <span>{item.detail}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </article>
-          </section>
-
-          <details className="developer-recovery">
-            <summary>高级恢复与启动选项</summary>
-            <div className="developer-recovery-body">
-              <div>
-                <p className="eyebrow">恢复</p>
-                <h2>备份</h2>
-                <p className="section-note">每次切换前会自动生成一个回滚点。这里面向排障和回滚，不作为普通用户的主流程。</p>
-              </div>
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() => runAction('restore-backup', () => restoreLatestBackup())}
-                disabled={busy !== null || state.backups.length === 0}
-              >
-                <ArchiveRestore size={16} />
-                恢复最近备份
-              </button>
-            </div>
-            <div className="advanced-setting-row">
-              <div>
-                <strong>开机自启动</strong>
-                <span>当前不作为主功能展示；需要 Tauri 原生层读写 Windows 启动项并通过安装包验证后再开放。</span>
-              </div>
-              <span className="pill warning">待原生验证</span>
-            </div>
-            <div className="advanced-setting-row">
-              <div>
-                <strong>旧版切换器</strong>
-                <span>
-                  {legacyActive
-                    ? `检测到旧版进程或 ${state.legacySwitcher.port} 端口仍在使用；最终切换前它继续作为 fallback。`
-                    : '未检测到旧版进程或端口占用；最终切换仍需新会话执行。'}
-                </span>
-              </div>
-              <span className={legacyActive ? 'pill warning' : 'pill ok'}>{legacyActive ? '交接前' : '可接管'}</span>
-            </div>
-            <div className="backup-list">
-              {state.backups.slice(0, 3).map((backup) => (
-                <div className="backup-row" key={backup.id}>
-                  <strong>{backup.label}</strong>
-                  <span>{backup.time} · {backup.files} 个文件</span>
-                </div>
-              ))}
-            </div>
-          </details>
+          )}
         </div>
       </section>
-    </main>
+
+    </div>
+  )
+}
+
+function SafetyWorkspace({
+  providerChecks,
+  configChecks,
+  safeMode,
+  selectedProfile,
+  busy,
+  hasUnsavedChanges,
+  runAction,
+}: {
+  providerChecks: ValidationCheck[]
+  configChecks: ValidationCheck[]
+  safeMode: boolean
+  selectedProfile: ProviderProfile | undefined
+  busy: string | null
+  hasUnsavedChanges: boolean
+  runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
+}) {
+  return (
+    <div className="workspace-stack">
+      <section className="surface-panel safety-summary">
+        <div>
+          <ShieldCheck size={22} />
+          <span>安全模式</span>
+          <strong>{safeMode ? '已开启' : '未开启'}</strong>
+        </div>
+        <div>
+          <KeyRound size={22} />
+          <span>本次检查</span>
+          <strong>已认证服务端探针</strong>
+        </div>
+        <button
+          className="primary-button safety-run-button"
+          type="button"
+          onClick={() => selectedProfile && runAction('verify', () => verifyProfile(selectedProfile.id))}
+          disabled={!selectedProfile || hasUnsavedChanges || busy !== null}
+        >
+          <ShieldCheck size={16} />
+          {hasUnsavedChanges ? '请先保存更改' : '运行真实检查'}
+        </button>
+      </section>
+      <section className="surface-panel">
+        <div className="check-section-heading">
+          <div>
+            <span>当前服务商</span>
+            <strong>{selectedProfile?.name ?? '未选择'}</strong>
+          </div>
+          <small>不依赖当前模型；模型仅在切换写入前必填。</small>
+        </div>
+        <div className="check-list">
+          {providerChecks.map((check) => {
+            const visual = getCheckVisual(check)
+            return (
+              <div className={`check-row ${visual.className}`} key={check.id}>
+                {visual.icon}
+                <div>
+                  <strong>{check.label}</strong>
+                  <span>{check.detail}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+      <section className="surface-panel compact-surface">
+        <div className="section-heading-row">
+          <div>
+            <span className="eyebrow">切换门禁</span>
+            <h3>Codex 配置状态</h3>
+          </div>
+          <span className="section-meta">真实检查不会写入此处</span>
+        </div>
+        <div className="check-list compact-check-list">
+          {configChecks.map((check) => {
+            const visual = getCheckVisual(check)
+            return (
+              <div className={`check-row ${visual.className}`} key={check.id}>
+                {visual.icon}
+                <div>
+                  <strong>{check.label}</strong>
+                  <span>{check.detail}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="path-grid verification-boundary">
+          <div>
+            <span>配置写入</span>
+            <strong>只有切换时才生成恢复点</strong>
+          </div>
+          <div>
+            <span>本次真实检查</span>
+            <strong>不依赖模型，不会修改 Codex 配置或凭据</strong>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function TimelineWorkspace({ state }: { state: AppState }) {
+  return (
+    <div className="workspace-stack">
+      <section className="surface-panel">
+        <div className="activity-list">
+          {state.activity.map((item) => (
+            <div className={`activity-item ${item.tone}`} key={item.id}>
+              <time>{item.time}</time>
+              <div>
+                <strong>{item.title}</strong>
+                <span>{item.detail}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
   )
 }
 

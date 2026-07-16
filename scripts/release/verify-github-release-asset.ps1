@@ -1,8 +1,8 @@
 param(
-    [string]$Version = "0.2.0-alpha",
+    [string]$Version = "0.3.0-alpha",
     [string]$Tag = "",
     [string]$Repository = "ga626/codex-provider-switcher",
-    [string]$OutputRoot = ".codex-provider-switcher\releases",
+    [string]$OutputRoot = "release-assets",
     [switch]$SkipBuild,
     [switch]$RemoteStructureOnly
 )
@@ -106,6 +106,15 @@ foreach ($assetName in $desktopAssetNames) {
     if ($assetNames -notcontains $assetName) {
         throw "GitHub Release is missing desktop asset: $assetName"
     }
+}
+$updaterAssetNames = @($assetNames | Where-Object {
+    $_ -eq "latest.json" -or $_ -like "*-setup.exe.sig"
+})
+if ($updaterAssetNames -notcontains "latest.json") {
+    throw "GitHub Release is missing signed updater manifest: latest.json"
+}
+if (-not ($updaterAssetNames | Where-Object { $_ -like "*-setup.exe.sig" })) {
+    throw "GitHub Release is missing Windows updater signature (*-setup.exe.sig)."
 }
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-provider-switcher-release-verify-" + [Guid]::NewGuid().ToString("N"))

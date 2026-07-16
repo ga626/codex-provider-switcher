@@ -91,8 +91,8 @@ try {
     $packageJsonPath = Join-Path $projectRoot "package.json"
     if (Test-Path -LiteralPath $packageJsonPath -PathType Leaf) {
         $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($packageJson.version -ne "0.2.0-alpha") {
-            Add-Failure "package.json version must match current alpha release: 0.2.0-alpha"
+        if ($packageJson.version -ne "0.3.0-alpha") {
+            Add-Failure "package.json version must match current alpha release: 0.3.0-alpha"
         }
     }
 
@@ -105,7 +105,7 @@ try {
     }
 
     $gitignore = Get-Content -LiteralPath (Join-Path $projectRoot ".gitignore") -Raw -Encoding UTF8
-    foreach ($ignored in @("AGENTS.md", ".agents/", ".codex/", ".codex-praetor/", "node_modules", "dist", "src-tauri/target", "logs/", "release/", "archive/", "project_status/", ".codex-provider-switcher/", "auth.json", "profiles.json")) {
+    foreach ($ignored in @("AGENTS.md", ".agents/", ".codex/", ".codex-praetor/", "node_modules", "dist", "src-tauri/target", "logs/", "release/", "release-assets/", "archive/", "project_status/", ".codex-provider-switcher/", "auth.json", "profiles.json")) {
         if ($gitignore -notlike "*$ignored*") {
             Add-Failure ".gitignore missing: $ignored"
         }

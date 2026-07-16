@@ -52,7 +52,7 @@ try {
 
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
   await page.locator('.app-shell').waitFor()
-  await page.getByText('本机 Web 后端').waitFor()
+  await page.getByRole('heading', { name: 'CodeX Provider Switcher' }).waitFor()
   await page.screenshot({ path: join(outputDir, 'local-web-backend.png'), fullPage: true })
 
   const seriousConsoleEvents = consoleEvents.filter((event) => !event.includes('Download the React DevTools'))

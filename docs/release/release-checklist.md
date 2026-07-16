@@ -9,7 +9,7 @@
 - [ ] `AGENTS.md`、`.agents/`、`.codex/`、`project_status/` 等本机开发/Agent 状态未进入 Git 跟踪。
 - [ ] `.github/pull_request_template.md` 已覆盖验证、安全和用户影响。
 - [ ] GitHub CI 包含 lint、build、Rust check、Rust tests、本地 Web 后端 build 和 smoke。
-- [ ] `.gitignore` 排除日志、构建产物、Release 输出、本机配置和密钥。
+- [ ] `.gitignore` 排除日志、构建产物、`release-assets/`、本机配置和密钥。
 - [ ] `git diff --check` 通过。
 - [ ] 敏感信息扫描无真实密钥。
 
@@ -82,6 +82,7 @@ npm run backend:smoke
 ```powershell
 npm run release:build -- -Apply
 npm run qa:install-release -- -Collect
+npm run qa:stable-install -- -ExplainOnly
 npm run release:verify-local
 ```
 
@@ -96,6 +97,7 @@ Release 包应包含：
 - README。
 - Release notes。
 - checksums。
+- `latest.json` 和 setup 对应的 `.sig` Tauri updater 资产。
 
 Release 包必须排除：
 
@@ -126,6 +128,8 @@ Release 包必须排除：
 - [ ] 关闭窗口后进程退出。
 - [ ] fallback zip 可解压并双击 `CodeXProviderSwitcher.cmd`。
 - [ ] fallback 浏览器打开本地 Web 控制台。
+- [ ] 稳定版安装到约定目录，升级不删除用户数据。
+- [ ] 卸载移除程序文件但保留 `%LOCALAPPDATA%\CodeX Provider Switcher`。
 - [ ] 当前 Codex 配置摘要脱敏显示。
 - [ ] provider 和模型状态能看懂。
 - [ ] 写入前能看到备份/恢复路径。
