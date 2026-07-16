@@ -91,8 +91,8 @@ try {
     $packageJsonPath = Join-Path $projectRoot "package.json"
     if (Test-Path -LiteralPath $packageJsonPath -PathType Leaf) {
         $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($packageJson.version -ne "0.3.0-alpha") {
-            Add-Failure "package.json version must match current alpha release: 0.3.0-alpha"
+        if ($packageJson.version -ne "0.3.1-alpha") {
+            Add-Failure "package.json version must match current alpha release: 0.3.1-alpha"
         }
     }
 

@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-这是 `0.3.0-alpha`：可稳定安装、可按 GitHub Release 更新的桌面 Alpha 基线：
+这是 `0.3.1-alpha`：可稳定安装、可按 GitHub Release 更新的桌面 Alpha 基线：
 
 - React/Vite 前端。
 - Tauri/Rust 桌面窗口、本地文件、profiles、backup、validation、restore 基础。
@@ -18,7 +18,7 @@
 - Playwright UI smoke flow。
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
 
-[下载 0.3.0-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.3.0-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
+[下载 0.3.1-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.3.1-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
 
 ## 开发验收方式
 

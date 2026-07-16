@@ -1,9 +1,10 @@
 [package]
 name = "codex-provider-switcher"
-version = "0.3.0-alpha"
+version = "0.3.1-alpha"
 description = "CodeX Provider Switcher for Codex Desktop"
 authors = ["OpenAI Codex"]
 edition = "2021"
+default-run = "codex-provider-switcher"
 
 [lib]
 name = "codex_switcher_tauri_lib"
