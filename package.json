@@ -24,8 +24,9 @@
     "verify:doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/doctor-codex-provider-switcher.ps1 -PublicRelease",
     "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/build-codex-provider-switcher-release.ps1",
     "release:verify-local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-local-release-package.ps1",
+    "release:assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/generate-installer-assets.ps1",
     "tauri:dev": "powershell -NoProfile -Command \"$env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL='development'; npx tauri dev\"",
-    "tauri:build": "tauri build"
+    "tauri:build": "npm run release:assets && tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

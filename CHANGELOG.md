@@ -4,6 +4,9 @@
 
 - Fixed the Tauri release entrypoint so the NSIS installer bundles the desktop GUI binary instead of the local Web backend binary.
 - Added a smoke guard for the Tauri CLI binary-selection syntax.
+- Hidden the Windows `tasklist.exe` probe so normal feature actions do not open a child console window.
+- Localized the NSIS installer to Simplified Chinese and added branded header/sidebar artwork.
+- Removed stale updater signatures before each release build.
 
 ## 0.3.1-alpha - 2026-07-16
 

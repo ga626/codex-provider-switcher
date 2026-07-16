@@ -8,6 +8,9 @@
 - Windows setup 现在安装并启动真正的桌面 GUI，不再把 `local_backend` 当作桌面入口。
 - 本地 Web 后端仍作为 fallback 单独构建，不会进入桌面安装器的主 exe。
 - 增加 smoke 检查，防止 `--bin` 再次被错误传入应用参数。
+- 修复桌面功能检查调用 `tasklist.exe` 时弹出黑色子窗口的问题。
+- NSIS 安装器固定使用简体中文，并加入 CodeX Provider Switcher 品牌页眉和侧栏视觉。
+- 发布构建会清理旧的 updater 签名残留，避免错误复用过期签名。
 
 ## 下载建议
 

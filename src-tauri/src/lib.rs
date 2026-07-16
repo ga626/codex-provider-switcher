@@ -646,9 +646,23 @@ fn legacy_port_in_use() -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_millis(160)).is_ok()
 }
 
+fn hidden_command(program: &str) -> Command {
+    let mut command = Command::new(program);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        // CREATE_NO_WINDOW keeps console utilities invisible when called by the GUI app.
+        command.creation_flags(0x08000000);
+    }
+
+    command
+}
+
 fn legacy_process_running() -> bool {
     if cfg!(target_os = "windows") {
-        if let Ok(output) = Command::new("tasklist")
+        if let Ok(output) = hidden_command("tasklist")
             .args(["/FI", "IMAGENAME eq CodeX-Switcher.exe", "/NH"])
             .output()
         {

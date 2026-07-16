@@ -273,6 +273,15 @@ if (-not $SkipDesktopBundle -and [string]::IsNullOrWhiteSpace($env:TAURI_SIGNING
     $loadedSigningKey = $true
 }
 
+if (-not $SkipDesktopBundle) {
+    $staleSignatures = @(
+        Get-ChildItem -LiteralPath $tauriBundleRoot -Recurse -File -Filter "*.sig" -ErrorAction SilentlyContinue
+    )
+    foreach ($staleSignature in $staleSignatures) {
+        Remove-Item -LiteralPath $staleSignature.FullName -Force
+    }
+}
+
 Push-Location $projectRoot
 try {
     npm run build
