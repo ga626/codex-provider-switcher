@@ -1,7 +1,7 @@
 use codex_switcher_tauri_lib::{
-    delete_profile_core, load_state_core, refresh_models_core, restore_latest_backup_core,
-    save_profile_core, set_default_profile_core, switch_profile_core, toggle_auto_start_core,
-    verify_profile_core, AppState, EditableProfile, SwitcherError,
+    check_for_update_core, delete_profile_core, load_state_core, refresh_models_core,
+    restore_latest_backup_core, save_profile_core, set_default_profile_core, switch_profile_core,
+    toggle_auto_start_core, verify_profile_core, AppState, EditableProfile, SwitcherError,
 };
 use serde_json::{json, Value};
 use std::{
@@ -235,6 +235,8 @@ fn handle_api(
     let result = match (method, path.split('?').next().unwrap_or(path)) {
         ("GET", "/api/health") => Ok(json!({ "ok": true, "runtimeMode": "local_web_backend" })),
         ("GET", "/api/state") => load_state_core().map(state_json),
+        ("GET", "/api/update/check") => check_for_update_core()
+            .and_then(|value| serde_json::to_value(value).map_err(SwitcherError::from)),
         ("POST", "/api/profiles/save") => {
             let profile = request_json(body)?
                 .get("profile")

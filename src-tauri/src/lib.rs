@@ -1,4 +1,5 @@
 use chrono::Local;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{
@@ -15,8 +16,13 @@ const APP_DIR_NAME: &str = "CodeX Provider Switcher";
 const PROFILES_FILE: &str = "profiles.json";
 const ACTIVITY_FILE: &str = "activity.json";
 const BACKUPS_DIR: &str = "backups";
+const CODEX_HOME_ENV: &str = "CODEX_PROVIDER_SWITCHER_CODEX_HOME";
+const APP_DATA_DIR_ENV: &str = "CODEX_PROVIDER_SWITCHER_APP_DATA_DIR";
 const LEGACY_PROFILE_ENV: &str = "CODEX_PROVIDER_SWITCHER_LEGACY_PROFILES";
 const LEGACY_SWITCHER_PORT: u16 = 47831;
+const RELEASES_API_ENV: &str = "CODEX_PROVIDER_SWITCHER_RELEASES_API";
+const RELEASES_API_URL: &str =
+    "https://api.github.com/repos/ga626/codex-provider-switcher/releases?per_page=20";
 
 #[derive(Debug, Error)]
 pub enum SwitcherError {
@@ -51,11 +57,16 @@ pub struct ProviderProfile {
     pub reasoning_effort: String,
     pub note: String,
     pub verified: bool,
+    pub verification_status: String,
     pub is_default: bool,
     pub active: bool,
     pub has_api_key: bool,
     pub last_switched_at: Option<String>,
     pub last_verified_at: Option<String>,
+    pub last_verification_detail: Option<String>,
+    pub last_verification_stage: Option<String>,
+    pub last_verification_http_status: Option<u16>,
+    pub last_verification_provider_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,6 +132,33 @@ pub struct BackupItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub current_version: String,
+    pub latest_version: String,
+    pub available: bool,
+    pub release_url: String,
+    pub download_url: Option<String>,
+    pub published_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    html_url: String,
+    draft: bool,
+    published_at: Option<String>,
+    #[serde(default)]
+    assets: Vec<GithubReleaseAsset>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LegacySwitcherStatus {
     pub profile_path: String,
     pub profile_exists: bool,
@@ -161,6 +199,8 @@ struct StoredProfile {
     model_reasoning_effort: String,
     #[serde(default)]
     verified: bool,
+    #[serde(default = "default_verification_status")]
+    verification_status: String,
     #[serde(default)]
     default: bool,
     #[serde(default)]
@@ -169,6 +209,24 @@ struct StoredProfile {
     last_switched_at: Option<String>,
     #[serde(default)]
     last_verified_at: Option<String>,
+    #[serde(default)]
+    last_verification_detail: Option<String>,
+    #[serde(default)]
+    last_verification_stage: Option<String>,
+    #[serde(default)]
+    last_verification_http_status: Option<u16>,
+    #[serde(default)]
+    last_verification_provider_code: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ProviderVerificationOutcome {
+    verified: bool,
+    status: String,
+    detail: String,
+    stage: String,
+    http_status: Option<u16>,
+    provider_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,6 +250,10 @@ fn default_version() -> String {
     "0.1".to_string()
 }
 
+fn default_verification_status() -> String {
+    "not_checked".to_string()
+}
+
 fn default_reasoning() -> String {
     "high".to_string()
 }
@@ -205,6 +267,9 @@ fn short_time() -> String {
 }
 
 fn codex_home() -> Result<PathBuf, SwitcherError> {
+    if let Some(path) = env::var_os(CODEX_HOME_ENV).filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(path));
+    }
     let home = dirs::home_dir().ok_or(SwitcherError::MissingHome)?;
     Ok(home.join(".codex"))
 }
@@ -218,6 +283,9 @@ fn auth_path() -> Result<PathBuf, SwitcherError> {
 }
 
 fn app_data_dir() -> Result<PathBuf, SwitcherError> {
+    if let Some(path) = env::var_os(APP_DATA_DIR_ENV).filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(path));
+    }
     let base = dirs::data_local_dir().ok_or(SwitcherError::MissingHome)?;
     Ok(base.join(APP_DIR_NAME))
 }
@@ -376,12 +444,17 @@ fn catalog_profiles(catalog: &StoredCatalog, current_id: &str) -> Vec<ProviderPr
                     model: profile.model,
                     reasoning_effort: profile.model_reasoning_effort,
                     note: profile.note,
-                    verified: profile.verified,
+                    verified: profile.verified && profile.verification_status == "verified",
+                    verification_status: profile.verification_status,
                     is_default: profile.default,
                     active: id == current_id,
                     has_api_key: !profile.api_key.trim().is_empty(),
                     last_switched_at: profile.last_switched_at,
                     last_verified_at: profile.last_verified_at,
+                    last_verification_detail: profile.last_verification_detail,
+                    last_verification_stage: profile.last_verification_stage,
+                    last_verification_http_status: profile.last_verification_http_status,
+                    last_verification_provider_code: profile.last_verification_provider_code,
                 })
         })
         .collect()
@@ -786,7 +859,8 @@ mod tests {
 
     #[test]
     fn parses_provider_array_model_list() {
-        let body = json!(["provider-fast-legacy", { "id": "vision-model" }, "", { "name": "ignored" }]);
+        let body =
+            json!(["provider-fast-legacy", { "id": "vision-model" }, "", { "name": "ignored" }]);
 
         let models = parse_provider_models(&body);
         let ids = models
@@ -920,6 +994,320 @@ fn fetch_provider_models(
     ))
 }
 
+fn verification_outcome(
+    verified: bool,
+    status: &str,
+    stage: &str,
+    detail: &str,
+    http_status: Option<u16>,
+    provider_code: Option<String>,
+) -> ProviderVerificationOutcome {
+    ProviderVerificationOutcome {
+        verified,
+        status: status.to_string(),
+        detail: detail.to_string(),
+        stage: stage.to_string(),
+        http_status,
+        provider_code,
+    }
+}
+
+fn provider_probe_endpoint(base_url: &str, probe_path: &str) -> Result<String, String> {
+    let trimmed = base_url.trim();
+    let mut url = reqwest::Url::parse(trimmed)
+        .map_err(|_| "接口地址不是有效的 http 或 https URL。".to_string())?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("接口地址必须以 http 或 https 开头。".to_string());
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err("接口地址不能包含查询参数或页面锚点。".to_string());
+    }
+    let base_path = url.path().trim_end_matches('/').to_string();
+    if base_path.ends_with("/responses") || base_path.ends_with("/models") {
+        return Err("接口地址应填写 API 基地址，不应包含 /responses 或 /models。".to_string());
+    }
+    if !url.path().ends_with('/') {
+        url.set_path(&format!("{}/", url.path()));
+    }
+    url.join(probe_path)
+        .map(|endpoint| endpoint.to_string())
+        .map_err(|_| "无法由接口地址构造服务商探针路径。".to_string())
+}
+
+fn uses_request_probe(profile: &StoredProfile) -> bool {
+    let identity = format!("{} {}", profile.name, profile.base_url).to_ascii_lowercase();
+    identity.contains("dasuapi") || identity.contains("dasu")
+}
+
+fn provider_error_code(error_body: &str) -> Option<String> {
+    let value = serde_json::from_str::<Value>(error_body).ok()?;
+    value
+        .get("error")
+        .and_then(|error| {
+            error
+                .get("code")
+                .or_else(|| error.get("type"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| value.get("code").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|code| !code.is_empty())
+        .map(ToString::to_string)
+}
+
+fn transport_failure_outcome(err: &reqwest::Error) -> ProviderVerificationOutcome {
+    if err.is_timeout() {
+        return verification_outcome(
+            false,
+            "timeout",
+            "transport",
+            "服务商响应超时，尚未确认可用性。",
+            None,
+            None,
+        );
+    }
+    if err.is_connect() {
+        return verification_outcome(
+            false,
+            "network_error",
+            "transport",
+            "无法建立连接；请检查 DNS、网络、TLS 或代理链路。",
+            None,
+            None,
+        );
+    }
+    verification_outcome(
+        false,
+        "transport_error",
+        "transport",
+        "服务商请求在传输过程中失败，尚未确认可用性。",
+        None,
+        None,
+    )
+}
+
+fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOutcome {
+    if profile.api_key.trim().is_empty() {
+        return verification_outcome(
+            false,
+            "missing_key",
+            "profile",
+            "缺少 API 密钥，无法发送真实服务商请求。",
+            None,
+            None,
+        );
+    }
+    let request_probe = uses_request_probe(profile);
+    if request_probe && profile.model.trim().is_empty() {
+        return verification_outcome(
+            false,
+            "invalid_profile",
+            "profile",
+            "该服务商的额度探针需要默认模型，无法确认实际请求额度。",
+            None,
+            None,
+        );
+    }
+    let probe_path = if request_probe { "responses" } else { "models" };
+    let endpoint = match provider_probe_endpoint(&profile.base_url, probe_path) {
+        Ok(endpoint) => endpoint,
+        Err(detail) => {
+            return verification_outcome(false, "invalid_profile", "profile", &detail, None, None)
+        }
+    };
+
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(25))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            return verification_outcome(
+                false,
+                "transport_error",
+                "transport",
+                &format!("创建验证连接失败：{err}"),
+                None,
+                None,
+            );
+        }
+    };
+    let request = if request_probe {
+        client
+            .post(endpoint)
+            .bearer_auth(profile.api_key.trim())
+            .json(&json!({
+                "model": profile.model.trim(),
+                "input": "Reply with OK.",
+                "max_output_tokens": 16,
+                "store": false,
+            }))
+    } else {
+        client.get(endpoint).bearer_auth(profile.api_key.trim())
+    };
+    let response = match request.send() {
+        Ok(response) => response,
+        Err(err) => return transport_failure_outcome(&err),
+    };
+
+    let status = response.status();
+    if status.is_success() {
+        return match response.json::<Value>() {
+            Ok(body)
+                if body.get("error").is_none() && (!request_probe || body.get("id").is_some()) =>
+            {
+                verification_outcome(
+                    true,
+                    "verified",
+                    "authenticated_server_probe",
+                    if request_probe {
+                        "已完成真实、已认证的服务请求；服务可用，当前额度足够完成请求。"
+                    } else {
+                        "已完成真实、已认证的服务端探针；服务可用。本次检查不依赖当前模型，也不会写入 Codex 配置。"
+                    },
+                    Some(status.as_u16()),
+                    None,
+                )
+            }
+            Ok(body) => provider_failure_outcome(Some(status.as_u16()), &body.to_string()),
+            Err(_) => verification_outcome(
+                false,
+                "protocol_incompatible",
+                "response_format",
+                "服务商探针没有返回兼容的 JSON 响应，未确认可用性。",
+                Some(status.as_u16()),
+                None,
+            ),
+        };
+    }
+
+    let error_body = response.text().unwrap_or_default();
+    provider_failure_outcome(Some(status.as_u16()), &error_body)
+}
+
+fn provider_failure_outcome(
+    http_status: Option<u16>,
+    error_body: &str,
+) -> ProviderVerificationOutcome {
+    let error_text = error_body.to_ascii_lowercase();
+    let provider_code = provider_error_code(error_body);
+    let has_billing_signal = ["insufficient", "quota", "balance", "credit", "余额", "额度"]
+        .iter()
+        .any(|signal| error_text.contains(signal));
+    let (status, stage, detail) = if has_billing_signal || http_status == Some(402) {
+        (
+            "billing_unavailable",
+            "billing",
+            "服务商余额、额度或配额不足，无法完成实际请求。",
+        )
+    } else {
+        match http_status {
+            Some(401 | 403) => (
+                "unauthorized",
+                "authentication",
+                "API 密钥无效、权限不足或服务商拒绝了该请求。",
+            ),
+            Some(404 | 405) => (
+                "endpoint_or_model_unavailable",
+                "endpoint",
+                "服务商探针接口不可用或被服务商拒绝。",
+            ),
+            Some(400 | 415 | 422) => (
+                "request_incompatible",
+                "request",
+                "服务商拒绝了认证探针请求。",
+            ),
+            Some(429) => (
+                "rate_limited",
+                "provider",
+                "服务商当前限流，尚未确认可用性。",
+            ),
+            Some(code) if code >= 500 => (
+                "service_error",
+                "provider",
+                "服务商发生服务端错误，尚未确认可用性。",
+            ),
+            None => (
+                "protocol_incompatible",
+                "response_format",
+                "服务商返回了错误响应，但响应形状不兼容。",
+            ),
+            _ => (
+                "provider_error",
+                "provider",
+                "服务商返回错误载荷，未确认可用性。",
+            ),
+        }
+    };
+    verification_outcome(false, status, stage, detail, http_status, provider_code)
+}
+
+fn apply_verification(profile: &mut StoredProfile, outcome: ProviderVerificationOutcome) {
+    profile.verified = outcome.verified;
+    profile.verification_status = outcome.status;
+    profile.last_verified_at = Some(now_label());
+    profile.last_verification_detail = Some(outcome.detail);
+    profile.last_verification_stage = Some(outcome.stage);
+    profile.last_verification_http_status = outcome.http_status;
+    profile.last_verification_provider_code = outcome.provider_code;
+}
+
+fn normalized_release_version(tag: &str) -> Option<Version> {
+    Version::parse(tag.trim().trim_start_matches(['v', 'V'])).ok()
+}
+
+pub fn check_for_update_core() -> Result<UpdateInfo, SwitcherError> {
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let current = Version::parse(&current_version)
+        .map_err(|err| SwitcherError::Message(format!("当前应用版本无效：{err}")))?;
+    let releases_url = env::var(RELEASES_API_ENV).unwrap_or_else(|_| RELEASES_API_URL.to_string());
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|err| SwitcherError::Message(format!("创建更新检查连接失败：{err}")))?;
+    let response = client
+        .get(releases_url)
+        .header("User-Agent", "CodeX-Provider-Switcher")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .map_err(|err| SwitcherError::Message(format!("无法连接更新服务：{err}")))?;
+    if !response.status().is_success() {
+        return Err(SwitcherError::Message(format!(
+            "更新服务返回 HTTP {}。",
+            response.status()
+        )));
+    }
+    let releases: Vec<GithubRelease> = response
+        .json()
+        .map_err(|err| SwitcherError::Message(format!("更新信息格式无效：{err}")))?;
+    let latest = releases
+        .into_iter()
+        .filter(|release| !release.draft)
+        .filter_map(|release| {
+            normalized_release_version(&release.tag_name).map(|version| (version, release))
+        })
+        .max_by(|(left, _), (right, _)| left.cmp(right))
+        .ok_or_else(|| SwitcherError::Message("更新服务没有可用版本。".to_string()))?;
+    let download_url = latest
+        .1
+        .assets
+        .iter()
+        .find(|asset| {
+            let name = asset.name.to_ascii_lowercase();
+            name.contains("windows-x64") && name.ends_with("-setup.exe")
+        })
+        .map(|asset| asset.browser_download_url.clone());
+
+    Ok(UpdateInfo {
+        current_version,
+        latest_version: latest.0.to_string(),
+        available: latest.0 > current,
+        release_url: latest.1.html_url,
+        download_url,
+        published_at: latest.1.published_at,
+    })
+}
+
 fn create_backup() -> Result<PathBuf, SwitcherError> {
     let label = format!("before-{}", Local::now().format("%Y%m%d-%H%M%S"));
     let dir = backups_dir()?.join(label);
@@ -1051,6 +1439,11 @@ fn load_state() -> Result<AppState, SwitcherError> {
     load_state_core()
 }
 
+#[tauri::command]
+fn check_for_update() -> Result<UpdateInfo, SwitcherError> {
+    check_for_update_core()
+}
+
 pub fn load_state_core() -> Result<AppState, SwitcherError> {
     app_state()
 }
@@ -1069,6 +1462,16 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
     };
     if id.is_empty() {
         return Err(SwitcherError::Message("服务商名称不能为空。".to_string()));
+    }
+    if profile.name.trim().is_empty() {
+        return Err(SwitcherError::Message("服务商名称不能为空。".to_string()));
+    }
+    if !profile.base_url.trim().starts_with("http://")
+        && !profile.base_url.trim().starts_with("https://")
+    {
+        return Err(SwitcherError::Message(
+            "接口地址必须以 http 或 https 开头。".to_string(),
+        ));
     }
     let existing = catalog.profiles.get(&id).cloned();
     let existing_profile = existing.and_then(|v| serde_json::from_value::<StoredProfile>(v).ok());
@@ -1090,6 +1493,7 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
             .map(|p| p.model_reasoning_effort.clone())
             .unwrap_or_else(default_reasoning),
         verified: false,
+        verification_status: default_verification_status(),
         default: existing_profile
             .as_ref()
             .map(|p| p.default)
@@ -1098,14 +1502,18 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
         last_switched_at: existing_profile
             .as_ref()
             .and_then(|p| p.last_switched_at.clone()),
-        last_verified_at: Some("编辑后尚未验证".to_string()),
+        last_verified_at: None,
+        last_verification_detail: Some("保存后尚未运行真实服务商检查。".to_string()),
+        last_verification_stage: Some("profile".to_string()),
+        last_verification_http_status: None,
+        last_verification_provider_code: None,
     };
     let display_name = stored.name.clone();
     catalog.profiles.insert(id, serde_json::to_value(stored)?);
     save_catalog(&catalog)?;
     app_state_with_activity(
         &format!("{display_name} 已保存"),
-        "服务商信息已更新；保存后不会明文显示 API 密钥。",
+        "服务商信息已更新；已清除旧验证，需要重新运行真实服务商检查。",
         "info",
     )
 }
@@ -1122,14 +1530,15 @@ pub fn delete_profile_core(profile_id: String) -> Result<AppState, SwitcherError
     if profile_id == current {
         return Err(SwitcherError::Message("当前服务商不能删除。".to_string()));
     }
-    let stored = catalog.profiles.get(&profile_id).cloned();
-    let mut display_name = profile_id.clone();
-    if let Some(value) = stored {
-        let profile = serde_json::from_value::<StoredProfile>(value)?;
-        display_name = profile.name.clone();
-        if profile.default {
-            return Err(SwitcherError::Message("默认服务商不能删除。".to_string()));
-        }
+    let stored = catalog
+        .profiles
+        .get(&profile_id)
+        .cloned()
+        .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
+    let profile = serde_json::from_value::<StoredProfile>(stored)?;
+    let display_name = profile.name.clone();
+    if profile.default {
+        return Err(SwitcherError::Message("默认服务商不能删除。".to_string()));
     }
     catalog.profiles.remove(&profile_id);
     save_catalog(&catalog)?;
@@ -1153,12 +1562,32 @@ pub fn switch_profile_core(profile_id: String) -> Result<AppState, SwitcherError
         .cloned()
         .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
     let mut profile: StoredProfile = serde_json::from_value(value)?;
-    if profile.api_key.trim().is_empty() {
-        return Err(SwitcherError::Message(
-            "该服务商缺少 API 密钥。".to_string(),
-        ));
-    }
     let display_name = profile.name.clone();
+    let verification = verify_provider_auth_probe(&profile);
+    if !verification.verified {
+        let detail = verification.detail.clone();
+        apply_verification(&mut profile, verification);
+        catalog
+            .profiles
+            .insert(profile_id, serde_json::to_value(profile)?);
+        save_catalog(&catalog)?;
+        push_activity(
+            "切换已阻止",
+            &format!("{display_name} 未通过实时服务商验证：{detail}"),
+            "warning",
+        )?;
+        return Err(SwitcherError::Message(format!("切换已阻止：{detail}")));
+    }
+    apply_verification(&mut profile, verification);
+    if profile.model.trim().is_empty() {
+        let detail = "缺少 Codex 使用的模型名称；服务商已验证，但不能写入空模型。";
+        catalog
+            .profiles
+            .insert(profile_id, serde_json::to_value(profile)?);
+        save_catalog(&catalog)?;
+        push_activity("切换已阻止", detail, "warning")?;
+        return Err(SwitcherError::Message(format!("切换已阻止：{detail}")));
+    }
     switch_config(&profile)?;
     profile.last_switched_at = Some(now_label());
     catalog
@@ -1185,18 +1614,11 @@ pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError
         .cloned()
         .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
     let mut profile: StoredProfile = serde_json::from_value(value)?;
-    let config = read_config().unwrap_or_default();
-    let checks = validation_checks(&config);
-    let required_ok = checks
-        .iter()
-        .all(|check| check.ok || check.severity != "required");
-    let profile_ready = !profile.api_key.trim().is_empty()
-        && !profile.model.trim().is_empty()
-        && profile.base_url.trim().starts_with("http");
-    profile.verified = required_ok && profile_ready;
-    profile.last_verified_at = Some(now_label());
     let display_name = profile.name.clone();
-    let verified = profile.verified;
+    let verification = verify_provider_auth_probe(&profile);
+    let verified = verification.verified;
+    let detail = verification.detail.clone();
+    apply_verification(&mut profile, verification);
     catalog
         .profiles
         .insert(profile_id, serde_json::to_value(profile)?);
@@ -1204,13 +1626,13 @@ pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError
     if verified {
         app_state_with_activity(
             "验证完成",
-            &format!("{display_name} 的本地配置和服务商必填字段已通过；未执行远端 API 调用。"),
+            &format!("{display_name} 已通过真实、已认证的服务端探针。"),
             "success",
         )
     } else {
         app_state_with_activity(
             "验证需要处理",
-            &format!("{display_name} 缺少 API 密钥、模型、有效接口地址，或当前 Codex 配置仍有红色阻断项。"),
+            &format!("{display_name} 未通过真实服务商验证：{detail}"),
             "warning",
         )
     }
@@ -1253,12 +1675,14 @@ fn set_default_profile(profile_id: String) -> Result<AppState, SwitcherError> {
 
 pub fn set_default_profile_core(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
-    let mut display_name = profile_id.clone();
+    let target = catalog
+        .profiles
+        .get(&profile_id)
+        .cloned()
+        .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
+    let display_name = serde_json::from_value::<StoredProfile>(target)?.name;
     for (id, value) in catalog.profiles.clone() {
         let mut profile: StoredProfile = serde_json::from_value(value)?;
-        if id == profile_id {
-            display_name = profile.name.clone();
-        }
         profile.default = id == profile_id;
         catalog.profiles.insert(id, serde_json::to_value(profile)?);
     }
@@ -1321,8 +1745,11 @@ pub fn restore_latest_backup_core() -> Result<AppState, SwitcherError> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             load_state,
+            check_for_update,
             save_profile,
             delete_profile,
             switch_profile,

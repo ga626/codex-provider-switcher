@@ -91,13 +91,15 @@ npm run qa:install-release -- -Collect
 
 ## Release 资产
 
-桌面 GUI 版本优先发布桌面安装资产，同时保留 fallback zip：
+桌面 GUI 版本优先发布桌面安装资产和签名 updater 资产，同时保留 fallback zip：
 
 ```text
 CodeXProviderSwitcher-windows-x64-<version>-setup.exe
 CodeXProviderSwitcher-windows-x64-<version>-setup.exe.sha256
 CodeXProviderSwitcher-windows-x64-<version>.zip
 CodeXProviderSwitcher-windows-x64-<version>.zip.sha256
+latest.json
+CodeXProviderSwitcher-windows-x64-<version>-setup.exe.sig
 ```
 
 fallback zip 应包含 `CodeXProviderSwitcher.cmd`、`CodeXProviderSwitcher.ps1`、`bin/local_backend.exe`、`dist/` 前端静态资源、必要用户文档、发布说明和版本信息。不要包含源码树、开发脚本、`AGENTS.md`、`.agents/`、`.codex/`、`project_status/`、`logs/`、`release/`、`archive/`、`node_modules/`、`src-tauri/target/`、真实 profiles、auth、config 或备份。
@@ -116,6 +118,7 @@ fallback zip 应包含 `CodeXProviderSwitcher.cmd`、`CodeXProviderSwitcher.ps1`
 8. 下载 fallback zip，解压到干净目录。
 9. 双击 fallback 启动入口。
 10. 确认本地 Web 控制台、端口、后端、UI 和文档一致。
+11. 在已安装程序中检查更新，确认新版本下载、签名校验、重启后版本变化，且 `%LOCALAPPDATA%\CodeX Provider Switcher` 数据仍在。
 
 只有完成这条路径，才能说产品已交付。
 

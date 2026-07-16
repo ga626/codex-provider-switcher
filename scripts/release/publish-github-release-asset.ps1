@@ -1,8 +1,8 @@
 param(
-    [string]$Version = "0.2.0-alpha",
+    [string]$Version = "0.3.0-alpha",
     [string]$Tag = "",
     [string]$Repository = "ga626/codex-provider-switcher",
-    [string]$OutputRoot = ".codex-provider-switcher\releases",
+    [string]$OutputRoot = "release-assets",
     [switch]$Apply
 )
 
@@ -63,7 +63,7 @@ if ($head -ne $originMain) {
 
 if (-not $Apply) {
     Write-Host ""
-    Write-Host "Dry run only. Re-run with -Apply after the user confirms replacing GitHub Release assets."
+    Write-Host "Dry run only. Re-run with -Apply after the user confirms publishing a new immutable Release."
     exit 0
 }
 
@@ -75,7 +75,15 @@ if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf)) { throw "Desktop se
 if (-not (Test-Path -LiteralPath $setupShaPath -PathType Leaf)) { throw "Desktop setup SHA256 missing after build: $setupShaPath" }
 if (-not (Test-Path -LiteralPath $notesPath -PathType Leaf)) { throw "Release notes missing: $notesPath" }
 
-& gh release upload $Tag $setupPath $setupShaPath $zipPath $shaPath --repo $Repository --clobber
+& gh release view $Tag --repo $Repository *> $null
+if ($LASTEXITCODE -ne 0) {
+    throw "GitHub Release $Tag does not exist. Create the new Release first; this script never creates or overwrites tags."
+}
+$releaseAssets = @($setupPath, $setupShaPath, $zipPath, $shaPath)
+$releaseAssets += @(Get-ChildItem -LiteralPath $outputRootPath -File -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -eq "latest.json" -or $_.Name -like "*-setup.exe.sig"
+} | ForEach-Object { $_.FullName })
+& gh release upload $Tag @releaseAssets --repo $Repository
 if ($LASTEXITCODE -ne 0) { throw "Failed to upload GitHub Release assets." }
 & gh release edit $Tag --repo $Repository --notes-file $notesPath
 if ($LASTEXITCODE -ne 0) { throw "Failed to update GitHub Release notes." }

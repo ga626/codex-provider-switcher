@@ -1,6 +1,6 @@
 param(
-    [string]$Version = "0.2.0-alpha",
-    [string]$OutputRoot = ".codex-provider-switcher\releases",
+    [string]$Version = "0.3.0-alpha",
+    [string]$OutputRoot = "release-assets",
     [switch]$SkipDesktopBundle,
     [switch]$Apply
 )
@@ -22,6 +22,7 @@ $desktopSetupPath = Join-Path $outputRootPath $desktopSetupName
 $backendExe = Join-Path $projectRoot "src-tauri\target\release\local_backend.exe"
 $distRoot = Join-Path $projectRoot "dist"
 $tauriBundleRoot = Join-Path $projectRoot "src-tauri\target\release\bundle"
+$updaterManifestPath = Join-Path $outputRootPath "latest.json"
 
 function Assert-UnderProject {
     param([string]$Path)
@@ -218,6 +219,7 @@ Write-Host "Stage:   $stagePath"
 Write-Host "Zip:     $zipPath"
 Write-Host "SHA256:  $sha256Path"
 Write-Host "Setup:   $desktopSetupPath"
+Write-Host "Updater: $updaterManifestPath"
 Write-Host "Mode:    $(if ($Apply) { 'apply' } else { 'dry-run' })"
 Write-Host "Package: desktop setup + launcher/local_backend fallback zip + public docs"
 
@@ -244,6 +246,16 @@ if (-not $Apply) {
     exit 0
 }
 
+$loadedSigningKey = $false
+if (-not $SkipDesktopBundle -and [string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+    $signingKeyPath = $env:TAURI_SIGNING_PRIVATE_KEY_PATH
+    if ([string]::IsNullOrWhiteSpace($signingKeyPath) -or -not (Test-Path -LiteralPath $signingKeyPath -PathType Leaf)) {
+        throw "Signed desktop Release requires TAURI_SIGNING_PRIVATE_KEY or TAURI_SIGNING_PRIVATE_KEY_PATH."
+    }
+    $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath $signingKeyPath -Raw -Encoding UTF8
+    $loadedSigningKey = $true
+}
+
 Push-Location $projectRoot
 try {
     npm run build
@@ -262,6 +274,9 @@ try {
     }
 } finally {
     Pop-Location
+    if ($loadedSigningKey) {
+        Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
+    }
 }
 
 if (-not (Test-Path -LiteralPath (Join-Path $distRoot "index.html") -PathType Leaf)) {
@@ -290,6 +305,12 @@ foreach ($assetPath in @($desktopSetupPath, "$desktopSetupPath.sha256")) {
         Remove-Item -LiteralPath $assetPath -Force
     }
 }
+if (Test-Path -LiteralPath $updaterManifestPath) {
+    Remove-Item -LiteralPath $updaterManifestPath -Force
+}
+Get-ChildItem -LiteralPath $outputRootPath -File -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like "*.nsis.zip" -or $_.Name -like "*.nsis.zip.sig" -or $_.Name -like "*.sig" } |
+    Remove-Item -Force
 
 New-Item -ItemType Directory -Path $stagePath -Force | Out-Null
 Copy-FileToPackage -Source (Join-Path $projectRoot "CodeXProviderSwitcher.cmd") -DestinationRelativePath "CodeXProviderSwitcher.cmd"
@@ -325,4 +346,32 @@ if (-not $SkipDesktopBundle) {
     $setupHash = Write-Sha256File -Path $desktopSetupPath
     Write-Host "[PASS] Desktop setup copied: $desktopSetupPath"
     Write-Host "[PASS] Desktop setup SHA256: $setupHash"
+
+    $signatureSource = Find-TauriBundleAsset -Pattern "*setup.exe.sig" -Label "signed Windows updater signature"
+    $signaturePath = "$desktopSetupPath.sig"
+    Copy-Item -LiteralPath $signatureSource -Destination $signaturePath -Force
+    $signature = (Get-Content -LiteralPath $signatureSource -Raw -Encoding UTF8).Trim()
+    $releaseNotes = (Get-Content -LiteralPath (Join-Path $projectRoot "docs\release\release-notes-$Version.md") -Raw -Encoding UTF8).Trim()
+    $manifestJson = [ordered]@{
+        version = $Version
+        notes = $releaseNotes
+        pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        platforms = [ordered]@{
+            "windows-x86_64" = [ordered]@{
+                signature = $signature
+                url = "https://github.com/ga626/codex-provider-switcher/releases/download/v$Version/$([System.IO.Path]::GetFileName($desktopSetupPath))"
+            }
+        }
+    } | ConvertTo-Json -Depth 6
+    [System.IO.File]::WriteAllText($updaterManifestPath, $manifestJson, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "[PASS] Signed updater manifest generated: $updaterManifestPath"
+
+    $updaterAssets = @(
+        Get-ChildItem -LiteralPath $tauriBundleRoot -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "*.sig" }
+    )
+    if ($updaterAssets.Count -eq 0) {
+        throw "Signed updater artifact missing. Configure TAURI_SIGNING_PRIVATE_KEY_PATH before building a Release."
+    }
+    Write-Host "[PASS] Signed updater signature copied: $signaturePath"
 }

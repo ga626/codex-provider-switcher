@@ -51,7 +51,7 @@ jobs:
         run: npm run backend:smoke
 
       - name: Build release package
-        run: npm run release:build -- -Apply
+        run: npm run release:build -- -Apply -SkipDesktopBundle
 
       - name: Verify release package
         run: npm run release:verify-local
@@ -59,3 +59,6 @@ jobs:
       - name: Diff whitespace check
         shell: pwsh
         run: git diff --check
+
+      - name: Stable install QA boundary
+        run: npm run qa:stable-install -- -ExplainOnly

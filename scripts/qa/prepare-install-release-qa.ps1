@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 if (-not $ReleaseRoot) {
-    $ReleaseRoot = Join-Path $projectRoot "release"
+    $ReleaseRoot = Join-Path $projectRoot "release-assets"
 }
 else {
     if ([System.IO.Path]::IsPathRooted($ReleaseRoot)) {

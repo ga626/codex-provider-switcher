@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Promoted the next alpha line to `0.2.0-alpha` for the lightweight desktop GUI baseline.
+- Promoted the next alpha line to `0.3.0-alpha` for the stable install and release-governance baseline.
+- Fixed local release assets under `release-assets/` and removed release upload overwrite behavior.
+- Added the signed Tauri updater integration boundary; release signing remains CI-secret gated.
+- Documented the three-state workflow: development desktop, local release candidate, and stable installed release.
 - Removed default Tauri tray/autostart wiring so the app opens as one normal window and exits on close.
 - Added `tauri:desktop-boundary:smoke` to guard against accidental tray/autostart/mock regressions.
 - Extended release scripts to build and publish a desktop setup asset alongside the fallback Web zip.

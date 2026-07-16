@@ -58,7 +58,7 @@ try {
   await waitForStaticPreview()
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 } })
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
-  await page.getByText('真实本地后端不可用').waitFor()
+  await page.getByText('连接服务未启动').waitFor()
   await page.screenshot({ path: join(outputDir, 'runtime-boundary.png'), fullPage: true })
 
   const providerCards = await page.locator('.provider-card').count()
