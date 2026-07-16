@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Fixed the Tauri release entrypoint so the NSIS installer bundles the desktop GUI binary instead of the local Web backend binary.
+- Added a smoke guard for the Tauri CLI binary-selection syntax.
+
+## 0.3.1-alpha - 2026-07-16
+
+- Hotfix release: the Windows setup now starts the Tauri desktop GUI.
+- The local Web backend remains a separate fallback binary and is not used as the installed desktop entrypoint.
+
+## 0.3.0-alpha - 2026-07-16
+
 - Promoted the next alpha line to `0.3.0-alpha` for the stable install and release-governance baseline.
 - Fixed local release assets under `release-assets/` and removed release upload overwrite behavior.
 - Added the signed Tauri updater integration boundary; release signing remains CI-secret gated.

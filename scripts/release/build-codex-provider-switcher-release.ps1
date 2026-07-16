@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.3.0-alpha",
+    [string]$Version = "0.3.1-alpha",
     [string]$OutputRoot = "release-assets",
     [switch]$SkipDesktopBundle,
     [switch]$Apply
@@ -156,6 +156,23 @@ function Find-TauriBundleAsset {
         throw "Tauri bundle output missing: $Label ($Pattern)"
     }
     return $matches[0].FullName
+}
+
+function Assert-WindowsGuiExecutable {
+    param([string]$Path, [string]$Label)
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 0x100 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) {
+        throw "$Label is not a Windows PE executable: $Path"
+    }
+    $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+    $subsystemOffset = $peOffset + 24 + 68
+    if ($subsystemOffset -ge $bytes.Length) {
+        throw "$Label has an invalid PE header: $Path"
+    }
+    $subsystem = [BitConverter]::ToUInt16($bytes, $subsystemOffset)
+    if ($subsystem -ne 2) {
+        throw "$Label is a console executable (PE subsystem $subsystem), expected Windows GUI (2): $Path"
+    }
 }
 
 function Assert-PublicReleaseTree {
@@ -342,6 +359,7 @@ Write-Host "[PASS] SHA256: $hash"
 
 if (-not $SkipDesktopBundle) {
     $setupSource = Find-TauriBundleAsset -Pattern "*setup*.exe" -Label "NSIS setup exe"
+    Assert-WindowsGuiExecutable -Path (Join-Path $projectRoot "src-tauri\target\release\codex-provider-switcher.exe") -Label "Tauri desktop binary"
     Copy-Item -LiteralPath $setupSource -Destination $desktopSetupPath -Force
     $setupHash = Write-Sha256File -Path $desktopSetupPath
     Write-Host "[PASS] Desktop setup copied: $desktopSetupPath"

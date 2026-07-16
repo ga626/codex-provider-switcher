@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.3.0-alpha",
+    [string]$Version = "0.3.1-alpha",
     [string]$Tag = "",
     [string]$Repository = "ga626/codex-provider-switcher",
     [string]$OutputRoot = "release-assets",

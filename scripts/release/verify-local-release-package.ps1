@@ -1,5 +1,5 @@
 param(
-    [string]$ZipPath = "release-assets\CodeXProviderSwitcher-windows-x64-0.3.0-alpha.zip",
+    [string]$ZipPath = "release-assets\CodeXProviderSwitcher-windows-x64-0.3.1-alpha.zip",
     [string]$WorkRoot = ".codex-provider-switcher\release-verification",
     [int]$Port = 47841
 )
