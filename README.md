@@ -13,6 +13,7 @@
 - Provider 模型目录缓存和只读 `/models` 刷新入口。
 - Windows 桌面安装资产：setup exe。
 - Tauri 签名更新通道：正式 Release 生成 `latest.json`、签名 setup 更新包和 `.sig` 文件；没有发布私钥时不会生成可冒充正式版的更新资产。
+- 正式发布由 GitHub Actions 在推送新 `v*` 标签后完成；用户不需要密钥或口令。Alpha 版本仍使用新版本号和新 tag，但 GitHub Release 必须保持 `Latest`，以便自动更新地址可用。
 - fallback alpha zip：包含 `CodeXProviderSwitcher.cmd`、静默本地后端 `local_backend.exe` 和 `dist/` 前端资源。
 - 浏览器 UI-only mock adapter，仅用于 `preview:start` 这种显式开发预览；Release 包和真实本地后端入口不会静默回落到假数据。
 - Playwright UI smoke flow。

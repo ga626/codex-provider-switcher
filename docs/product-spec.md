@@ -189,6 +189,7 @@ Release 包不得包含：
 - 本机标准稳定安装 QA 目录为 `D:\Software\CodeX Provider Switcher`，公开安装器仍保持 `currentUser` 和 NSIS 可选路径，不把本机路径编译为产品硬编码。
 - 程序文件与用户可变数据分离。profiles、备份、活动记录和更新缓存位于 `%LOCALAPPDATA%\CodeX Provider Switcher`。
 - 稳定版只从 GitHub Release 的签名 `latest.json` 检查更新；更新下载、签名校验、退出后替换和重启由 Tauri updater 处理。
+- updater endpoint 使用 GitHub `/releases/latest/download/latest.json`，因此公开发布的 Release 必须标记为 `Latest`，不能标记为 `Pre-release`；版本标签仍可使用 `-alpha` 后缀。
 - 发布资产必须使用新版本和新 tag；禁止用旧 tag 或 `--clobber` 覆盖已发布资产。
 
 更新签名职责边界：
@@ -196,6 +197,7 @@ Release 包不得包含：
 - 最终用户检查更新、下载更新和安装更新时不需要密钥或口令；应用只内置公钥验证更新包。
 - 日常开发、PR 验证和本地运行不依赖 Tauri updater 私钥。
 - 正式 Release 由 CI 使用 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Secrets 生成签名资产。
+- `.github/workflows/release.yml` 只响应新 `v*` 标签，并校验标签与三份版本元数据一致；旧 tag 和旧 Release 不得覆盖。
 - 密钥对只在建立发布信任根时生成一次并复用；丢失或轮换时必须记录旧版本迁移和一次性手动升级路径。
 
 ## 已知 alpha 缺口

@@ -11,6 +11,8 @@
 - 修复桌面功能检查调用 `tasklist.exe` 时弹出黑色子窗口的问题。
 - NSIS 安装器固定使用简体中文，并加入 CodeX Provider Switcher 品牌页眉和侧栏视觉。
 - 发布构建会清理旧的 updater 签名残留，避免错误复用过期签名。
+- 正式发布改为由 GitHub Actions 使用受保护的签名 Secrets 完成，普通开发、PR 和用户安装不需要私钥或口令。
+- 该版本使用新的 updater 公钥；GitHub Release 必须标记为 `Latest`，以保证应用内检查更新地址可访问。
 
 ## 下载建议
 
@@ -28,4 +30,4 @@ latest.json
 CodeXProviderSwitcher-windows-x64-0.3.1-alpha-setup.exe.sig
 ```
 
-旧的 `v0.3.0-alpha` 安装包存在入口错误，不应继续安装或作为稳定版使用；本版本使用新 tag 发布，不覆盖旧 Release。
+旧的 `v0.3.0-alpha` 安装包存在入口错误且内置旧 updater 公钥；本版本使用新 tag 发布，不覆盖旧 Release。已经安装 `v0.3.0-alpha` 的用户需要先手动安装本版本一次，之后才能使用自动更新。

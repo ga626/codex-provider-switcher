@@ -34,7 +34,11 @@ TAURI_SIGNING_PRIVATE_KEY
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 ```
 
-密钥对只在首次建立发布信任根时生成一次，后续 Release 复用同一私钥。不能因为某次本地构建失败就重新生成密钥；如果私钥或口令丢失，必须先制定密钥轮换和一次性手动升级计划，再更新 `tauri.conf.json` 中的公钥。已经安装旧公钥的版本不能直接验证新公钥签名的更新。
+正式发布通过 `.github/workflows/release.yml` 完成。它只响应已经推送到远端的 `v*` 标签，先校验标签、`package.json`、`tauri.conf.json` 和 Cargo 版本一致，再由 GitHub Actions 生成签名资产并创建新的不可变 Release。workflow 会把该 Release 标记为 GitHub `Latest`，因为 updater 使用 `/releases/latest/download/latest.json`；标签可以继续使用 `0.3.1-alpha` 这样的版本号，但不能把 GitHub Release 标记为 `Pre-release`，否则该下载地址会返回 `404`。
+
+首次启用或轮换密钥时，维护者只需要在仓库 Settings > Secrets and variables > Actions 中确认上述两个 Secrets 存在。后续日常开发、PR、开发版和本地未签名候选包都不读取私钥；只有推送新版本标签时才由 CI 使用它们。旧版本如果内置了旧公钥，不能直接验证轮换后的新公钥，因此密钥轮换必须伴随一次手动安装迁移，并在发布说明中写明。
+
+密钥对只在首次建立发布信任根时生成一次，后续 Release 复用同一私钥。不能因为某次本地构建失败就重新生成密钥；如果私钥或口令丢失，必须先制定密钥轮换和一次性手动升级计划，再更新 `tauri.conf.json` 中的公钥。已经安装旧公钥的版本不能直接验证新公钥签名的更新。本项目的 `v0.3.0-alpha` 使用旧公钥且已有 Release 资产；切换到新公钥后，`v0.3.0-alpha` 用户必须先手动安装 `v0.3.1-alpha`，之后才能使用自动更新。
 
 Tauri updater 签名只保证更新包的来源和完整性，不等同于 Windows Authenticode/MSIX 代码签名，也不是用户运行软件所需的登录凭据。
 
