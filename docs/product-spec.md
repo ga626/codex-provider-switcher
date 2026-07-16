@@ -191,6 +191,13 @@ Release 包不得包含：
 - 稳定版只从 GitHub Release 的签名 `latest.json` 检查更新；更新下载、签名校验、退出后替换和重启由 Tauri updater 处理。
 - 发布资产必须使用新版本和新 tag；禁止用旧 tag 或 `--clobber` 覆盖已发布资产。
 
+更新签名职责边界：
+
+- 最终用户检查更新、下载更新和安装更新时不需要密钥或口令；应用只内置公钥验证更新包。
+- 日常开发、PR 验证和本地运行不依赖 Tauri updater 私钥。
+- 正式 Release 由 CI 使用 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Secrets 生成签名资产。
+- 密钥对只在建立发布信任根时生成一次并复用；丢失或轮换时必须记录旧版本迁移和一次性手动升级路径。
+
 ## 已知 alpha 缺口
 
 - 当前交付开始提供桌面安装资产，但仍是 alpha。
