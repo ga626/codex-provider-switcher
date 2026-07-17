@@ -27,7 +27,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRFQkJBNzUwOUU3NEU0MQpSV1JCVHVjSmRicnJCTmNZUHdscDM4RElzdTJTYXpVVXI3NlNOTDc3cXJXRHhtSFMwb2s2dzRLYQo=",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2NTlFMjg3RTM4QkYwQTEKUldTaDhJdmpoK0paOW9xZWZyKzc5eWxiVW1HWkRQbG5ab1orbDdFTVhvUXI3bW9ZWEExNmIyTngK",
       "endpoints": [
         "https://github.com/ga626/codex-provider-switcher/releases/latest/download/latest.json"
       ]

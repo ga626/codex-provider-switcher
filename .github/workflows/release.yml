@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Build and publish Windows Release
+    runs-on: windows-latest
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate release identity and signing configuration
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          $package = Get-Content -Raw -LiteralPath 'package.json' | ConvertFrom-Json
+          $tauri = Get-Content -Raw -LiteralPath 'src-tauri/tauri.conf.json' | ConvertFrom-Json
+          $cargoText = Get-Content -Raw -LiteralPath 'src-tauri/Cargo.toml'
+          if ($package.version -ne $version) { throw "package.json version does not match tag: $($package.version) != $version" }
+          if ($tauri.version -ne $version) { throw "tauri.conf.json version does not match tag: $($tauri.version) != $version" }
+          if ($cargoText -notmatch ('(?m)^version\s*=\s*"' + [regex]::Escape($version) + '"')) { throw "Cargo version does not match tag: $version" }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'TAURI_SIGNING_PRIVATE_KEY secret is missing.' }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) { throw 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is missing.' }
+
+      - name: Build signed release assets
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          npm run release:build -- -Version $version -Apply
+
+      - name: Create immutable GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          $notes = "docs/release/release-notes-$version.md"
+          if (-not (Test-Path -LiteralPath $notes -PathType Leaf)) { throw "Release notes missing: $notes" }
+          $releaseName = "CodeXProviderSwitcher-windows-x64-$version"
+          $assetNames = @(
+            "$releaseName.zip",
+            "$releaseName.zip.sha256",
+            "$releaseName-setup.exe",
+            "$releaseName-setup.exe.sha256",
+            "$releaseName-setup.exe.sig",
+            'latest.json'
+          )
+          $assetPaths = foreach ($assetName in $assetNames) {
+            $path = Join-Path 'release-assets' $assetName
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Release asset missing: $path" }
+            $path
+          }
+          & gh release create $env:RELEASE_TAG @assetPaths --repo 'ga626/codex-provider-switcher' --title "CodeX Provider Switcher $version" --notes-file $notes --verify-tag --latest
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed.' }

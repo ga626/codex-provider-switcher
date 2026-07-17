@@ -88,6 +88,14 @@ npm run release:verify-local
 
 ## 4. Release 包层
 
+发布自动化边界：
+
+- `.github/workflows/release.yml` 只响应已推送的 `v*` 标签，不在普通 push 或 PR 中使用签名私钥。
+- 标签、`package.json`、`src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 的版本必须一致。
+- GitHub Release 必须创建为 `Latest`，不能标记为 `Pre-release`，否则 `/releases/latest/download/latest.json` 不可用。
+- 私钥和口令只存在于 GitHub Actions Secrets；仓库只提交 updater 公钥。
+- 新版本和新 tag 不覆盖旧 Release 或旧资产。
+
 Release 包应包含：
 
 - 桌面 setup exe。
