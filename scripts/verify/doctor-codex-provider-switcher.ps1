@@ -69,6 +69,7 @@ try {
         "scripts\release\verify-github-release-asset.ps1",
         "scripts\release\publish-github-release-asset.ps1",
         "scripts\release\publish-github-release-from-artifact.ps1",
+        "scripts\qa\prepare-updater-release-qa.ps1",
         "scripts\verify\doctor-codex-provider-switcher.ps1",
         "setup.cmd",
         "setup.ps1",

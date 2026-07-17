@@ -85,6 +85,7 @@ npm run release:verify-upload-assets
 npm run qa:install-release -- -Collect
 npm run qa:stable-install -- -ExplainOnly
 npm run release:verify-local
+npm run qa:updater-release -- -ExplainOnly
 ```
 
 ## 4. Release 包层
@@ -142,6 +143,7 @@ Release 包必须排除：
 - [ ] fallback zip 可解压并双击 `CodeXProviderSwitcher.cmd`。
 - [ ] fallback 浏览器打开本地 Web 控制台。
 - [ ] 稳定版安装到约定目录，升级不删除用户数据。
+- [ ] 跨版本更新前，`qa:updater-release` 已确认旧版低于新版本且目标 Release 包含 setup、签名和 `latest.json`。
 - [ ] 卸载移除程序文件但保留 `%LOCALAPPDATA%\CodeX Provider Switcher`。
 - [ ] 当前 Codex 配置摘要脱敏显示。
 - [ ] provider 和模型状态能看懂。

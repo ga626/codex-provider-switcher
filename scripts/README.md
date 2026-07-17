@@ -9,6 +9,7 @@
 | `scripts/qa-smoke.mjs` | Playwright visual/UI smoke for the explicitly marked browser preview; it must not simulate a real switch |
 | `scripts/qa/start-dev-desktop.ps1` | Launch the current source-tree desktop app for dev validation without installing |
 | `scripts/qa/prepare-install-release-qa.ps1` | Locate or collect release setup assets for install/release validation |
+| `scripts/qa/prepare-updater-release-qa.ps1` | Gate cross-version updater acceptance against an installed baseline |
 | `scripts/qa/stable-install.ps1` | Explain, install, upgrade, or uninstall the local stable release at the fixed QA path |
 | `scripts/local-backend-smoke.mjs` | Start the real local Web backend and verify `/api/health` plus `/api/state` |
 | `scripts/local-backend-functional-smoke.mjs` | Exercise real backend writes against an isolated Codex home, including `/responses` verification and the insufficient-balance switch block |
