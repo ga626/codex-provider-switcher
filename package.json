@@ -13,6 +13,7 @@
     "qa:smoke": "node scripts/qa-smoke.mjs",
     "qa:dev-desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/start-dev-desktop.ps1",
     "qa:install-release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/prepare-install-release-qa.ps1",
+    "qa:updater-release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/prepare-updater-release-qa.ps1",
     "qa:stable-install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/stable-install.ps1",
     "backend:build": "cargo build --manifest-path src-tauri/Cargo.toml --bin local_backend",
     "backend:smoke": "node scripts/local-backend-smoke.mjs",

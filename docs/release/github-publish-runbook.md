@@ -159,6 +159,8 @@ fallback zip 应包含 `CodeXProviderSwitcher.cmd`、`CodeXProviderSwitcher.ps1`
 10. 确认本地 Web 控制台、端口、后端、UI 和文档一致。
 11. 在已安装程序中检查更新，确认新版本下载、签名校验、重启后版本变化，且 `%LOCALAPPDATA%\CodeX Provider Switcher` 数据仍在。
 
+发布新 tag 后，先运行 `npm run qa:updater-release -- -CurrentVersion <旧版本> -TargetVersion <新版本> -Collect`，再进行应用内更新验收。
+
 只有完成这条路径，才能说产品已交付。
 
 如果在 PR 合并前只需要确认当前 GitHub Release 资产仍可下载、校验文件匹配远端 zip、包内结构正确，可以使用结构验证模式：
