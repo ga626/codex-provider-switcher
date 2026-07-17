@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed the artifact-backed Release publisher so an expected GitHub 404 for a new tag reaches the explicit create-Release path instead of becoming a PowerShell native-command exception.
+
 ## 0.3.2-alpha - 2026-07-17
 
 - Added Rust/Tauri build caching, explicit GitHub Actions timeouts, and phase timing for Release builds.

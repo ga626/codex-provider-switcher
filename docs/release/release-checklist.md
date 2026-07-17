@@ -96,6 +96,7 @@ npm run release:verify-local
 - Release workflow 的 preflight、build、publish job 有明确超时；build job 输出 Rust/Tauri cache 命中和阶段耗时。
 - setup、zip、`.sig`、`latest.json` 和 sha256 必须先通过本地候选资产校验并上传为 workflow artifact，再由没有签名私钥的 publish job 创建 Release。
 - 已存在但完整的 Release 只能验证，已存在但不完整的 Release 必须失败，不得自动覆盖资产。
+- publish job 查询新 tag 时的 GitHub 404 必须进入创建 Release 的正常分支；401、403、429、网络错误和其他 API 错误必须停止发布。
 - GitHub Release 必须创建为 `Latest`，不能标记为 `Pre-release`，否则 `/releases/latest/download/latest.json` 不可用。
 - 私钥和口令只存在于 GitHub Actions Secrets；仓库只提交 updater 公钥。
 - 新版本和新 tag 不覆盖旧 Release 或旧资产。

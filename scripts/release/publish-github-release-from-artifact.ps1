@@ -43,7 +43,15 @@ if (-not (Test-Path -LiteralPath $notesPath -PathType Leaf)) {
     throw "Release notes are missing: $notesPath"
 }
 
-$releaseRaw = & gh api "repos/$Repository/releases/tags/$Tag" 2>&1
+# A new tag normally has no Release yet. Some PowerShell hosts turn gh's
+# expected 404 stderr into a terminating exception, so preserve that output
+# for the explicit missing-Release branch below.
+$releaseRaw = $null
+try {
+    $releaseRaw = & gh api "repos/$Repository/releases/tags/$Tag" 2>&1
+} catch {
+    $releaseRaw = $_.Exception.Message
+}
 if ($LASTEXITCODE -eq 0) {
     $release = $releaseRaw | ConvertFrom-Json
     if ($release.draft -or $release.prerelease) {
