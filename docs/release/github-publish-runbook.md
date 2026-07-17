@@ -108,6 +108,8 @@ git push -u origin codex/bootstrap-github-release-flow
 
 ## PR 合并前检查
 
+功能分支推送不会运行完整 CI；创建 PR 后由 `pull_request` 触发一次完整 GitHub CI。Codex 在推送前完成本地验证，PR 页面中的 CI 是可合并前的权威云端结果。合并后 `main` 会再运行一次 CI，作为收口证据。
+
 - PR 模板中的验证项全部有结果。
 - GitHub CI 通过。
 - 没有真实密钥或本机私有状态进入 diff。
