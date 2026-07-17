@@ -1,5 +1,5 @@
 param(
-    [string]$ZipPath = "release-assets\CodeXProviderSwitcher-windows-x64-0.3.1-alpha.zip",
+    [string]$ZipPath = "",
     [string]$WorkRoot = ".codex-provider-switcher\release-verification",
     [int]$Port = 47841
 )
@@ -7,6 +7,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+if ([string]::IsNullOrWhiteSpace($ZipPath)) {
+    $package = Get-Content -LiteralPath (Join-Path $projectRoot "package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    $ZipPath = "release-assets\CodeXProviderSwitcher-windows-x64-$($package.version).zip"
+}
 $zipFull = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $ZipPath))
 $workFull = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $WorkRoot))
 

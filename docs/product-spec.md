@@ -1,6 +1,6 @@
 # CodeX Provider Switcher 产品规格
 
-状态：`0.3.1-alpha` 稳定安装和签名更新基线
+状态：`0.3.2-alpha` 稳定安装、签名更新和发布流水线硬化基线
 目标：Windows 优先的轻量桌面 GUI
 日期：2026-07-15
 

@@ -17,5 +17,7 @@
 | `scripts/verify/doctor-codex-provider-switcher.ps1` | Repository and release-readiness checks |
 | `scripts/release/build-codex-provider-switcher-release.ps1` | Build desktop installer assets, signed updater artifacts, fallback zip, and checksums into `release-assets/` |
 | `scripts/release/verify-local-release-package.ps1` | Unpack and smoke-test the runnable local release zip |
+| `scripts/release/verify-release-upload-assets.ps1` | Verify the complete local upload set, checksums, and updater manifest before publishing |
 | `scripts/release/publish-github-release-asset.ps1` | Upload and verify GitHub Release assets |
+| `scripts/release/publish-github-release-from-artifact.ps1` | Create a new GitHub Release from verified workflow artifacts without overwriting an existing Release |
 | `scripts/release/verify-github-release-asset.ps1` | Download and compare GitHub Release assets |

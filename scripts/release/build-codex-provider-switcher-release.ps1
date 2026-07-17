@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.3.1-alpha",
+    [string]$Version = "",
     [string]$OutputRoot = "release-assets",
     [switch]$SkipDesktopBundle,
     [switch]$Apply
@@ -12,6 +12,10 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -Er
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $package = Get-Content -LiteralPath (Join-Path $projectRoot "package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    $Version = [string]$package.version
+}
 $outputRootPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputRoot))
 $releaseName = "CodeXProviderSwitcher-windows-x64-$Version"
 $stagePath = Join-Path $outputRootPath $releaseName
@@ -143,6 +147,26 @@ function Write-Sha256File {
     $hash = Get-Sha256Hex -Path $Path
     "$hash  $([System.IO.Path]::GetFileName($Path))" | Set-Content -LiteralPath "$Path.sha256" -Encoding UTF8
     return $hash
+}
+
+function Invoke-ReleaseBuildPhase {
+    param(
+        [string]$Name,
+        [scriptblock]$Action
+    )
+
+    $startedAt = Get-Date
+    Write-Host "::group::Release phase: $Name"
+    try {
+        & $Action
+        if ($LASTEXITCODE -ne 0) {
+            throw "Release phase failed: $Name"
+        }
+    } finally {
+        $elapsed = (Get-Date) - $startedAt
+        Write-Host ("[TIMING] {0}: {1:N1}s" -f $Name, $elapsed.TotalSeconds)
+        Write-Host "::endgroup::"
+    }
 }
 
 function Find-TauriBundleAsset {
@@ -284,19 +308,16 @@ if (-not $SkipDesktopBundle) {
 
 Push-Location $projectRoot
 try {
-    npm run build
-    if ($LASTEXITCODE -ne 0) {
-        throw "npm run build failed."
+    Invoke-ReleaseBuildPhase -Name "frontend build" -Action {
+        npm run build
     }
     if (-not $SkipDesktopBundle) {
-        npm run tauri:build
-        if ($LASTEXITCODE -ne 0) {
-            throw "tauri desktop bundle build failed."
+        Invoke-ReleaseBuildPhase -Name "Tauri bundle and NSIS setup" -Action {
+            npm run tauri:build
         }
     }
-    cargo build --manifest-path src-tauri/Cargo.toml --release --bin local_backend
-    if ($LASTEXITCODE -ne 0) {
-        throw "release local_backend build failed."
+    Invoke-ReleaseBuildPhase -Name "release local backend" -Action {
+        cargo build --manifest-path src-tauri/Cargo.toml --release --bin local_backend
     }
 } finally {
     Pop-Location
@@ -316,6 +337,9 @@ Assert-UnderProject -Path $outputRootPath
 Assert-UnderProject -Path $stagePath
 Assert-UnderProject -Path $zipPath
 
+$packageStartedAt = Get-Date
+Write-Host "::group::Release phase: fallback package, hashes, and updater manifest"
+try {
 New-Item -ItemType Directory -Path $outputRootPath -Force | Out-Null
 if (Test-Path -LiteralPath $stagePath) {
     Remove-Item -LiteralPath $stagePath -Recurse -Force
@@ -401,4 +425,9 @@ if (-not $SkipDesktopBundle) {
         throw "Signed updater artifact missing. Configure TAURI_SIGNING_PRIVATE_KEY_PATH before building a Release."
     }
     Write-Host "[PASS] Signed updater signature copied: $signaturePath"
+}
+} finally {
+    $packageElapsed = (Get-Date) - $packageStartedAt
+    Write-Host ("[TIMING] fallback package, hashes, and updater manifest: {0:N1}s" -f $packageElapsed.TotalSeconds)
+    Write-Host "::endgroup::"
 }

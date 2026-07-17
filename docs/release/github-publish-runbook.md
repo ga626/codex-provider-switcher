@@ -34,13 +34,23 @@ TAURI_SIGNING_PRIVATE_KEY
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 ```
 
-正式发布通过 `.github/workflows/release.yml` 完成。它只响应已经推送到远端的 `v*` 标签，先校验标签、`package.json`、`tauri.conf.json` 和 Cargo 版本一致，再由 GitHub Actions 生成签名资产并创建新的不可变 Release。workflow 会把该 Release 标记为 GitHub `Latest`，因为 updater 使用 `/releases/latest/download/latest.json`；标签可以继续使用 `0.3.1-alpha` 这样的版本号，但不能把 GitHub Release 标记为 `Pre-release`，否则该下载地址会返回 `404`。
+正式发布通过 `.github/workflows/release.yml` 完成。它只响应已经推送到远端的 `v*` 标签，先校验标签、`package.json`、`tauri.conf.json` 和 Cargo 版本一致，再由 GitHub Actions 生成签名资产。workflow 会把新 Release 标记为 GitHub `Latest`，因为 updater 使用 `/releases/latest/download/latest.json`；标签可以继续使用 `0.3.2-alpha` 这样的版本号，但不能把 GitHub Release 标记为 `Pre-release`，否则该下载地址会返回 `404`。GitHub API 的 `isImmutable` 状态不应替代项目自己的不可覆盖策略：旧 tag 和旧资产仍不得被重跑静默覆盖。
 
 首次启用或轮换密钥时，维护者只需要在仓库 Settings > Secrets and variables > Actions 中确认上述两个 Secrets 存在。后续日常开发、PR、开发版和本地未签名候选包都不读取私钥；只有推送新版本标签时才由 CI 使用它们。旧版本如果内置了旧公钥，不能直接验证轮换后的新公钥，因此密钥轮换必须伴随一次手动安装迁移，并在发布说明中写明。
 
 密钥对只在首次建立发布信任根时生成一次，后续 Release 复用同一私钥。不能因为某次本地构建失败就重新生成密钥；如果私钥或口令丢失，必须先制定密钥轮换和一次性手动升级计划，再更新 `tauri.conf.json` 中的公钥。已经安装旧公钥的版本不能直接验证新公钥签名的更新。本项目的 `v0.3.0-alpha` 使用旧公钥且已有 Release 资产；切换到新公钥后，`v0.3.0-alpha` 用户必须先手动安装 `v0.3.1-alpha`，之后才能使用自动更新。
 
 Tauri updater 签名只保证更新包的来源和完整性，不等同于 Windows Authenticode/MSIX 代码签名，也不是用户运行软件所需的登录凭据。
+
+## Release workflow 结构
+
+Release workflow 分为三个 job：
+
+1. `preflight`：checkout 指定 tag，校验 tag、三份版本元数据、已有 Release 状态和资产完整性。
+2. `build`：只在 Release 不存在时运行；它持有签名 Secrets，使用 Rust/Tauri cache 构建资产，输出阶段耗时，并把公开候选资产上传为 7 天保留的 workflow artifact。
+3. `publish`：下载并复核 artifact，再创建 GitHub Release；它没有签名私钥。已有完整 Release 时只执行远端结构验证，不覆盖资产。
+
+cache 只保存可重新生成的 Cargo/Tauri 依赖和中间产物；setup、zip、`.sig`、`latest.json`、sha256 和发布说明属于 artifact/Release 资产。构建 job 超过 60 分钟、CI 超过 45 分钟会自动失败；先读阶段耗时和 cache 命中情况，再决定下一步，不要用无限等待掩盖问题。
 
 ## 前置检查
 
@@ -115,6 +125,7 @@ npm run qa:dev-desktop
 ```powershell
 npm run release:build -- -Apply
 npm run qa:install-release -- -Collect
+npm run release:verify-upload-assets
 ```
 
 ## Release 资产

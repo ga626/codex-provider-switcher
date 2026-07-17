@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.3.1-alpha",
+    [string]$Version = "",
     [string]$Tag = "",
     [string]$Repository = "ga626/codex-provider-switcher",
     [string]$OutputRoot = "release-assets",
@@ -13,6 +13,10 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -Er
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $package = Get-Content -LiteralPath (Join-Path $projectRoot "package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    $Version = [string]$package.version
+}
 if ([string]::IsNullOrWhiteSpace($Tag)) {
     $Tag = "v$Version"
 }
