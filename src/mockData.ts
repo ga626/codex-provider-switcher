@@ -8,15 +8,6 @@ export const initialState: AppState = {
   autoStart: false,
   trayEnabled: false,
   safeMode: true,
-  legacySwitcher: {
-    profilePath: '旧版工具本机 profiles.json',
-    profileExists: true,
-    processRunning: true,
-    port: 47831,
-    portInUse: true,
-    imported: false,
-    appProfilePath: String.raw`%LOCALAPPDATA%\CodeX Provider Switcher\profiles.json`,
-  },
   profiles: [
     {
       id: 'owl',

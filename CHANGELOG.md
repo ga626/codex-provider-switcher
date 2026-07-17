@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.4.0-alpha - 2026-07-18
+
+- Added a recovery center that shows the newest application-created restore point and requires explicit confirmation before restoration.
+- Added a credential-free backup manifest that records the backup time, reason, and file names for each pre-switch backup.
+- Removed legacy-tool-specific detection, environment variables, and automatic profile import from the product runtime and UI.
+- Avoided duplicate full validation for feature-branch pushes while retaining local preflight and PR CI coverage.
 - Fixed the artifact-backed Release publisher so an expected GitHub 404 for a new tag reaches the explicit create-Release path instead of becoming a PowerShell native-command exception.
 
 ## 0.3.2-alpha - 2026-07-17

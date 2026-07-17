@@ -314,6 +314,29 @@ export async function deleteProfile(profileId: string): Promise<AppState> {
   return structuredClone(mockState)
 }
 
+export async function restoreLatestBackup(): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('restore_latest_backup')
+  }
+  const webState = await tryWebBackend<AppState>('/api/backup/restore-latest', apiPost())
+  if (webState) {
+    return webState
+  }
+  await mockDelay()
+  const latest = mockState.backups[0]
+  if (!latest) {
+    throw new Error('当前没有可恢复的备份。')
+  }
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: '预览已模拟恢复',
+    detail: `${latest.label} 仅用于界面预览，未修改本机 Codex 配置或凭据。`,
+    tone: 'warning',
+  })
+  return structuredClone(mockState)
+}
+
 export async function switchProfile(profileId: string): Promise<AppState> {
   if (isTauri) {
     return invoke<AppState>('switch_profile', { profileId })

@@ -17,8 +17,7 @@
 
 - [ ] README 写清当前主路线是轻量桌面 GUI。
 - [ ] 本地 Web 控制台被描述为开发、诊断和 fallback 路线。
-- [ ] 旧版工具只作为参考源和回滚源。
-- [ ] 不承诺自动替换旧工具。
+- [ ] 本机替换不作为桌面产品功能或公开迁移界面交付。
 - [ ] 不把 `gpt-5.5` 或任何单一模型写成永久默认。
 
 ## 3. 验证层
@@ -40,7 +39,7 @@
 | mock、真实后端、模型刷新、配置写入边界 | README、产品规格、故障排查、验证命令、PR 风险边界 |
 | Release 包内容或发布命令 | release checklist、GitHub 发布 Runbook、release notes、verify-local 脚本 |
 | CI、smoke、构建或验证命令 | README、release checklist、PR 验证段、GitHub Actions |
-| 旧工具 cutover、备份、恢复、回滚 | 产品规格、用户文档、release checklist、PR 风险边界 |
+| 备份、恢复、回滚 | 产品规格、用户文档、release checklist、PR 风险边界 |
 
 CI 触发规则：功能分支由本地前置验证加 PR CI 覆盖；完整 GitHub CI 不在功能分支 `push` 时重复运行。`main` 合并提交仍运行 CI 作为收口证据。
 
@@ -151,6 +150,8 @@ Release 包必须排除：
 - [ ] provider 和模型状态能看懂。
 - [ ] 写入前能看到备份/恢复路径。
 - [ ] dry-run 不修改真实配置。
+- [ ] 最近备份可见，恢复操作要求二次确认。
+- [ ] 备份 manifest 不包含配置内容或凭据。
 
 ## 6. 停止条件
 
@@ -161,4 +162,4 @@ Release 包必须排除：
 - 本地 Web 控制台无法启动。
 - 写入配置前没有备份。
 - 无法恢复到切换前状态。
-- 最终 cutover 需要当前 Codex 会话修改自身 provider 配置。
+- 当前 Codex 会话直接执行最终 provider 切换。
