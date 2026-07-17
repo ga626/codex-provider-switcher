@@ -145,6 +145,8 @@ Release 包必须排除：
 - [ ] fallback 浏览器打开本地 Web 控制台。
 - [ ] 稳定版安装到约定目录，升级不删除用户数据。
 - [ ] 跨版本更新前，`qa:updater-release` 已确认旧版低于新版本且目标 Release 包含 setup、签名和 `latest.json`。
+- [ ] 已验证更新对象会直接调用签名安装；手动打开 Release 页的 fallback URL 才走项目地址白名单。
+- [ ] 若已发布版本存在更新器阻断缺陷，发布说明和安装文档写明一次性手动升级路径，且不声称旧版可自动修复自己。
 - [ ] 卸载移除程序文件但保留 `%LOCALAPPDATA%\CodeX Provider Switcher`。
 - [ ] 当前 Codex 配置摘要脱敏显示。
 - [ ] provider 和模型状态能看懂。

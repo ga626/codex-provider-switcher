@@ -9,6 +9,20 @@ let mockState: AppState = structuredClone(initialState)
 let webBackendAvailable: boolean | null = null
 let pendingTauriUpdate: { version: string; date?: string | null; downloadAndInstall: () => Promise<void> } | null = null
 
+function isTrustedProjectReleaseUrl(value: string) {
+  try {
+    const parsed = new URL(value)
+    return (
+      parsed.protocol === 'https:' &&
+      parsed.hostname === 'github.com' &&
+      (parsed.pathname === '/ga626/codex-provider-switcher/releases' ||
+        parsed.pathname.startsWith('/ga626/codex-provider-switcher/releases/'))
+    )
+  } catch {
+    return false
+  }
+}
+
 function backendUnavailableMessage() {
   return '应用的连接服务未能启动。请重新打开 CodeX Provider Switcher；如果问题持续，请查看故障排查。'
 }
@@ -135,16 +149,16 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
 }
 
 export async function openUpdate(url: string): Promise<void> {
-  if (!/^https:\/\/github\.com\/ga626\/codex-provider-switcher\/releases\//i.test(url)) {
+  if (isTauri && pendingTauriUpdate) {
+    await pendingTauriUpdate.downloadAndInstall()
+    const { relaunch } = await import('@tauri-apps/plugin-process')
+    await relaunch()
+    return
+  }
+  if (!isTrustedProjectReleaseUrl(url)) {
     throw new Error('更新地址不是受信任的项目 Release 地址。')
   }
   if (isTauri) {
-    if (pendingTauriUpdate) {
-      await pendingTauriUpdate.downloadAndInstall()
-      const { relaunch } = await import('@tauri-apps/plugin-process')
-      await relaunch()
-      return
-    }
     const { openUrl } = await import('@tauri-apps/plugin-opener')
     await openUrl(url)
     return

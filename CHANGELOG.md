@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.4.1-alpha - 2026-07-18
+
+- Fixed the Tauri updater action so a verified pending update is installed directly instead of being rejected by the manual Release-page URL guard.
+- Kept the manual download fallback restricted to the canonical project Release page and its child URLs.
+- Documented the one-time manual upgrade required for installations of 0.3.2-alpha and 0.4.0-alpha before future automatic updates can be used.
+
 ## 0.4.0-alpha - 2026-07-18
 
 - Added a recovery center that shows the newest application-created restore point and requires explicit confirmation before restoration.

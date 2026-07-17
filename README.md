@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-当前已发布版本是 `0.3.2-alpha`。本分支准备 `0.4.0-alpha`，补齐普通用户可见的恢复中心、可审计备份和跨版本发布验收：
+当前已发布版本是 `0.4.0-alpha`。本分支准备 `0.4.1-alpha`，修复已验证更新被手动 Release 页地址校验错误拦截的问题：
 
 - React/Vite 前端。
 - Tauri/Rust 桌面窗口、本地文件、profiles、backup、validation、restore 基础。
@@ -21,8 +21,9 @@
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
 - 安全检查中的恢复中心：展示最近恢复点，并在恢复前要求二次确认。
 - 每次切换生成不含凭据内容的备份 manifest，记录时间、原因和备份文件名。
+- 对已安装 `0.3.2-alpha` 或 `0.4.0-alpha` 的用户，`0.4.1-alpha` 需要从 Release 手动安装一次；之后的已验证更新不会再被手动下载页校验拦截。
 
-[下载当前已发布的 0.3.2-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.3.2-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
+[下载当前已发布的 0.4.0-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.4.0-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
 
 ## 开发验收方式
 
