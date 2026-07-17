@@ -42,6 +42,8 @@
 | CI、smoke、构建或验证命令 | README、release checklist、PR 验证段、GitHub Actions |
 | 旧工具 cutover、备份、恢复、回滚 | 产品规格、用户文档、release checklist、PR 风险边界 |
 
+CI 触发规则：功能分支由本地前置验证加 PR CI 覆盖；完整 GitHub CI 不在功能分支 `push` 时重复运行。`main` 合并提交仍运行 CI 作为收口证据。
+
 基础验证：
 
 ```powershell
