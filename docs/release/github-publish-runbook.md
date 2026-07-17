@@ -48,7 +48,7 @@ Release workflow 分为三个 job：
 
 1. `preflight`：checkout 指定 tag，校验 tag、三份版本元数据、已有 Release 状态和资产完整性。
 2. `build`：只在 Release 不存在时运行；它持有签名 Secrets，使用 Rust/Tauri cache 构建资产，输出阶段耗时，并把公开候选资产上传为 7 天保留的 workflow artifact。
-3. `publish`：下载并复核 artifact，再创建 GitHub Release；它没有签名私钥。已有完整 Release 时只执行远端结构验证，不覆盖资产。
+3. `publish`：下载并复核 artifact，再创建 GitHub Release；它没有签名私钥。查询到“新 tag 尚无 Release”的 GitHub 404 是正常创建分支，不是失败；其他 API 错误仍会停止发布。已有完整 Release 时只执行远端结构验证，不覆盖资产。
 
 cache 只保存可重新生成的 Cargo/Tauri 依赖和中间产物；setup、zip、`.sig`、`latest.json`、sha256 和发布说明属于 artifact/Release 资产。构建 job 超过 60 分钟、CI 超过 45 分钟会自动失败；先读阶段耗时和 cache 命中情况，再决定下一步，不要用无限等待掩盖问题。
 
