@@ -11,6 +11,7 @@ import {
   PlugZap,
   Plus,
   RefreshCcw,
+  RotateCcw,
   Save,
   Server,
   ShieldCheck,
@@ -27,12 +28,13 @@ import {
   loadState,
   openUpdate,
   refreshModels,
+  restoreLatestBackup,
   saveProfile,
   setDefaultProfile,
   switchProfile,
   verifyProfile,
 } from './adapter'
-import type { AppState, EditableProfile, ModelCatalog, ProviderProfile, UpdateInfo, ValidationCheck } from './types'
+import type { AppState, BackupItem, EditableProfile, ModelCatalog, ProviderProfile, UpdateInfo, ValidationCheck } from './types'
 
 type ViewId = 'providers' | 'models' | 'safety' | 'timeline'
 
@@ -196,6 +198,7 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
+  const [restoreConfirm, setRestoreConfirm] = useState<BackupItem | null>(null)
 
   useEffect(() => {
     async function loadInitialState() {
@@ -368,6 +371,11 @@ function App() {
     }
   }
 
+  async function restoreLatest() {
+    await runAction('restore-backup', restoreLatestBackup)
+    setRestoreConfirm(null)
+  }
+
   if (!state && error) {
     return (
       <main className="loading-shell runtime-error-shell">
@@ -452,6 +460,15 @@ function App() {
             <X size={16} />
           </button>
         </section>
+      )}
+
+      {restoreConfirm && (
+        <RestoreConfirmDialog
+          backup={restoreConfirm}
+          busy={busy !== null}
+          onCancel={() => setRestoreConfirm(null)}
+          onConfirm={() => void restoreLatest()}
+        />
       )}
 
       <section className="workbench">
@@ -545,6 +562,8 @@ function App() {
                 selectedProfile={selectedProfile}
                 busy={busy}
                 hasUnsavedChanges={hasUnsavedChanges}
+                backups={state.backups}
+                onRestoreRequested={() => setRestoreConfirm(state.backups[0] ?? null)}
                 runAction={runAction}
               />
             )}
@@ -885,6 +904,8 @@ function SafetyWorkspace({
   selectedProfile,
   busy,
   hasUnsavedChanges,
+  backups,
+  onRestoreRequested,
   runAction,
 }: {
   providerChecks: ValidationCheck[]
@@ -893,8 +914,11 @@ function SafetyWorkspace({
   selectedProfile: ProviderProfile | undefined
   busy: string | null
   hasUnsavedChanges: boolean
+  backups: BackupItem[]
+  onRestoreRequested: () => void
   runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
 }) {
+  const latestBackup = backups[0]
   return (
     <div className="workspace-stack">
       <section className="surface-panel safety-summary">
@@ -972,6 +996,65 @@ function SafetyWorkspace({
             <span>本次真实检查</span>
             <strong>不依赖模型，不会修改 Codex 配置或凭据</strong>
           </div>
+        </div>
+      </section>
+      <section className="surface-panel recovery-panel">
+        <div className="section-heading-row">
+          <div>
+            <span className="eyebrow">恢复中心</span>
+            <h3>最近备份</h3>
+          </div>
+          <span className="section-meta">切换前自动生成</span>
+        </div>
+        {latestBackup ? (
+          <div className="recovery-row">
+            <div>
+              <strong>{latestBackup.label}</strong>
+              <span>{latestBackup.time} · {latestBackup.files} 个备份文件</span>
+            </div>
+            <button className="danger-button" type="button" onClick={onRestoreRequested} disabled={busy !== null}>
+              <RotateCcw size={16} />
+              恢复最近备份
+            </button>
+          </div>
+        ) : (
+          <div className="empty-state recovery-empty">
+            <RotateCcw size={26} />
+            <strong>尚未创建恢复点</strong>
+            <span>成功切换服务商前会自动生成配置和凭据备份。</span>
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function RestoreConfirmDialog({
+  backup,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  backup: BackupItem
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div className="confirm-backdrop" role="presentation">
+      <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="restore-dialog-title">
+        <div className="confirm-dialog-icon"><AlertTriangle size={20} /></div>
+        <div>
+          <span className="eyebrow">恢复最近备份</span>
+          <h2 id="restore-dialog-title">确认恢复配置？</h2>
+          <p>将恢复 {backup.label} 中的 Codex 配置和凭据。恢复后需要重新检查当前服务商状态。</p>
+        </div>
+        <div className="command-row">
+          <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
+          <button className="danger-button" type="button" onClick={onConfirm} disabled={busy}>
+            <RotateCcw size={16} />
+            确认恢复
+          </button>
         </div>
       </section>
     </div>

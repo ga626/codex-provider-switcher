@@ -171,6 +171,10 @@ try {
   if ((safetyLayout.switchIconCenterDelta ?? 99) > 2) {
     throw new Error(`Switch card icon is not vertically aligned with its label: ${JSON.stringify(safetyLayout)}`)
   }
+  await desktop.getByRole('button', { name: '恢复最近备份' }).click()
+  await desktop.getByRole('dialog', { name: '确认恢复配置？' }).waitFor()
+  await desktop.getByRole('button', { name: '取消' }).click()
+  await desktop.getByRole('dialog', { name: '确认恢复配置？' }).waitFor({ state: 'detached' })
   await desktop.screenshot({ path: join(outputDir, 'desktop-safety.png'), fullPage: true })
 
   await desktop.getByRole('button', { name: /活动记录/ }).click()

@@ -2,14 +2,7 @@ use chrono::Local;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::{
-    collections::BTreeSet,
-    env, fs,
-    net::{SocketAddr, TcpStream},
-    path::PathBuf,
-    process::Command,
-    time::Duration,
-};
+use std::{collections::BTreeSet, env, fs, path::PathBuf, time::Duration};
 use thiserror::Error;
 
 const APP_DIR_NAME: &str = "CodeX Provider Switcher";
@@ -18,8 +11,6 @@ const ACTIVITY_FILE: &str = "activity.json";
 const BACKUPS_DIR: &str = "backups";
 const CODEX_HOME_ENV: &str = "CODEX_PROVIDER_SWITCHER_CODEX_HOME";
 const APP_DATA_DIR_ENV: &str = "CODEX_PROVIDER_SWITCHER_APP_DATA_DIR";
-const LEGACY_PROFILE_ENV: &str = "CODEX_PROVIDER_SWITCHER_LEGACY_PROFILES";
-const LEGACY_SWITCHER_PORT: u16 = 47831;
 const RELEASES_API_ENV: &str = "CODEX_PROVIDER_SWITCHER_RELEASES_API";
 const RELEASES_API_URL: &str =
     "https://api.github.com/repos/ga626/codex-provider-switcher/releases?per_page=20";
@@ -159,20 +150,6 @@ struct GithubRelease {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LegacySwitcherStatus {
-    pub profile_path: String,
-    pub profile_exists: bool,
-    pub process_running: bool,
-    pub port: u16,
-    pub port_in_use: bool,
-    pub imported: bool,
-    pub imported_from: Option<String>,
-    pub imported_at: Option<String>,
-    pub app_profile_path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AppState {
     pub runtime_mode: String,
     pub current_profile_id: String,
@@ -186,7 +163,6 @@ pub struct AppState {
     pub checks: Vec<ValidationCheck>,
     pub activity: Vec<ActivityItem>,
     pub backups: Vec<BackupItem>,
-    pub legacy_switcher: LegacySwitcherStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -240,10 +216,6 @@ struct StoredCatalog {
     auto_start: bool,
     #[serde(default)]
     invariants: Value,
-    #[serde(default)]
-    imported_from_legacy: Option<String>,
-    #[serde(default)]
-    imported_at: Option<String>,
 }
 
 fn default_version() -> String {
@@ -302,10 +274,6 @@ fn backups_dir() -> Result<PathBuf, SwitcherError> {
     Ok(app_data_dir()?.join(BACKUPS_DIR))
 }
 
-fn legacy_profile_path() -> Option<PathBuf> {
-    env::var_os(LEGACY_PROFILE_ENV).map(PathBuf::from)
-}
-
 fn ensure_dirs() -> Result<(), SwitcherError> {
     fs::create_dir_all(app_data_dir()?)?;
     fs::create_dir_all(backups_dir()?)?;
@@ -328,15 +296,6 @@ fn normalize_id(name: &str) -> String {
 }
 
 fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
-    if let Some(legacy) = legacy_profile_path().filter(|path| path.exists()) {
-        let text = fs::read_to_string(legacy)?;
-        let mut catalog: StoredCatalog = serde_json::from_str(&text)?;
-        normalize_catalog(&mut catalog);
-        catalog.imported_from_legacy = legacy_profile_path().map(|path| path.display().to_string());
-        catalog.imported_at = Some(now_label());
-        return Ok(catalog);
-    }
-
     let mut profiles = Map::new();
     profiles.insert(
         "owl".to_string(),
@@ -357,8 +316,6 @@ fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
         model_catalogs: Map::new(),
         auto_start: false,
         invariants: default_invariants(),
-        imported_from_legacy: None,
-        imported_at: None,
     })
 }
 
@@ -641,61 +598,6 @@ fn list_backups() -> Result<Vec<BackupItem>, SwitcherError> {
     Ok(items)
 }
 
-fn legacy_port_in_use() -> bool {
-    let addr = SocketAddr::from(([127, 0, 0, 1], LEGACY_SWITCHER_PORT));
-    TcpStream::connect_timeout(&addr, Duration::from_millis(160)).is_ok()
-}
-
-fn hidden_command(program: &str) -> Command {
-    let mut command = Command::new(program);
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-
-        // CREATE_NO_WINDOW keeps console utilities invisible when called by the GUI app.
-        command.creation_flags(0x08000000);
-    }
-
-    command
-}
-
-fn legacy_process_running() -> bool {
-    if cfg!(target_os = "windows") {
-        if let Ok(output) = hidden_command("tasklist")
-            .args(["/FI", "IMAGENAME eq CodeX-Switcher.exe", "/NH"])
-            .output()
-        {
-            let text = String::from_utf8_lossy(&output.stdout);
-            return text.contains("CodeX-Switcher.exe");
-        }
-    }
-    false
-}
-
-fn legacy_switcher_status(catalog: &StoredCatalog) -> Result<LegacySwitcherStatus, SwitcherError> {
-    let profile_path = legacy_profile_path();
-    let profile_exists = profile_path
-        .as_ref()
-        .map(|path| path.exists())
-        .unwrap_or(false);
-    let profile_path_label = profile_path
-        .as_ref()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| format!("%{}%", LEGACY_PROFILE_ENV));
-    Ok(LegacySwitcherStatus {
-        profile_path: profile_path_label,
-        profile_exists,
-        process_running: legacy_process_running(),
-        port: LEGACY_SWITCHER_PORT,
-        port_in_use: legacy_port_in_use(),
-        imported: catalog.imported_from_legacy.is_some(),
-        imported_from: catalog.imported_from_legacy.clone(),
-        imported_at: catalog.imported_at.clone(),
-        app_profile_path: profiles_path()?.display().to_string(),
-    })
-}
-
 fn activity_seed() -> ActivityItem {
     ActivityItem {
         id: "startup".to_string(),
@@ -757,7 +659,6 @@ fn app_state() -> Result<AppState, SwitcherError> {
     let config = read_config().unwrap_or_default();
     let current_id = current_profile_id(&catalog, &config);
     let profiles = catalog_profiles(&catalog, &current_id);
-    let legacy_switcher = legacy_switcher_status(&catalog)?;
     Ok(AppState {
         runtime_mode: "tauri_native".to_string(),
         current_profile_id: current_id,
@@ -771,7 +672,6 @@ fn app_state() -> Result<AppState, SwitcherError> {
         checks: validation_checks(&config),
         activity: load_activity()?,
         backups: list_backups()?,
-        legacy_switcher,
     })
 }
 
@@ -1327,13 +1227,25 @@ fn create_backup() -> Result<PathBuf, SwitcherError> {
     let dir = backups_dir()?.join(label);
     fs::create_dir_all(&dir)?;
     let config = config_path()?;
+    let mut files = Vec::new();
     if config.exists() {
         fs::copy(&config, dir.join("config.toml"))?;
+        files.push("config.toml");
     }
     let auth = auth_path()?;
     if auth.exists() {
         fs::copy(&auth, dir.join("auth.json"))?;
+        files.push("auth.json");
     }
+    fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_string_pretty(&json!({
+            "schema_version": 1,
+            "created_at": now_label(),
+            "reason": "before_switch",
+            "files": files,
+        }))?,
+    )?;
     Ok(dir)
 }
 

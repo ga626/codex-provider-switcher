@@ -90,18 +90,6 @@ export type UpdateInfo = {
   publishedAt?: string
 }
 
-export type LegacySwitcherStatus = {
-  profilePath: string
-  profileExists: boolean
-  processRunning: boolean
-  port: number
-  portInUse: boolean
-  imported: boolean
-  importedFrom?: string
-  importedAt?: string
-  appProfilePath: string
-}
-
 export type AppState = {
   runtimeMode: 'tauri_native' | 'local_web_backend' | 'browser_preview_mock'
   currentProfileId: string
@@ -115,7 +103,6 @@ export type AppState = {
   checks: ValidationCheck[]
   activity: ActivityItem[]
   backups: BackupItem[]
-  legacySwitcher: LegacySwitcherStatus
 }
 
 export type EditableProfile = {
