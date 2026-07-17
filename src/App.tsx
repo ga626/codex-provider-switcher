@@ -24,17 +24,19 @@ import './App.css'
 import {
   deleteProfile,
   checkForUpdate,
+  importLegacyProfiles,
   loadState,
   openUpdate,
+  previewLegacyImport,
   refreshModels,
   saveProfile,
   setDefaultProfile,
   switchProfile,
   verifyProfile,
 } from './adapter'
-import type { AppState, EditableProfile, ModelCatalog, ProviderProfile, UpdateInfo, ValidationCheck } from './types'
+import type { AppState, EditableProfile, LegacyImportPreview, LegacySwitcherStatus, ModelCatalog, ProviderProfile, UpdateInfo, ValidationCheck } from './types'
 
-type ViewId = 'providers' | 'models' | 'safety' | 'timeline'
+type ViewId = 'providers' | 'models' | 'safety' | 'cutover' | 'timeline'
 
 const emptyProfile: EditableProfile = {
   id: '',
@@ -196,6 +198,8 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
+  const [legacySourcePath, setLegacySourcePath] = useState('')
+  const [legacyPreview, setLegacyPreview] = useState<LegacyImportPreview | null>(null)
 
   useEffect(() => {
     async function loadInitialState() {
@@ -259,6 +263,7 @@ function App() {
       selectedProfile.verified &&
       !hasUnsavedChanges &&
       requiredFailures === 0 &&
+      !state?.legacySwitcher.writeBlocked &&
       busy === null
   )
 
@@ -368,6 +373,25 @@ function App() {
     }
   }
 
+  async function previewLegacySource() {
+    setBusy('legacy-preview')
+    try {
+      const next = await previewLegacyImport(legacySourcePath)
+      setLegacyPreview(next)
+      setError(null)
+    } catch (err) {
+      setLegacyPreview(null)
+      setError(err instanceof Error ? err.message : '旧 profiles 预检失败。')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function importLegacySource() {
+    await runAction('legacy-import', () => importLegacyProfiles(legacySourcePath))
+    setLegacyPreview(null)
+  }
+
   if (!state && error) {
     return (
       <main className="loading-shell runtime-error-shell">
@@ -397,6 +421,7 @@ function App() {
     { id: 'providers', label: '服务商', note: `${state.profiles.length} 个配置`, icon: <LayoutDashboard size={17} /> },
     { id: 'models', label: '模型目录', note: selectedModelCatalog?.status === 'ok' ? '已同步' : '待刷新', icon: <Boxes size={17} /> },
     { id: 'safety', label: '安全检查', note: hasUnsavedChanges ? '请先保存' : requiredFailures === 0 ? '可以切换' : `${requiredFailures} 个待处理`, icon: <ShieldCheck size={17} /> },
+    { id: 'cutover', label: '交接准备', note: state.legacySwitcher.imported ? '已导入' : '待迁移', icon: <GitCompareArrows size={17} /> },
     { id: 'timeline', label: '活动记录', note: latestActivity?.time ?? '暂无记录', icon: <Activity size={17} /> },
   ]
   const selectedIsCurrent = Boolean(selectedProfile?.active)
@@ -548,6 +573,20 @@ function App() {
                 runAction={runAction}
               />
             )}
+            {activeView === 'cutover' && (
+              <CutoverWorkspace
+                legacy={state.legacySwitcher}
+                sourcePath={legacySourcePath}
+                preview={legacyPreview}
+                busy={busy}
+                onSourcePathChange={(value) => {
+                  setLegacySourcePath(value)
+                  setLegacyPreview(null)
+                }}
+                onPreview={previewLegacySource}
+                onImport={importLegacySource}
+              />
+            )}
             {activeView === 'timeline' && <TimelineWorkspace state={state} />}
           </div>
         </section>
@@ -678,6 +717,10 @@ function WorkspaceHeader({
     safety: {
       title: '安全检查',
       note: requiredFailures === 0 ? '当前配置满足切换前置条件。' : '还有必填检查未通过。',
+    },
+    cutover: {
+      title: '交接准备',
+      note: '先导入旧配置并完成检查，最终切换必须由新会话执行。',
     },
     timeline: {
       title: '活动记录',
@@ -972,6 +1015,99 @@ function SafetyWorkspace({
             <span>本次真实检查</span>
             <strong>不依赖模型，不会修改 Codex 配置或凭据</strong>
           </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function CutoverWorkspace({
+  legacy,
+  sourcePath,
+  preview,
+  busy,
+  onSourcePathChange,
+  onPreview,
+  onImport,
+}: {
+  legacy: LegacySwitcherStatus
+  sourcePath: string
+  preview: LegacyImportPreview | null
+  busy: string | null
+  onSourcePathChange: (value: string) => void
+  onPreview: () => Promise<void>
+  onImport: () => Promise<void>
+}) {
+  const oldToolRunning = legacy.processRunning || legacy.portInUse
+  const canImport = Boolean(preview?.canImport && sourcePath.trim() && busy === null)
+
+  return (
+    <div className="workspace-stack">
+      <section className={`surface-panel cutover-status ${legacy.writeBlocked ? 'blocked' : 'ready'}`}>
+        <div className="section-heading-row">
+          <div>
+            <span className="eyebrow">唯一写入者</span>
+            <h3>{legacy.writeBlocked ? '当前不能切换' : '切换窗口可准备'}</h3>
+          </div>
+          {legacy.writeBlocked ? <AlertTriangle size={20} /> : <CheckCircle2 size={20} />}
+        </div>
+        <p>{legacy.writeBlockReason ?? '旧工具未占用写入路径；仍需由新会话执行最终交接。'}</p>
+        <div className="cutover-facts">
+          <div><span>旧工具进程</span><strong>{legacy.processRunning ? '正在运行' : '未运行'}</strong></div>
+          <div><span>旧端口</span><strong>{legacy.portInUse ? `${legacy.port} 已占用` : `${legacy.port} 未占用`}</strong></div>
+          <div><span>迁移状态</span><strong>{legacy.imported ? `已导入 ${legacy.importedProfileCount ?? ''} 条配置` : '尚未导入'}</strong></div>
+        </div>
+      </section>
+
+      <section className="surface-panel">
+        <div className="section-heading-row">
+          <div>
+            <span className="eyebrow">旧 profiles 迁移</span>
+            <h3>先预检，再导入</h3>
+          </div>
+          <span className="section-meta">旧文件保持只读</span>
+        </div>
+        <label className="cutover-source-field">
+          旧 profiles.json 路径
+          <input
+            value={sourcePath}
+            onChange={(event) => onSourcePathChange(event.target.value)}
+            placeholder="选择旧工具的 profiles.json 文件路径"
+            spellCheck={false}
+          />
+        </label>
+        <div className="command-row">
+          <button className="ghost-button" type="button" onClick={() => void onPreview()} disabled={!sourcePath.trim() || busy !== null}>
+            <ShieldCheck size={16} />
+            预检来源
+          </button>
+          <button className="primary-button" type="button" onClick={() => void onImport()} disabled={!canImport}>
+            <GitCompareArrows size={16} />
+            导入到新版目录
+          </button>
+        </div>
+        {preview && (
+          <div className={`migration-preview ${preview.canImport ? 'ok' : 'warning'}`}>
+            {preview.canImport ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}
+            <div>
+              <strong>{preview.sourceLabel}：识别到 {preview.profileCount} 条配置</strong>
+              <span>{preview.message}</span>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="surface-panel compact-surface">
+        <div className="section-heading-row">
+          <div>
+            <span className="eyebrow">最终交接</span>
+            <h3>不在当前会话执行</h3>
+          </div>
+        </div>
+        <div className="cutover-steps">
+          <div className={legacy.imported ? 'done' : ''}><span>1</span><p>导入旧配置并完成新版服务商验证。</p></div>
+          <div className={oldToolRunning ? '' : 'done'}><span>2</span><p>由新 Codex 会话停止旧工具，确认旧端口已释放。</p></div>
+          <div><span>3</span><p>新会话创建备份、执行一次真实切换与 smoke；失败立即恢复并重启旧工具。</p></div>
         </div>
       </section>
     </div>

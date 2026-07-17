@@ -173,6 +173,13 @@ try {
   }
   await desktop.screenshot({ path: join(outputDir, 'desktop-safety.png'), fullPage: true })
 
+  await desktop.getByRole('button', { name: /交接准备/ }).click()
+  await desktop.getByRole('heading', { name: '交接准备' }).waitFor()
+  await desktop.getByText('当前不能切换').waitFor()
+  await desktop.getByLabel('旧 profiles.json 路径').fill('C:\\fixture\\profiles.json')
+  await desktop.getByRole('button', { name: '预检来源' }).waitFor()
+  await desktop.screenshot({ path: join(outputDir, 'desktop-cutover.png'), fullPage: true })
+
   await desktop.getByRole('button', { name: /活动记录/ }).click()
   await desktop.getByRole('heading', { name: '活动记录' }).waitFor()
   await desktop.locator('.activity-list').waitFor()
@@ -230,14 +237,14 @@ try {
     ok: true,
     url,
     outputDir,
-    screenshots: ['desktop.png', 'desktop-models.png', 'desktop-safety.png', 'desktop-after-save.png', 'compact-desktop.png', 'wide-safety.png'],
+    screenshots: ['desktop.png', 'desktop-models.png', 'desktop-safety.png', 'desktop-cutover.png', 'desktop-after-save.png', 'compact-desktop.png', 'wide-safety.png'],
     metrics: {
       desktop: desktopMetrics,
       compact: compactMetrics,
       sidebar: { desktop: desktopSidebarMetrics, compact: compactSidebarMetrics, wide: wideSidebarMetrics },
       safety: { desktop: safetyLayout, compact: compactSafetyLayout },
     },
-    interaction: '检查更新 -> 模型目录 -> 刷新并选择模型 -> 新增服务商 -> 保存 -> 安全检查显示预览边界 -> 复制 -> 删除 -> 设为默认 -> 活动记录',
+    interaction: '检查更新 -> 模型目录 -> 刷新并选择模型 -> 新增服务商 -> 保存 -> 安全检查显示预览边界 -> 交接准备状态 -> 复制 -> 删除 -> 设为默认 -> 活动记录',
   }, null, 2))
 } finally {
   await browser.close()

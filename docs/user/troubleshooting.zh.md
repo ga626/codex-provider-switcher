@@ -120,6 +120,16 @@ npm run tauri:desktop-boundary:smoke
 
 不要直接手工覆盖 `config.toml` 或 `auth.json`。先确认是否已有备份和恢复路径。涉及真实 Codex provider 切换时，应使用新会话或另一个 agent 执行最终 cutover。
 
+## 旧工具迁移或切换被阻止
+
+这是安全门禁，不要绕过：
+
+- 旧工具仍在运行或旧端口仍被占用：不要同时使用两个切换器。保留旧工具作为回滚源，等新会话进入最终交接窗口后再停止它。
+- 旧 profiles 尚未导入：在“交接准备”中输入旧 `profiles.json` 路径并先预检。预检发现冲突时，新版不会覆盖已有配置；先人工整理冲突，再重新预检。
+- 导入后仍不能切换：先对目标服务商运行真实检查，并确认模型名称非空。切换会先创建包含 manifest 的备份；失败时用“恢复最近备份”，然后重启旧工具。
+
+最终交接不能在当前正在工作的 Codex 会话中执行。具体顺序见 [旧工具交接手册](../release/legacy-cutover-handoff.zh.md)。
+
 ## 不要提交的信息
 
 不要把真实 API key、`auth.json`、真实 `profiles.json`、备份目录、截图或本机私有日志贴到 Issue、PR 或公开文档里。

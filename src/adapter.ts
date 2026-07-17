@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { initialState } from './mockData'
-import type { AppState, EditableProfile, ModelCatalog, ProviderProfile, UpdateInfo } from './types'
+import type { AppState, EditableProfile, LegacyImportPreview, ModelCatalog, ProviderProfile, UpdateInfo } from './types'
 
 const isTauri = '__TAURI_INTERNALS__' in window
 const allowBrowserMock = import.meta.env.VITE_CODEX_PROVIDER_SWITCHER_ALLOW_MOCK === 'true'
@@ -153,6 +153,24 @@ export async function openUpdate(url: string): Promise<void> {
   if (!opened) {
     throw new Error('浏览器阻止了更新下载窗口。')
   }
+}
+
+export async function previewLegacyImport(sourcePath: string): Promise<LegacyImportPreview> {
+  if (isTauri) {
+    return invoke<LegacyImportPreview>('preview_legacy_import', { sourcePath })
+  }
+  const webResult = await tryWebBackend<LegacyImportPreview>('/api/legacy/preview', apiPost({ sourcePath }))
+  if (webResult) return webResult
+  throw new Error('开发预览不读取本机旧 profiles。请使用桌面开发版或本机后端预检。')
+}
+
+export async function importLegacyProfiles(sourcePath: string): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('import_legacy_profiles', { sourcePath })
+  }
+  const webState = await tryWebBackend<AppState>('/api/legacy/import', apiPost({ sourcePath }))
+  if (webState) return webState
+  throw new Error('开发预览不导入本机旧 profiles。请使用桌面开发版或本机后端执行迁移。')
 }
 
 export async function saveProfile(profile: EditableProfile): Promise<AppState> {

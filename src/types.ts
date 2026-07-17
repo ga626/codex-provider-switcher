@@ -93,13 +93,27 @@ export type UpdateInfo = {
 export type LegacySwitcherStatus = {
   profilePath: string
   profileExists: boolean
+  sourceConfigured: boolean
   processRunning: boolean
   port: number
   portInUse: boolean
   imported: boolean
   importedFrom?: string
   importedAt?: string
+  importedProfileCount?: number
+  migrationState: 'source_required' | 'ready_to_import' | 'imported'
+  writeBlocked: boolean
+  writeBlockReason?: string
   appProfilePath: string
+}
+
+export type LegacyImportPreview = {
+  sourceLabel: string
+  schema: string
+  profileCount: number
+  conflictCount: number
+  canImport: boolean
+  message: string
 }
 
 export type AppState = {

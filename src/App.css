@@ -815,6 +815,111 @@ textarea {
   margin-top: 12px;
 }
 
+.cutover-status.ready {
+  border-color: rgba(20, 132, 74, 0.28);
+  background: var(--green-soft);
+}
+
+.cutover-status.blocked {
+  border-color: rgba(161, 98, 7, 0.28);
+  background: var(--amber-soft);
+}
+
+.cutover-status > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cutover-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.cutover-facts div,
+.migration-preview,
+.cutover-steps > div {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-soft);
+}
+
+.cutover-facts div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.cutover-facts span,
+.cutover-source-field,
+.cutover-steps p,
+.migration-preview span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cutover-facts strong {
+  font-size: 13px;
+}
+
+.cutover-source-field {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  font-weight: 720;
+}
+
+.cutover-source-field input {
+  min-width: 0;
+}
+
+.migration-preview {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px;
+}
+
+.migration-preview.ok svg { color: var(--green); }
+.migration-preview.warning { border-color: rgba(161, 98, 7, 0.28); background: var(--amber-soft); }
+.migration-preview.warning svg { color: var(--amber); }
+.migration-preview strong,
+.migration-preview span { display: block; }
+
+.cutover-steps {
+  display: grid;
+  gap: 8px;
+}
+
+.cutover-steps > div {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 9px;
+}
+
+.cutover-steps > div.done { border-color: rgba(20, 132, 74, 0.28); }
+
+.cutover-steps > div > span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cutover-steps p { margin: 0; line-height: 1.45; }
+
 .check-row {
   grid-template-columns: 20px minmax(0, 1fr);
 }
@@ -1059,6 +1164,10 @@ textarea {
   .safety-run-button {
     grid-column: 1 / -1;
     justify-self: end;
+  }
+
+  .cutover-facts {
+    grid-template-columns: 1fr;
   }
 
 }

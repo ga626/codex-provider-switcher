@@ -11,10 +11,14 @@ export const initialState: AppState = {
   legacySwitcher: {
     profilePath: '旧版工具本机 profiles.json',
     profileExists: true,
+    sourceConfigured: true,
     processRunning: true,
     port: 47831,
     portInUse: true,
     imported: false,
+    migrationState: 'ready_to_import',
+    writeBlocked: true,
+    writeBlockReason: '开发预览不会执行旧工具迁移或真实切换。',
     appProfilePath: String.raw`%LOCALAPPDATA%\CodeX Provider Switcher\profiles.json`,
   },
   profiles: [
