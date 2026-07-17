@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-这是 `0.3.1-alpha`：可稳定安装、可按 GitHub Release 更新的桌面 Alpha 基线：
+这是即将发布的 `0.3.2-alpha`：在稳定安装和签名更新基线之上，补齐 Release 构建缓存、超时、候选资产和安全重试边界：
 
 - React/Vite 前端。
 - Tauri/Rust 桌面窗口、本地文件、profiles、backup、validation、restore 基础。
@@ -14,12 +14,13 @@
 - Windows 桌面安装资产：setup exe。
 - Tauri 签名更新通道：正式 Release 生成 `latest.json`、签名 setup 更新包和 `.sig` 文件；没有发布私钥时不会生成可冒充正式版的更新资产。
 - 正式发布由 GitHub Actions 在推送新 `v*` 标签后完成；用户不需要密钥或口令。Alpha 版本仍使用新版本号和新 tag，但 GitHub Release 必须保持 `Latest`，以便自动更新地址可用。
+- Release workflow 会先校验 tag 和版本，再构建签名候选资产、保存 workflow artifact，最后创建 GitHub Release；缓存只加速 Rust/Tauri 构建，不保存用户下载包。
 - fallback alpha zip：包含 `CodeXProviderSwitcher.cmd`、静默本地后端 `local_backend.exe` 和 `dist/` 前端资源。
 - 浏览器 UI-only mock adapter，仅用于 `preview:start` 这种显式开发预览；Release 包和真实本地后端入口不会静默回落到假数据。
 - Playwright UI smoke flow。
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
 
-[下载 0.3.1-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.3.1-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
+[下载 0.3.2-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.3.2-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
 
 ## 开发验收方式
 
@@ -196,6 +197,7 @@ npm run qa:install-release -- -Collect
 
 ```powershell
 npm run release:verify-local
+npm run release:verify-upload-assets
 ```
 
 稳定安装 QA（默认只解释，不启动安装器）：

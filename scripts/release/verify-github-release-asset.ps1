@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.3.1-alpha",
+    [string]$Version = "",
     [string]$Tag = "",
     [string]$Repository = "ga626/codex-provider-switcher",
     [string]$OutputRoot = "release-assets",
@@ -14,6 +14,10 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -Er
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $package = Get-Content -LiteralPath (Join-Path $projectRoot "package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    $Version = [string]$package.version
+}
 if ([string]::IsNullOrWhiteSpace($Tag)) {
     $Tag = "v$Version"
 }
@@ -90,6 +94,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "Unable to read GitHub Release $Repository@$Tag. Output: $releaseJson"
 }
 $release = $releaseJson | ConvertFrom-Json
+if ($release.isDraft -or $release.isPrerelease) {
+    throw "GitHub Release $Tag is not eligible for the updater latest channel."
+}
 $assetNames = @($release.assets | ForEach-Object { $_.name })
 if ($assetNames -notcontains "$releaseName.zip") {
     throw "GitHub Release is missing asset: $releaseName.zip"
@@ -112,6 +119,15 @@ $updaterAssetNames = @($assetNames | Where-Object {
 })
 if ($updaterAssetNames -notcontains "latest.json") {
     throw "GitHub Release is missing signed updater manifest: latest.json"
+}
+
+$latestJson = & gh api "repos/$Repository/releases/latest" 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to read the GitHub latest Release. Output: $latestJson"
+}
+$latestRelease = $latestJson | ConvertFrom-Json
+if ($latestRelease.tag_name -ne $Tag) {
+    throw "GitHub latest Release tag mismatch: expected $Tag, got $($latestRelease.tag_name)"
 }
 if (-not ($updaterAssetNames | Where-Object { $_ -like "*-setup.exe.sig" })) {
     throw "GitHub Release is missing Windows updater signature (*-setup.exe.sig)."

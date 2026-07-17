@@ -65,8 +65,10 @@ try {
         "CodeXProviderSwitcher.ps1",
         "scripts\release\build-codex-provider-switcher-release.ps1",
         "scripts\release\verify-local-release-package.ps1",
+        "scripts\release\verify-release-upload-assets.ps1",
         "scripts\release\verify-github-release-asset.ps1",
         "scripts\release\publish-github-release-asset.ps1",
+        "scripts\release\publish-github-release-from-artifact.ps1",
         "scripts\verify\doctor-codex-provider-switcher.ps1",
         "setup.cmd",
         "setup.ps1",
@@ -91,8 +93,18 @@ try {
     $packageJsonPath = Join-Path $projectRoot "package.json"
     if (Test-Path -LiteralPath $packageJsonPath -PathType Leaf) {
         $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($packageJson.version -ne "0.3.1-alpha") {
-            Add-Failure "package.json version must match current alpha release: 0.3.1-alpha"
+        if ([string]::IsNullOrWhiteSpace($packageJson.version)) {
+            Add-Failure "package.json version must not be empty."
+        }
+        if ($tauriConfig -and $tauriConfig.version -ne $packageJson.version) {
+            Add-Failure "package.json and tauri.conf.json versions must match."
+        }
+        $cargoPath = Join-Path $projectRoot "src-tauri\Cargo.toml"
+        if (Test-Path -LiteralPath $cargoPath -PathType Leaf) {
+            $cargoText = Get-Content -LiteralPath $cargoPath -Raw -Encoding UTF8
+            if ($cargoText -notmatch ('(?m)^version\s*=\s*"' + [regex]::Escape($packageJson.version) + '"')) {
+                Add-Failure "package.json and Cargo.toml versions must match."
+            }
         }
     }
 

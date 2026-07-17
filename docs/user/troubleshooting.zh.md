@@ -110,6 +110,12 @@ cargo check --manifest-path src-tauri/Cargo.toml
 npm run tauri:desktop-boundary:smoke
 ```
 
+## GitHub Actions 构建过慢或超时
+
+先看 Actions 中是哪一个阶段慢：前端、Tauri/NSIS、本地后端、候选资产校验，还是发布。Rust/Tauri cache 只会加速相同依赖和工具链下的后续构建；第一次冷构建仍可能较慢。
+
+不要重新生成签名密钥，也不要重用旧 tag。若 build job 超时，记录 cache 命中和阶段耗时后修复；若已有完整 Release，使用受控的 workflow_dispatch 输入该 tag 做远端结构验证，不覆盖已有资产。
+
 ## provider 切换失败
 
 不要直接手工覆盖 `config.toml` 或 `auth.json`。先确认是否已有备份和恢复路径。涉及真实 Codex provider 切换时，应使用新会话或另一个 agent 执行最终 cutover。

@@ -2,16 +2,23 @@
 
 ## Unreleased
 
-- Fixed the Tauri release entrypoint so the NSIS installer bundles the desktop GUI binary instead of the local Web backend binary.
-- Added a smoke guard for the Tauri CLI binary-selection syntax.
-- Hidden the Windows `tasklist.exe` probe so normal feature actions do not open a child console window.
-- Localized the NSIS installer to Simplified Chinese and added branded header/sidebar artwork.
-- Removed stale updater signatures before each release build.
+## 0.3.2-alpha - 2026-07-17
+
+- Added Rust/Tauri build caching, explicit GitHub Actions timeouts, and phase timing for Release builds.
+- Split the Release workflow into tag preflight, signed asset build, and artifact-backed publishing jobs.
+- Added upload-set validation for checksums and updater metadata before a GitHub Release is created.
+- Added idempotent handling for an existing complete Release and an explicit failure path for incomplete assets.
+- Kept signing Secrets in the build job only; the publish job receives verified public artifacts and no signing key.
 
 ## 0.3.1-alpha - 2026-07-16
 
 - Hotfix release: the Windows setup now starts the Tauri desktop GUI.
 - The local Web backend remains a separate fallback binary and is not used as the installed desktop entrypoint.
+- Fixed the Tauri release entrypoint so the NSIS installer bundles the desktop GUI binary instead of the local Web backend binary.
+- Added a smoke guard for the Tauri CLI binary-selection syntax.
+- Hidden the Windows `tasklist.exe` probe so normal feature actions do not open a child console window.
+- Localized the NSIS installer to Simplified Chinese and added branded header/sidebar artwork.
+- Removed stale updater signatures before each release build.
 
 ## 0.3.0-alpha - 2026-07-16
 
