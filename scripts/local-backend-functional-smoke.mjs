@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -21,7 +21,6 @@ const localAppData = join(fixtureRoot, 'local-app-data')
 const codexDir = join(userHome, '.codex')
 const configPath = join(codexDir, 'config.toml')
 const authPath = join(codexDir, 'auth.json')
-const legacyProfilesPath = join(fixtureRoot, 'legacy-profiles.json')
 let modelsProbeRequestCount = 0
 let responsesProbeRequestCount = 0
 
@@ -86,37 +85,20 @@ const originalConfig = [
 const originalAuth = JSON.stringify({ OPENAI_API_KEY: 'baseline-key', preserved: 'yes' }, null, 2)
 await writeFile(configPath, originalConfig, 'utf8')
 await writeFile(authPath, originalAuth, 'utf8')
-await writeFile(legacyProfilesPath, JSON.stringify({
-  profiles: {
-    'legacy-primary': {
-      name: 'Legacy Primary',
-      base_url: providerUrl,
-      api_key: 'sk-legacy-primary',
-      model: 'reasoning-current',
-      default: true,
-    },
-    'legacy-backup': {
-      name: 'Legacy Backup',
-      baseUrl: providerUrl,
-      apiKey: 'sk-legacy-backup',
-      model: 'fast-current',
-    },
-  },
-}, null, 2), 'utf8')
 
 const providerServer = createServer((request, response) => {
   if (request.url === '/releases') {
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify([
       {
-        tag_name: 'v0.5.0-alpha',
-        html_url: 'https://github.com/ga626/codex-provider-switcher/releases/tag/v0.5.0-alpha',
+        tag_name: 'v0.4.0-alpha',
+        html_url: 'https://github.com/ga626/codex-provider-switcher/releases/tag/v0.4.0-alpha',
         draft: false,
         published_at: '2026-07-16T00:00:00Z',
         assets: [
           {
-            name: 'CodeXProviderSwitcher-windows-x64-0.5.0-alpha-setup.exe',
-            browser_download_url: 'https://github.com/ga626/codex-provider-switcher/releases/download/v0.5.0-alpha/CodeXProviderSwitcher-windows-x64-0.5.0-alpha-setup.exe',
+            name: 'CodeXProviderSwitcher-windows-x64-0.4.0-alpha-setup.exe',
+            browser_download_url: 'https://github.com/ga626/codex-provider-switcher/releases/download/v0.4.0-alpha/CodeXProviderSwitcher-windows-x64-0.4.0-alpha-setup.exe',
           },
         ],
       },
@@ -192,9 +174,7 @@ const backend = spawn(exePath, ['--port', String(backendPort)], {
     LOCALAPPDATA: localAppData,
     CODEX_PROVIDER_SWITCHER_CODEX_HOME: codexDir,
     CODEX_PROVIDER_SWITCHER_APP_DATA_DIR: join(localAppData, 'CodeX Provider Switcher'),
-    CODEX_PROVIDER_SWITCHER_LEGACY_PROFILES: legacyProfilesPath,
-    CODEX_PROVIDER_SWITCHER_LEGACY_PROCESS_NAME: 'fixture-old-switcher.exe',
-    CODEX_PROVIDER_SWITCHER_LEGACY_PORT: '47849',
+    CODEX_PROVIDER_SWITCHER_LEGACY_PROFILES: '',
     CODEX_PROVIDER_SWITCHER_RELEASES_API: `http://127.0.0.1:${providerPort}/releases`,
   },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -205,25 +185,10 @@ try {
   await waitForBackend()
   const initial = await api('/api/state')
   const initialActivityCount = initial.activity.length
-  assert(initial.legacySwitcher.migrationState === 'ready_to_import', 'legacy source was not surfaced as ready to import')
-  assert(initial.legacySwitcher.writeBlocked, 'configured legacy source must block switching before import')
-
-  const legacyPreview = await api('/api/legacy/preview', { sourcePath: legacyProfilesPath })
-  assert(legacyPreview.canImport, 'legacy profile preview should allow a clean import')
-  assert(legacyPreview.profileCount === 2, 'legacy profile preview returned the wrong profile count')
-  assert(legacyPreview.conflictCount === 0, 'legacy profile preview reported a false conflict')
-  const importedLegacy = await api('/api/legacy/import', { sourcePath: legacyProfilesPath })
-  assert(importedLegacy.legacySwitcher.imported, 'legacy import did not persist its completion state')
-  assert(importedLegacy.legacySwitcher.importedProfileCount === 2, 'legacy import did not retain the imported count')
-  assert(!importedLegacy.legacySwitcher.writeBlocked, 'legacy import should clear the migration-only write guard in isolation')
-  assert(importedLegacy.profiles.some((item) => item.id === 'legacy-primary'), 'legacy primary profile was not imported')
-  assert(importedLegacy.profiles.some((item) => item.id === 'legacy-backup'), 'legacy backup profile was not imported')
-  const repeatImportError = await expectApiFailure('/api/legacy/import', { sourcePath: legacyProfilesPath })
-  assert(repeatImportError.includes('不能导入'), 'repeat import must refuse to overwrite imported profiles')
 
   const update = await api('/api/update/check')
   assert(update.available, 'update check did not detect a newer semantic version')
-  assert(update.latestVersion === '0.5.0-alpha', 'update check returned the wrong latest version')
+  assert(update.latestVersion === '0.4.0-alpha', 'update check returned the wrong latest version')
   assert(update.downloadUrl?.endsWith('-setup.exe'), 'update check did not select the Windows setup asset')
 
   const profile = {
@@ -275,11 +240,6 @@ try {
   assert(switchedAuth.OPENAI_API_KEY === 'sk-fixture', 'switch did not update auth key')
   assert(switchedAuth.preserved === 'yes', 'switch removed unrelated auth data')
   assert(switched.backups.length === 1, 'switch did not create exactly one backup')
-  assert(switched.backups[0].files >= 3, 'switch backup did not include a manifest')
-  const backupLabels = await readdir(join(localAppData, 'CodeX Provider Switcher', 'backups'))
-  const manifest = JSON.parse(await readFile(join(localAppData, 'CodeX Provider Switcher', 'backups', backupLabels[0], 'manifest.json'), 'utf8'))
-  assert(manifest.reason === 'before_switch', 'backup manifest did not record its reason')
-  assert(Array.isArray(manifest.files) && manifest.files.includes('config.toml') && manifest.files.includes('auth.json'), 'backup manifest did not list protected files')
   assert(switched.activity[0]?.title === '已切换到 Fixture Provider', 'switch did not update activity')
   assert(modelsProbeRequestCount >= 3, 'verification and switching did not issue real authenticated /models probes')
 
@@ -348,15 +308,13 @@ try {
     isolationRoot: fixtureRoot,
     assertions: [
       'save persisted provider and activity',
-      'legacy profiles require explicit preview and import without overwriting existing entries',
-      'legacy migration status blocks switching until the isolated import completes',
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models and deduplicated results',
       'real authenticated /v1/models probes gate A6/OWL without requiring a selected model',
       'DasuAPI request probe identifies insufficient quota instead of trusting /v1/models availability',
       'verification diagnostics classify endpoint, protocol, billing, and service errors without changing Codex config/auth',
       'default selection persisted',
-      'switch wrote config/auth, preserved unrelated data, and created a manifest-backed backup',
+      'switch wrote config/auth, preserved unrelated data, and created a backup',
       'insufficient balance blocks switching without touching config/auth or backups',
       'restore recovered both files and updated timeline',
       'delete removed a non-current non-default provider',

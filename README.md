@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-当前已发布版本是 `0.3.2-alpha`。本分支准备 `0.4.0-alpha`，在稳定安装和签名更新基线之上补齐旧工具替换前的迁移、唯一写入者和交接边界：
+这是即将发布的 `0.3.2-alpha`：在稳定安装和签名更新基线之上，补齐 Release 构建缓存、超时、候选资产和安全重试边界：
 
 - React/Vite 前端。
 - Tauri/Rust 桌面窗口、本地文件、profiles、backup、validation、restore 基础。
@@ -19,11 +19,8 @@
 - 浏览器 UI-only mock adapter，仅用于 `preview:start` 这种显式开发预览；Release 包和真实本地后端入口不会静默回落到假数据。
 - Playwright UI smoke flow。
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
-- 旧 profiles 的显式预检与导入：只显示条数、格式和冲突结果，不显示或记录密钥。
-- 旧工具进程/端口门禁：旧工具仍运行时，新版拒绝写入 Codex 配置，避免两个工具竞争同一配置。
-- 切换前的备份 manifest：只记录备份时间、原因和文件名，不记录配置内容或凭据。
 
-[下载当前已发布的 0.3.2-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.3.2-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md) · [旧工具交接](docs/release/legacy-cutover-handoff.zh.md)
+[下载 0.3.2-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.3.2-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
 
 ## 开发验收方式
 
@@ -52,14 +49,14 @@ npm run qa:stable-install -- -ExplainOnly
 本版本明确保留的后续边界：
 
 - Codex/Responses 与中转站模型名的完整行为兼容验证策略。
-- 最终 cutover 只能由新会话执行，当前 PR 不会停止或删除旧工具。
+- 旧版工具最终 cutover。
 - UI 信息架构重构。
 
 ## 旧版工具边界
 
 旧版工具仍然是参考源和回滚源：
 
-本仓库不会直接覆盖旧版 `CodeX-Switcher.exe` 或旧版本机目录。新版要求先显式预检并导入旧 profiles；旧工具运行或仍占用旧端口时，切换写入会被阻止。只有当新版完成启动、验证、备份、恢复、回滚、模型发现和最终交接包之后，才进入受控替换阶段。
+本仓库不会直接覆盖旧版 `CodeX-Switcher.exe` 或旧版本机目录。只有当新版完成启动、验证、备份、恢复、回滚、模型发现和最终交接包之后，才进入受控替换阶段。
 
 ## 开发命令
 

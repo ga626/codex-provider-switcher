@@ -495,7 +495,7 @@ dependencies = [
 
 [[package]]
 name = "codex-provider-switcher"
-version = "0.4.0-alpha"
+version = "0.3.2-alpha"
 dependencies = [
  "chrono",
  "dirs",

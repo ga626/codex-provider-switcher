@@ -19,8 +19,6 @@ const BACKUPS_DIR: &str = "backups";
 const CODEX_HOME_ENV: &str = "CODEX_PROVIDER_SWITCHER_CODEX_HOME";
 const APP_DATA_DIR_ENV: &str = "CODEX_PROVIDER_SWITCHER_APP_DATA_DIR";
 const LEGACY_PROFILE_ENV: &str = "CODEX_PROVIDER_SWITCHER_LEGACY_PROFILES";
-const LEGACY_PROCESS_NAME_ENV: &str = "CODEX_PROVIDER_SWITCHER_LEGACY_PROCESS_NAME";
-const LEGACY_PORT_ENV: &str = "CODEX_PROVIDER_SWITCHER_LEGACY_PORT";
 const LEGACY_SWITCHER_PORT: u16 = 47831;
 const RELEASES_API_ENV: &str = "CODEX_PROVIDER_SWITCHER_RELEASES_API";
 const RELEASES_API_URL: &str =
@@ -164,29 +162,13 @@ struct GithubRelease {
 pub struct LegacySwitcherStatus {
     pub profile_path: String,
     pub profile_exists: bool,
-    pub source_configured: bool,
     pub process_running: bool,
     pub port: u16,
     pub port_in_use: bool,
     pub imported: bool,
     pub imported_from: Option<String>,
     pub imported_at: Option<String>,
-    pub imported_profile_count: Option<usize>,
-    pub migration_state: String,
-    pub write_blocked: bool,
-    pub write_block_reason: Option<String>,
     pub app_profile_path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LegacyImportPreview {
-    pub source_label: String,
-    pub schema: String,
-    pub profile_count: usize,
-    pub conflict_count: usize,
-    pub can_import: bool,
-    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -262,16 +244,6 @@ struct StoredCatalog {
     imported_from_legacy: Option<String>,
     #[serde(default)]
     imported_at: Option<String>,
-    #[serde(default)]
-    legacy_import: Option<LegacyImportRecord>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LegacyImportRecord {
-    source_label: String,
-    schema: String,
-    profile_count: usize,
-    imported_at: String,
 }
 
 fn default_version() -> String {
@@ -356,6 +328,15 @@ fn normalize_id(name: &str) -> String {
 }
 
 fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
+    if let Some(legacy) = legacy_profile_path().filter(|path| path.exists()) {
+        let text = fs::read_to_string(legacy)?;
+        let mut catalog: StoredCatalog = serde_json::from_str(&text)?;
+        normalize_catalog(&mut catalog);
+        catalog.imported_from_legacy = legacy_profile_path().map(|path| path.display().to_string());
+        catalog.imported_at = Some(now_label());
+        return Ok(catalog);
+    }
+
     let mut profiles = Map::new();
     profiles.insert(
         "owl".to_string(),
@@ -378,7 +359,6 @@ fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
         invariants: default_invariants(),
         imported_from_legacy: None,
         imported_at: None,
-        legacy_import: None,
     })
 }
 
@@ -426,194 +406,6 @@ fn normalize_catalog(catalog: &mut StoredCatalog) {
     if protected_empty {
         catalog.invariants = default_invariants();
     }
-}
-
-fn source_label(path: &std::path::Path) -> String {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or("profiles.json")
-        .to_string()
-}
-
-fn legacy_profile_value(raw: &Map<String, Value>, keys: &[&str]) -> String {
-    keys.iter()
-        .find_map(|key| raw.get(*key).and_then(Value::as_str))
-        .map(str::trim)
-        .unwrap_or("")
-        .to_string()
-}
-
-fn normalized_legacy_profile(
-    id_hint: &str,
-    raw: &Value,
-    position: usize,
-) -> Result<(String, StoredProfile), SwitcherError> {
-    let object = raw.as_object().ok_or_else(|| {
-        SwitcherError::Message("旧 profiles 包含不是对象的服务商条目。".to_string())
-    })?;
-    let name = legacy_profile_value(object, &["name", "display_name", "displayName"]);
-    let base_url = legacy_profile_value(object, &["base_url", "baseUrl", "url"]);
-    if name.is_empty() || !base_url.starts_with("http") {
-        return Err(SwitcherError::Message(
-            "旧 profiles 缺少可识别的服务商名称或有效接口地址。".to_string(),
-        ));
-    }
-    let id = normalize_id(if id_hint.trim().is_empty() {
-        &name
-    } else {
-        id_hint
-    });
-    let id = if id.is_empty() {
-        format!("legacy-provider-{}", position + 1)
-    } else {
-        id
-    };
-    Ok((
-        id,
-        StoredProfile {
-            name,
-            base_url,
-            api_key: legacy_profile_value(object, &["api_key", "apiKey", "key"]),
-            model: legacy_profile_value(object, &["model", "model_name", "modelName"]),
-            model_reasoning_effort: {
-                let value =
-                    legacy_profile_value(object, &["model_reasoning_effort", "reasoning_effort"]);
-                if value.is_empty() {
-                    default_reasoning()
-                } else {
-                    value
-                }
-            },
-            verified: false,
-            verification_status: default_verification_status(),
-            default: object
-                .get("default")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            note: legacy_profile_value(object, &["note", "notes", "description"]),
-            last_switched_at: None,
-            last_verified_at: None,
-            last_verification_detail: None,
-            last_verification_stage: None,
-            last_verification_http_status: None,
-            last_verification_provider_code: None,
-        },
-    ))
-}
-
-fn parse_legacy_profiles(
-    text: &str,
-) -> Result<(String, Vec<(String, StoredProfile)>), SwitcherError> {
-    let root: Value = serde_json::from_str(text)?;
-    let root_object = root.as_object().ok_or_else(|| {
-        SwitcherError::Message("旧 profiles 根节点必须是 JSON 对象。".to_string())
-    })?;
-    let (schema, entries): (&str, Vec<(String, Value)>) = match root_object.get("profiles") {
-        Some(Value::Object(profiles)) => (
-            "profiles_object",
-            profiles
-                .iter()
-                .map(|(id, value)| (id.clone(), value.clone()))
-                .collect(),
-        ),
-        Some(Value::Array(profiles)) => (
-            "profiles_array",
-            profiles
-                .iter()
-                .enumerate()
-                .map(|(index, value)| {
-                    let id = value
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
-                    (
-                        if id.is_empty() {
-                            format!("legacy-{index}")
-                        } else {
-                            id
-                        },
-                        value.clone(),
-                    )
-                })
-                .collect(),
-        ),
-        _ => (
-            "root_profile_map",
-            root_object
-                .iter()
-                .filter(|(_, value)| value.is_object())
-                .map(|(id, value)| (id.clone(), value.clone()))
-                .collect(),
-        ),
-    };
-    if entries.is_empty() {
-        return Err(SwitcherError::Message(
-            "旧 profiles 中没有可导入的服务商配置。".to_string(),
-        ));
-    }
-
-    let mut seen = BTreeSet::new();
-    let mut profiles = Vec::new();
-    for (position, (id_hint, value)) in entries.iter().enumerate() {
-        let (id, profile) = normalized_legacy_profile(id_hint, value, position)?;
-        if !seen.insert(id.clone()) {
-            return Err(SwitcherError::Message(
-                "旧 profiles 存在重复的服务商标识。".to_string(),
-            ));
-        }
-        profiles.push((id, profile));
-    }
-    Ok((schema.to_string(), profiles))
-}
-
-fn is_bootstrap_profile(value: &Value) -> bool {
-    serde_json::from_value::<StoredProfile>(value.clone())
-        .map(|profile| {
-            profile.name == "OWL"
-                && profile.base_url == "https://api.owlai.tech/v1"
-                && profile.api_key.trim().is_empty()
-                && profile.model.trim().is_empty()
-        })
-        .unwrap_or(false)
-}
-
-fn legacy_import_preview_for_catalog(
-    catalog: &StoredCatalog,
-    source: &std::path::Path,
-) -> Result<(String, Vec<(String, StoredProfile)>, LegacyImportPreview), SwitcherError> {
-    let text = fs::read_to_string(source)?;
-    let (schema, profiles) = parse_legacy_profiles(&text)?;
-    let profile_count = profiles.len();
-    let conflict_count = profiles
-        .iter()
-        .filter(|(id, _)| {
-            catalog
-                .profiles
-                .get(id)
-                .map(|value| !is_bootstrap_profile(value))
-                .unwrap_or(false)
-        })
-        .count();
-    let can_import = conflict_count == 0;
-    let message = if can_import {
-        format!("已识别 {profile_count} 条服务商配置；导入不会覆盖已有配置。")
-    } else {
-        format!("发现 {conflict_count} 条同名配置；为防止覆盖，当前不能导入。")
-    };
-    Ok((
-        schema.clone(),
-        profiles,
-        LegacyImportPreview {
-            source_label: source_label(source),
-            schema,
-            profile_count,
-            conflict_count,
-            can_import,
-            message,
-        },
-    ))
 }
 
 fn save_catalog(catalog: &StoredCatalog) -> Result<(), SwitcherError> {
@@ -849,18 +641,8 @@ fn list_backups() -> Result<Vec<BackupItem>, SwitcherError> {
     Ok(items)
 }
 
-fn legacy_switcher_port() -> u16 {
-    if cfg!(debug_assertions) {
-        return env::var(LEGACY_PORT_ENV)
-            .ok()
-            .and_then(|value| value.parse::<u16>().ok())
-            .unwrap_or(LEGACY_SWITCHER_PORT);
-    }
-    LEGACY_SWITCHER_PORT
-}
-
 fn legacy_port_in_use() -> bool {
-    let addr = SocketAddr::from(([127, 0, 0, 1], legacy_switcher_port()));
+    let addr = SocketAddr::from(([127, 0, 0, 1], LEGACY_SWITCHER_PORT));
     TcpStream::connect_timeout(&addr, Duration::from_millis(160)).is_ok()
 }
 
@@ -880,42 +662,15 @@ fn hidden_command(program: &str) -> Command {
 
 fn legacy_process_running() -> bool {
     if cfg!(target_os = "windows") {
-        let process_name = if cfg!(debug_assertions) {
-            env::var(LEGACY_PROCESS_NAME_ENV).unwrap_or_else(|_| "CodeX-Switcher.exe".to_string())
-        } else {
-            "CodeX-Switcher.exe".to_string()
-        };
-        let filter = format!("IMAGENAME eq {process_name}");
         if let Ok(output) = hidden_command("tasklist")
-            .args(["/FI", filter.as_str(), "/NH"])
+            .args(["/FI", "IMAGENAME eq CodeX-Switcher.exe", "/NH"])
             .output()
         {
             let text = String::from_utf8_lossy(&output.stdout);
-            return text.contains(&process_name);
+            return text.contains("CodeX-Switcher.exe");
         }
     }
     false
-}
-
-fn legacy_write_block_reason(
-    process_running: bool,
-    port_in_use: bool,
-    profile_exists: bool,
-    imported: bool,
-) -> Option<String> {
-    if process_running || port_in_use {
-        return Some(
-            "旧版 CodeX-Switcher 仍在运行或占用 47831 端口。请只在最终交接窗口停止旧工具后继续。"
-                .to_string(),
-        );
-    }
-    if profile_exists && !imported {
-        return Some(
-            "已选择旧 profiles，但尚未完成显式导入。为避免遗漏原有服务商配置，暂不允许切换。"
-                .to_string(),
-        );
-    }
-    None
 }
 
 fn legacy_switcher_status(catalog: &StoredCatalog) -> Result<LegacySwitcherStatus, SwitcherError> {
@@ -926,44 +681,17 @@ fn legacy_switcher_status(catalog: &StoredCatalog) -> Result<LegacySwitcherStatu
         .unwrap_or(false);
     let profile_path_label = profile_path
         .as_ref()
-        .map(|path| source_label(path))
-        .unwrap_or_else(|| "尚未选择旧 profiles".to_string());
-    let legacy_import = catalog.legacy_import.as_ref();
-    let imported = legacy_import.is_some() || catalog.imported_from_legacy.is_some();
-    let process_running = legacy_process_running();
-    let port_in_use = legacy_port_in_use();
-    let write_block_reason =
-        legacy_write_block_reason(process_running, port_in_use, profile_exists, imported);
-    let migration_state = if imported {
-        "imported"
-    } else if profile_exists {
-        "ready_to_import"
-    } else {
-        "source_required"
-    };
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| format!("%{}%", LEGACY_PROFILE_ENV));
     Ok(LegacySwitcherStatus {
         profile_path: profile_path_label,
         profile_exists,
-        source_configured: profile_path.is_some(),
-        process_running,
-        port: legacy_switcher_port(),
-        port_in_use,
-        imported,
-        imported_from: legacy_import
-            .map(|record| record.source_label.clone())
-            .or_else(|| {
-                catalog
-                    .imported_from_legacy
-                    .as_ref()
-                    .map(|_| "历史导入记录".to_string())
-            }),
-        imported_at: legacy_import
-            .map(|record| record.imported_at.clone())
-            .or_else(|| catalog.imported_at.clone()),
-        imported_profile_count: legacy_import.map(|record| record.profile_count),
-        migration_state: migration_state.to_string(),
-        write_blocked: write_block_reason.is_some(),
-        write_block_reason,
+        process_running: legacy_process_running(),
+        port: LEGACY_SWITCHER_PORT,
+        port_in_use: legacy_port_in_use(),
+        imported: catalog.imported_from_legacy.is_some(),
+        imported_from: catalog.imported_from_legacy.clone(),
+        imported_at: catalog.imported_at.clone(),
         app_profile_path: profiles_path()?.display().to_string(),
     })
 }
@@ -1161,20 +889,6 @@ mod tests {
             .expect("vision model should be kept")
             .tags
             .contains(&"vision".to_string()));
-    }
-
-    #[test]
-    fn legacy_write_guard_requires_a_single_writer_and_completed_import() {
-        assert!(legacy_write_block_reason(true, false, false, false)
-            .expect("running legacy process must block")
-            .contains("仍在运行"));
-        assert!(legacy_write_block_reason(false, true, false, false)
-            .expect("legacy port must block")
-            .contains("仍在运行"));
-        assert!(legacy_write_block_reason(false, false, true, false)
-            .expect("unimported configured source must block")
-            .contains("尚未完成显式导入"));
-        assert!(legacy_write_block_reason(false, false, true, true).is_none());
     }
 }
 
@@ -1613,25 +1327,13 @@ fn create_backup() -> Result<PathBuf, SwitcherError> {
     let dir = backups_dir()?.join(label);
     fs::create_dir_all(&dir)?;
     let config = config_path()?;
-    let mut files = Vec::new();
     if config.exists() {
         fs::copy(&config, dir.join("config.toml"))?;
-        files.push("config.toml");
     }
     let auth = auth_path()?;
     if auth.exists() {
         fs::copy(&auth, dir.join("auth.json"))?;
-        files.push("auth.json");
     }
-    fs::write(
-        dir.join("manifest.json"),
-        serde_json::to_string_pretty(&json!({
-            "schema_version": 1,
-            "created_at": now_label(),
-            "reason": "before_switch",
-            "files": files,
-        }))?,
-    )?;
     Ok(dir)
 }
 
@@ -1761,66 +1463,6 @@ pub fn load_state_core() -> Result<AppState, SwitcherError> {
 }
 
 #[tauri::command]
-fn preview_legacy_import(source_path: String) -> Result<LegacyImportPreview, SwitcherError> {
-    preview_legacy_import_core(source_path)
-}
-
-pub fn preview_legacy_import_core(
-    source_path: String,
-) -> Result<LegacyImportPreview, SwitcherError> {
-    let source = PathBuf::from(source_path.trim());
-    if source_path.trim().is_empty() || !source.is_file() {
-        return Err(SwitcherError::Message(
-            "请选择存在的旧 profiles.json 文件。".to_string(),
-        ));
-    }
-    let catalog = load_catalog()?;
-    let (_, _, preview) = legacy_import_preview_for_catalog(&catalog, &source)?;
-    Ok(preview)
-}
-
-#[tauri::command]
-fn import_legacy_profiles(source_path: String) -> Result<AppState, SwitcherError> {
-    import_legacy_profiles_core(source_path)
-}
-
-pub fn import_legacy_profiles_core(source_path: String) -> Result<AppState, SwitcherError> {
-    let source = PathBuf::from(source_path.trim());
-    if source_path.trim().is_empty() || !source.is_file() {
-        return Err(SwitcherError::Message(
-            "请选择存在的旧 profiles.json 文件。".to_string(),
-        ));
-    }
-    let mut catalog = load_catalog()?;
-    let (schema, profiles, preview) = legacy_import_preview_for_catalog(&catalog, &source)?;
-    if !preview.can_import {
-        return Err(SwitcherError::Message(preview.message));
-    }
-
-    for (id, profile) in profiles {
-        catalog.profiles.insert(id, serde_json::to_value(profile)?);
-    }
-    let imported_at = now_label();
-    catalog.imported_from_legacy = Some(preview.source_label.clone());
-    catalog.imported_at = Some(imported_at.clone());
-    catalog.legacy_import = Some(LegacyImportRecord {
-        source_label: preview.source_label.clone(),
-        schema,
-        profile_count: preview.profile_count,
-        imported_at,
-    });
-    save_catalog(&catalog)?;
-    app_state_with_activity(
-        "旧配置已导入",
-        &format!(
-            "已导入 {} 条服务商配置。旧文件保持只读，切换前仍需停止旧工具并通过真实验证。",
-            preview.profile_count
-        ),
-        "success",
-    )
-}
-
-#[tauri::command]
 fn save_profile(profile: EditableProfile) -> Result<AppState, SwitcherError> {
     save_profile_core(profile)
 }
@@ -1928,11 +1570,6 @@ fn switch_profile(profile_id: String) -> Result<AppState, SwitcherError> {
 
 pub fn switch_profile_core(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
-    let legacy = legacy_switcher_status(&catalog)?;
-    if let Some(reason) = legacy.write_block_reason {
-        push_activity("切换已阻止", &reason, "warning")?;
-        return Err(SwitcherError::Message(format!("切换已阻止：{reason}")));
-    }
     let value = catalog
         .profiles
         .get(&profile_id)
@@ -2127,8 +1764,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_state,
             check_for_update,
-            preview_legacy_import,
-            import_legacy_profiles,
             save_profile,
             delete_profile,
             switch_profile,

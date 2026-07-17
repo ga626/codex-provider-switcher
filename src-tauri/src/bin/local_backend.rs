@@ -1,8 +1,7 @@
 use codex_switcher_tauri_lib::{
-    check_for_update_core, delete_profile_core, import_legacy_profiles_core, load_state_core,
-    preview_legacy_import_core, refresh_models_core, restore_latest_backup_core, save_profile_core,
-    set_default_profile_core, switch_profile_core, toggle_auto_start_core, verify_profile_core,
-    AppState, EditableProfile, SwitcherError,
+    check_for_update_core, delete_profile_core, load_state_core, refresh_models_core,
+    restore_latest_backup_core, save_profile_core, set_default_profile_core, switch_profile_core,
+    toggle_auto_start_core, verify_profile_core, AppState, EditableProfile, SwitcherError,
 };
 use serde_json::{json, Value};
 use std::{
@@ -238,12 +237,6 @@ fn handle_api(
         ("GET", "/api/state") => load_state_core().map(state_json),
         ("GET", "/api/update/check") => check_for_update_core()
             .and_then(|value| serde_json::to_value(value).map_err(SwitcherError::from)),
-        ("POST", "/api/legacy/preview") => legacy_source_path(body)
-            .and_then(preview_legacy_import_core)
-            .and_then(|value| serde_json::to_value(value).map_err(SwitcherError::from)),
-        ("POST", "/api/legacy/import") => legacy_source_path(body)
-            .and_then(import_legacy_profiles_core)
-            .map(state_json),
         ("POST", "/api/profiles/save") => {
             let profile = request_json(body)?
                 .get("profile")
@@ -292,14 +285,6 @@ fn profile_id(body: &[u8]) -> Result<String, SwitcherError> {
         .and_then(Value::as_str)
         .map(ToString::to_string)
         .ok_or_else(|| SwitcherError::Message("缺少 profileId。".to_string()))
-}
-
-fn legacy_source_path(body: &[u8]) -> Result<String, SwitcherError> {
-    request_json(body)?
-        .get("sourcePath")
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
-        .ok_or_else(|| SwitcherError::Message("缺少 sourcePath。".to_string()))
 }
 
 fn state_json(mut state: AppState) -> Value {
