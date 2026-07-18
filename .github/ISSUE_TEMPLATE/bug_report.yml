@@ -1,43 +1,43 @@
-name: Bug report
-description: Report a problem with CodeX Provider Switcher
-title: "[Bug]: "
+name: 问题反馈
+description: 报告 CodeX Provider Switcher 的使用问题
+title: "[问题]: "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Please do not include real API keys, auth.json, full config.toml, screenshots with secrets, or private provider account data.
+        请不要填写真实 API key、auth.json、完整 config.toml、含凭据的截图或私有服务商账户资料。
   - type: textarea
     id: summary
     attributes:
-      label: Problem
-      description: What happened?
+      label: 问题描述
+      description: 实际发生了什么？
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
-      label: Steps to reproduce
-      description: List the smallest set of steps that reproduces the issue.
+      label: 最小复现步骤
+      description: 写出能稳定复现问题的最少步骤。
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected behavior
+      label: 预期行为
     validations:
       required: true
   - type: textarea
     id: environment
     attributes:
-      label: Environment
-      description: Windows version, app version, Codex surface, provider name. Redact secrets.
+      label: 使用环境
+      description: Windows 版本、应用版本、Codex 使用入口、服务商名称。请脱敏。
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: Logs or screenshots
-      description: Optional. Redact keys, tokens, local auth files, and provider account details.
+      label: 日志或截图
+      description: 可选。请先移除 key、token、本机认证文件和服务商账户信息。
     validations:
       required: false

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "release_target": "windows-x86_64",
+  "entries": [
+    {
+      "alert_number": 1,
+      "dependency": "glib",
+      "severity": "medium",
+      "scope": "Non-Windows Tauri GTK dependency branch retained in Cargo.lock",
+      "release_impact": "Not linked into the Windows x86_64 release target",
+      "evidence_command": "cargo tree --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc -i glib",
+      "review_by": "2026-08-16",
+      "required_follow_up": "Re-evaluate when Tauri or its runtime dependency graph changes; upgrade through a separately validated compatibility PR."
+    }
+  ]
+}

@@ -1,24 +1,16 @@
-# Scripts
+# 维护脚本索引
 
-| Path | Purpose |
-|---|---|
-| `setup.ps1` / root `setup.cmd` | Source-tree convenience launcher that builds frontend/backend and starts the real local Web backend |
-| `CodeXProviderSwitcher.ps1` / root `CodeXProviderSwitcher.cmd` | Release/source launcher for the real local Web backend on `127.0.0.1` |
-| `scripts/start-preview.ps1` | Build and start the preview server on fixed port `127.0.0.1:47832` |
-| `scripts/stop-preview.ps1` | Stop the managed preview process tree and the matching listener on port `47832` |
-| `scripts/qa-smoke.mjs` | Playwright visual/UI smoke for the explicitly marked browser preview; it must not simulate a real switch |
-| `scripts/qa/start-dev-desktop.ps1` | Launch the current source-tree desktop app for dev validation without installing |
-| `scripts/qa/prepare-install-release-qa.ps1` | Locate or collect release setup assets for install/release validation |
-| `scripts/qa/prepare-updater-release-qa.ps1` | Gate cross-version updater acceptance against an installed baseline |
-| `scripts/qa/stable-install.ps1` | Explain, install, upgrade, or uninstall the local stable release at the fixed QA path |
-| `scripts/local-backend-smoke.mjs` | Start the real local Web backend and verify `/api/health` plus `/api/state` |
-| `scripts/local-backend-functional-smoke.mjs` | Exercise real backend writes against an isolated Codex home, including `/responses` verification and the insufficient-balance switch block |
-| `scripts/local-backend-ui-smoke.mjs` | Open the real local Web backend UI and assert it renders as `本机 Web 后端` without write actions |
-| `scripts/tauri-desktop-boundary-smoke.mjs` | Assert the desktop app keeps one window, no default tray/autostart, and `tauri_native` runtime state |
-| `scripts/verify/doctor-codex-provider-switcher.ps1` | Repository and release-readiness checks |
-| `scripts/release/build-codex-provider-switcher-release.ps1` | Build desktop installer assets, signed updater artifacts, fallback zip, and checksums into `release-assets/` |
-| `scripts/release/verify-local-release-package.ps1` | Unpack and smoke-test the runnable local release zip |
-| `scripts/release/verify-release-upload-assets.ps1` | Verify the complete local upload set, checksums, and updater manifest before publishing |
-| `scripts/release/publish-github-release-asset.ps1` | Upload and verify GitHub Release assets |
-| `scripts/release/publish-github-release-from-artifact.ps1` | Create a new GitHub Release from verified workflow artifacts without overwriting an existing Release |
-| `scripts/release/verify-github-release-asset.ps1` | Download and compare GitHub Release assets |
+这些脚本面向贡献者和发布维护者，不是普通用户的安装入口。用户请使用根 README 和 `docs/user/`。
+
+| 类别 | 入口 | 用途 |
+| --- | --- | --- |
+| 开发版桌面验收 | `npm run qa:dev-desktop` | 直接打开当前源码树桌面应用，不安装 |
+| 基础质量 | `npm run verify:doctor`、`npm run lint`、`npm run build` | 检查仓库结构、静态质量和前端构建 |
+| 真实本地能力 | `npm run backend:build`、`npm run backend:smoke`、`npm run backend:functional-smoke` | 验证本地后端与隔离配置流程 |
+| UI/运行边界 | `npm run qa:preview-smoke`、`npm run runtime-boundary:smoke`、`npm run tauri:desktop-boundary:smoke` | 验证预览、真实运行边界和桌面壳约束 |
+| 发布就绪 | `npm run release:readiness` | 只读检查版本、GitHub、发布 Secret 名称和依赖告警；不会读取 Secret 值 |
+| 候选发布包 | `npm run release:build -- -Apply`、`npm run release:verify-local` | 构建并验证本地 fallback 包；不是正式发布 |
+| 远端交付 | `npm run release:verify-remote` | 下载并检查已发布的 GitHub Release |
+| cutover 准备 | `npm run qa:cutover-preflight` | 只读记录新安装版和旧工具状态；不执行真实切换 |
+
+按改动类型选择命令、以及何时必须运行安装发布验收，见 [开发与 PR 指南](../docs/contributing/development-and-prs.zh.md)。

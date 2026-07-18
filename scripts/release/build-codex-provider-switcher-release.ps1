@@ -273,7 +273,6 @@ foreach ($item in @(
     "CHANGELOG.md",
     "docs\user\installation.zh.md",
     "docs\user\troubleshooting.zh.md",
-    "docs\release\release-checklist.md",
     "docs\release\release-notes-$Version.md"
 )) {
     $path = Join-Path $projectRoot $item
@@ -383,7 +382,6 @@ foreach ($item in @("README.md", "LICENSE", "CHANGELOG.md")) {
 foreach ($item in @(
     "docs\user\installation.zh.md",
     "docs\user\troubleshooting.zh.md",
-    "docs\release\release-checklist.md",
     "docs\release\release-notes-$Version.md"
 )) {
     Copy-FileToPackage -Source (Join-Path $projectRoot $item) -DestinationRelativePath $item

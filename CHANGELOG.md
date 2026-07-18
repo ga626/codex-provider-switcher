@@ -1,95 +1,51 @@
-# Changelog
+# 变更记录
 
-## Unreleased
+这里记录已合并版本线的用户可见变化。是否已经可下载安装，以 [GitHub Releases](https://github.com/ga626/codex-provider-switcher/releases/latest) 为准。
+
+## 未发布
+
+- 仓库与文档产品化：使用者、贡献者、发布维护者和历史资料分层；新增发布就绪检查和依赖风险登记。
 
 ## 0.6.0-alpha - 2026-07-18
 
-- Added Windows DPAPI protection and one-time migration for provider keys and app-created backup copies.
-- Added an explicit current-configuration sync confirmation so a stale profile cannot silently overwrite the active Codex model.
-- Require Windows Authenticode signing material for formal Release builds and add a remote-only release verification command.
-- Replaced hard-coded current-release links with GitHub Latest Release links.
+- provider API key 与应用创建的敏感恢复副本改用当前 Windows 用户的 DPAPI 保护，并兼容迁移旧明文资料。
+- 安全检查能识别当前 Codex 模型与本地目录差异；确认后只同步本地目录，不改写 Codex 配置。
+- 正式 Release 同时要求更新包签名与 Windows 代码签名，并增加旧工具替换前的只读检查。
 
 ## 0.5.0-alpha - 2026-07-18
 
-- Reworked provider availability testing so a successful payload with `"error": null` is not misclassified as a provider failure.
-- Separated callable-result evidence, standard Responses shape, and an unconfirmed response shape in the UI and diagnostics.
-- Renamed the user-facing provider check to "服务商可用性测试" and kept it non-blocking for safe local switching.
+- 修正服务商可用性测试的结果分类，区分可调用、标准 Responses 形状与待确认响应。
+- 将界面中的检查名称统一为“服务商可用性测试”，它不会替代真实 Codex 使用结果。
 
 ## 0.4.1-alpha - 2026-07-18
 
-- Fixed the Tauri updater action so a verified pending update is installed directly instead of being rejected by the manual Release-page URL guard.
-- Kept the manual download fallback restricted to the canonical project Release page and its child URLs.
-- Documented the one-time manual upgrade required for installations of 0.3.2-alpha and 0.4.0-alpha before future automatic updates can be used.
+- 修复已验证更新包的安装路径，并保留受限的手动下载 fallback。
+- 明确旧安装版升级到新更新基线时的一次性手动升级要求。
 
 ## 0.4.0-alpha - 2026-07-18
 
-- Added a recovery center that shows the newest application-created restore point and requires explicit confirmation before restoration.
-- Added a credential-free backup manifest that records the backup time, reason, and file names for each pre-switch backup.
-- Removed legacy-tool-specific detection, environment variables, and automatic profile import from the product runtime and UI.
-- Avoided duplicate full validation for feature-branch pushes while retaining local preflight and PR CI coverage.
-- Fixed the artifact-backed Release publisher so an expected GitHub 404 for a new tag reaches the explicit create-Release path instead of becoming a PowerShell native-command exception.
+- 增加恢复中心、无凭据备份 manifest 和恢复确认。
+- 移除旧工具特定的运行时自动导入与展示逻辑。
 
 ## 0.3.2-alpha - 2026-07-17
 
-- Added Rust/Tauri build caching, explicit GitHub Actions timeouts, and phase timing for Release builds.
-- Split the Release workflow into tag preflight, signed asset build, and artifact-backed publishing jobs.
-- Added upload-set validation for checksums and updater metadata before a GitHub Release is created.
-- Added idempotent handling for an existing complete Release and an explicit failure path for incomplete assets.
-- Kept signing Secrets in the build job only; the publish job receives verified public artifacts and no signing key.
+- 增加 Rust/Tauri 构建缓存、阶段耗时与分阶段 Release 工作流。
+- 发布资产先验证再发布，已存在 Release 不会被自动覆盖。
 
 ## 0.3.1-alpha - 2026-07-16
 
-- Hotfix release: the Windows setup now starts the Tauri desktop GUI.
-- The local Web backend remains a separate fallback binary and is not used as the installed desktop entrypoint.
-- Fixed the Tauri release entrypoint so the NSIS installer bundles the desktop GUI binary instead of the local Web backend binary.
-- Added a smoke guard for the Tauri CLI binary-selection syntax.
-- Hidden the Windows `tasklist.exe` probe so normal feature actions do not open a child console window.
-- Localized the NSIS installer to Simplified Chinese and added branded header/sidebar artwork.
-- Removed stale updater signatures before each release build.
+- 修复 Windows setup 启动桌面 GUI 的入口。
+- 本地 Web 后端继续作为 fallback 和诊断能力，不再作为安装后的桌面入口。
 
 ## 0.3.0-alpha - 2026-07-16
 
-- Promoted the next alpha line to `0.3.0-alpha` for the stable install and release-governance baseline.
-- Fixed local release assets under `release-assets/` and removed release upload overwrite behavior.
-- Added the signed Tauri updater integration boundary; release signing remains CI-secret gated.
-- Documented the three-state workflow: development desktop, local release candidate, and stable installed release.
-- Removed default Tauri tray/autostart wiring so the app opens as one normal window and exits on close.
-- Added `tauri:desktop-boundary:smoke` to guard against accidental tray/autostart/mock regressions.
-- Extended release scripts to build and publish a desktop setup asset alongside the fallback Web zip.
-- Updated public docs, installation, troubleshooting, product spec, release checklist, and CI for the desktop-first shape.
+- 建立桌面安装包、签名更新、稳定安装版与本地候选包的基础流程。
+- 默认保持单窗口、无托盘、无开机自启。
 
 ## 0.2.0-alpha - 2026-07-15
 
-- Lightweight desktop GUI baseline.
-- Tauri app now reports `tauri_native`, keeps a single normal window, and does not install a default tray icon.
-- Default autostart plugin wiring is removed; auto start remains a future explicit advanced option.
-- Release output now includes Windows setup exe, fallback Web zip, and SHA256 files.
-- Local Web console remains available as a fallback and diagnostic path.
-
-## 0.1.1-alpha - 2026-07-15
-
-- Aligned root `setup.cmd` / `setup.ps1` with the real local Web backend instead of the UI-only preview path.
-- Fixed GitHub Release asset verification for zip files that contain a top-level package directory.
-- Updated public README, installation, troubleshooting, structure, and PR template wording to match the released local Web Alpha shape.
-- Aligned package metadata versions with `0.1.0-alpha`.
+- 建立轻量 Tauri 桌面 GUI、provider 目录、备份与恢复基础。
 
 ## 0.1.0-alpha - 2026-07-14
 
-Initial public Alpha release.
-
-- React/Vite UI for managing Codex provider profiles.
-- Tauri/Rust local file, profile, backup, validation, and restore foundation.
-- Provider model catalog state, read-only `/models` refresh, full returned-list display, light model tags, and manual model selection.
-- Removed `gpt-5.5` as an application default in source and mock state; existing imported user profiles are not auto-migrated.
-- Local Web backend binary that serves `dist/` on `127.0.0.1` and exposes real `/api/*` endpoints backed by Rust state/actions.
-- Runnable Windows alpha zip with `CodeXProviderSwitcher.cmd`, `CodeXProviderSwitcher.ps1`, `bin/local_backend.exe`, frontend assets, user docs, and SHA256.
-- Browser UI-only mock adapter and Playwright smoke script for UI validation.
-- Early Codex config/auth switching logic with backup and validation safeguards.
-- Legacy profile import/status direction for the old `CodeX-Switcher.exe` tool.
-- Public repository structure, project rules, contribution guidance, security policy, GitHub issue/PR templates, CI, release runbook, and release gate checklist.
-
-Known alpha boundaries:
-
-- Current delivery is a runnable alpha zip, not a formal installer or auto-updater.
-- Provider compatibility, stable cutover, and UI information architecture still need later hardening.
-- Final Codex provider cutover must be handled by a new session or another agent with a handoff package.
+- 首个公开 alpha：React/Vite 界面、Tauri/Rust 本地能力、模型目录与安全切换基础。
