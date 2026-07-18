@@ -10,9 +10,9 @@
 
 - React/Vite 前端。
 - Tauri/Rust 桌面窗口、本地文件、profiles、backup、validation、restore 基础。
-- Provider 模型目录缓存和只读 `/models` 刷新入口；目录只说明服务商列出了模型，不等同于 Responses 已验证。
-- 所有服务商验证与切换前复验统一发送最小的已认证 `/responses` 请求，并要求返回有效 Responses `id`；不会写入 Codex 配置或凭据。
-- 目录外的手动模型保存前要求二次确认，保存后仍必须通过真实 Responses 检查。
+- Provider 模型目录缓存和只读 `/models` 刷新入口；目录只说明服务商列出了模型，不等同于 Responses 或 Codex 已验证。
+- 兼容性探测是用户显式触发的短时 `/responses` 诊断。成功会记录当前模型的正向证据；未确认不会阻止安全切换，也不代表服务商不能被 Codex 使用。
+- 目录外的手动模型保存前要求二次确认；探测只提供补充诊断，不取代用户实际使用结果。
 - Windows 桌面安装资产：setup exe。
 - Tauri 签名更新通道：正式 Release 生成 `latest.json`、签名 setup 更新包和 `.sig` 文件；没有发布私钥时不会生成可冒充正式版的更新资产。
 - 正式发布由 GitHub Actions 在推送新 `v*` 标签后完成；用户不需要密钥或口令。Alpha 版本仍使用新版本号和新 tag，但 GitHub Release 必须保持 `Latest`，以便自动更新地址可用。

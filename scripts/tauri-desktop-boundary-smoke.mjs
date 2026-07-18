@@ -36,6 +36,10 @@ const [packageJsonText, tauriConfigText, cargoToml, libRs, adapterTs, mockDataTs
 
 const tauriConfig = JSON.parse(tauriConfigText)
 const packageJson = JSON.parse(packageJsonText)
+const switchProfileCore = libRs.slice(
+  libRs.indexOf('pub fn switch_profile_core'),
+  libRs.indexOf('#[tauri::command]\nfn verify_profile')
+)
 
 assert(tauriConfig.productName === 'CodeX Provider Switcher', 'Tauri productName must stay stable')
 assert(tauriConfig.mainBinaryName === 'codex-provider-switcher', 'Tauri must bundle the desktop binary, not local_backend')
@@ -76,6 +80,8 @@ assert(libRs.includes('.post(endpoint)'), 'Provider verification must send the R
 assert(libRs.includes('"authenticated_response_probe"'), 'Provider verification must record the Responses probe stage')
 assert(libRs.includes('body.get("id").is_some()'), 'Provider verification must require a Responses id')
 assert(libRs.includes('mark_catalog_model_verified'), 'Successful Responses verification must update the matching catalog model')
+assert(libRs.includes('.timeout(Duration::from_secs(8))'), 'Compatibility probes must use the short timeout budget')
+assertNotIncludes(switchProfileCore, 'verify_provider_auth_probe', 'Switching must not trigger a remote compatibility probe')
 assertNotIncludes(libRs, 'uses_request_probe', 'src-tauri/src/lib.rs')
 assert(mockDataTs.includes('trayEnabled: false'), 'Browser preview mock must not imply a default tray')
 

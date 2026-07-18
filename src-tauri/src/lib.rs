@@ -377,12 +377,40 @@ fn read_config() -> Result<String, SwitcherError> {
 }
 
 fn current_profile_id(catalog: &StoredCatalog, config_text: &str) -> String {
-    for (id, value) in &catalog.profiles {
-        if let Ok(profile) = serde_json::from_value::<StoredProfile>(value.clone()) {
-            if config_text.contains(&format!("base_url = \"{}\"", profile.base_url)) {
-                return id.to_string();
-            }
+    let custom = toml::from_str::<toml::Value>(config_text)
+        .ok()
+        .and_then(|config| {
+            config
+                .get("model_providers")
+                .and_then(toml::Value::as_table)
+                .and_then(|providers| providers.get("custom"))
+                .cloned()
+        });
+    let current_name = custom
+        .as_ref()
+        .and_then(|provider| provider.get("name"))
+        .and_then(toml::Value::as_str);
+    let current_base_url = custom
+        .as_ref()
+        .and_then(|provider| provider.get("base_url"))
+        .and_then(toml::Value::as_str);
+    let matches = catalog
+        .profiles
+        .iter()
+        .filter_map(|(id, value)| {
+            serde_json::from_value::<StoredProfile>(value.clone())
+                .ok()
+                .map(|profile| (id, profile))
+        })
+        .filter(|(_, profile)| Some(profile.base_url.as_str()) == current_base_url)
+        .collect::<Vec<_>>();
+    if let Some(name) = current_name {
+        if let Some((id, _)) = matches.iter().find(|(_, profile)| profile.name == name) {
+            return (*id).to_string();
         }
+    }
+    if matches.len() == 1 {
+        return matches[0].0.to_string();
     }
     "unknown".to_string()
 }
@@ -1024,7 +1052,7 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
     };
 
     let client = match reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(25))
+        .timeout(Duration::from_secs(8))
         .build()
     {
         Ok(client) => client,
@@ -1061,7 +1089,7 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
                     true,
                     "verified",
                     "authenticated_response_probe",
-                    "已完成真实、已认证的 Responses 请求；服务可用。本次检查不会写入 Codex 配置。",
+                    "短时兼容性探测已通过：服务商返回了有效 Responses 响应。本次检查不会写入 Codex 配置。",
                     Some(status.as_u16()),
                     None,
                 )
@@ -1070,7 +1098,7 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
                 false,
                 "protocol_incompatible",
                 "response_format",
-                "服务商返回了 JSON，但缺少 Responses 响应标识，未确认可用性。",
+                "兼容性探测收到了 JSON，但不符合本工具的最小 Responses 形状；这不代表服务商不能被 Codex 使用。",
                 Some(status.as_u16()),
                 None,
             ),
@@ -1078,7 +1106,7 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
                 false,
                 "protocol_incompatible",
                 "response_format",
-                "服务商探针没有返回兼容的 JSON 响应，未确认可用性。",
+                "兼容性探测没有收到可解析的 JSON 响应；这不代表服务商不能被 Codex 使用。",
                 Some(status.as_u16()),
                 None,
             ),
@@ -1484,7 +1512,7 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
             .as_ref()
             .and_then(|p| p.last_switched_at.clone()),
         last_verified_at: None,
-        last_verification_detail: Some("保存后尚未运行真实服务商检查。".to_string()),
+        last_verification_detail: Some("保存后尚未运行兼容性探测。".to_string()),
         last_verification_stage: Some("profile".to_string()),
         last_verification_http_status: None,
         last_verification_provider_code: None,
@@ -1495,7 +1523,7 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
     save_catalog(&catalog)?;
     app_state_with_activity(
         &format!("{display_name} 已保存"),
-        "服务商信息已更新；已清除旧验证，需要重新运行真实服务商检查。",
+        "服务商信息已更新；已清除旧兼容性探测结果。",
         "info",
     )
 }
@@ -1545,30 +1573,17 @@ pub fn switch_profile_core(profile_id: String) -> Result<AppState, SwitcherError
         .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
     let mut profile: StoredProfile = serde_json::from_value(value)?;
     let display_name = profile.name.clone();
-    let verification = verify_provider_auth_probe(&profile);
-    if !verification.verified {
-        let detail = verification.detail.clone();
-        apply_verification(&mut profile, verification);
-        catalog
-            .profiles
-            .insert(profile_id, serde_json::to_value(profile)?);
-        save_catalog(&catalog)?;
-        push_activity(
-            "切换已阻止",
-            &format!("{display_name} 未通过实时服务商验证：{detail}"),
-            "warning",
-        )?;
-        return Err(SwitcherError::Message(format!("切换已阻止：{detail}")));
+    if profile.api_key.trim().is_empty() {
+        return Err(SwitcherError::Message(
+            "切换已阻止：缺少 API 密钥。".to_string(),
+        ));
     }
-    apply_verification(&mut profile, verification);
-    mark_catalog_model_verified(&mut catalog, &profile_id, &profile.model)?;
     if profile.model.trim().is_empty() {
-        let detail = "缺少 Codex 使用的模型名称；服务商已验证，但不能写入空模型。";
-        catalog
-            .profiles
-            .insert(profile_id, serde_json::to_value(profile)?);
-        save_catalog(&catalog)?;
-        push_activity("切换已阻止", detail, "warning")?;
+        return Err(SwitcherError::Message(
+            "切换已阻止：缺少 Codex 使用的模型名称。".to_string(),
+        ));
+    }
+    if let Err(detail) = provider_probe_endpoint(&profile.base_url, "responses") {
         return Err(SwitcherError::Message(format!("切换已阻止：{detail}")));
     }
     switch_config(&profile)?;
@@ -1579,7 +1594,7 @@ pub fn switch_profile_core(profile_id: String) -> Result<AppState, SwitcherError
     save_catalog(&catalog)?;
     app_state_with_activity(
         &format!("已切换到 {display_name}"),
-        "已写入 Codex config.toml/auth.json，并生成回滚备份。",
+        "已写入 Codex config.toml/auth.json，并生成回滚备份；未自动执行远端兼容性探测。",
         "success",
     )
 }
@@ -1611,14 +1626,14 @@ pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError
     save_catalog(&catalog)?;
     if verified {
         app_state_with_activity(
-            "验证完成",
-            &format!("{display_name} 已通过真实、已认证的服务端探针。"),
+            "兼容性探测通过",
+            &format!("{display_name} 已通过短时、已认证的 Responses 兼容性探测。"),
             "success",
         )
     } else {
         app_state_with_activity(
-            "验证需要处理",
-            &format!("{display_name} 未通过真实服务商验证：{detail}"),
+            "兼容性探测未确认",
+            &format!("{display_name} 的兼容性探测未确认：{detail}"),
             "warning",
         )
     }

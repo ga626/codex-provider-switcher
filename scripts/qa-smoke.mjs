@@ -136,11 +136,14 @@ try {
   await desktop.getByLabel('API 密钥').fill('sk-smoke-test')
   await desktop.getByLabel('备注').fill('由 qa:smoke 自动生成。')
   await desktop.getByRole('button', { name: '保存更改' }).click()
+  await desktop.getByRole('dialog', { name: '确认保存手动模型？' }).waitFor()
+  await desktop.getByRole('button', { name: '仍然保存' }).click()
+  await desktop.getByRole('dialog', { name: '确认保存手动模型？' }).waitFor({ state: 'detached' })
   await desktop.locator('.provider-row').filter({ hasText: 'Smoke Test API' }).waitFor()
   await desktop.getByRole('heading', { name: '编辑 Smoke Test API' }).waitFor()
 
   await desktop.getByRole('button', { name: /安全检查/ }).click()
-  await desktop.getByRole('button', { name: '运行真实检查' }).click()
+  await desktop.getByRole('button', { name: '运行兼容性探测' }).click()
   await desktop.getByText('没有连接远端服务商').waitFor()
   await desktop.getByRole('button', { name: /服务商/ }).first().click()
   if (!await desktop.getByRole('button', { name: '切换到 Smoke Test API' }).isDisabled()) {

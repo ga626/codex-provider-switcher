@@ -242,7 +242,7 @@ try {
       ?.verifiedForResponses === 'verified',
     'successful Responses verification did not mark the catalog model as verified'
   )
-  assert(verified.activity[0]?.title === '验证完成', 'verification did not update activity')
+  assert(verified.activity[0]?.title === '兼容性探测通过', 'compatibility probe did not update activity')
   assert(await readFile(configPath, 'utf8') === originalConfig, 'verification changed config.toml')
   assert(await readFile(authPath, 'utf8') === originalAuth, 'verification changed auth.json')
 
@@ -265,6 +265,7 @@ try {
   const defaulted = await api('/api/profiles/default', { profileId: profile.id })
   assert(defaulted.profiles.find((item) => item.id === profile.id)?.isDefault, 'default provider was not updated')
 
+  const responsesBeforeSwitch = responsesProbeRequestCount
   const switched = await api('/api/profiles/switch', { profileId: profile.id })
   const switchedConfig = await readFile(configPath, 'utf8')
   const switchedAuth = JSON.parse(await readFile(authPath, 'utf8'))
@@ -283,7 +284,7 @@ try {
   assert(Array.isArray(manifest.files) && manifest.files.includes('config.toml') && manifest.files.includes('auth.json'), 'backup manifest did not list protected files')
   assert(switched.activity[0]?.title === '已切换到 Fixture Provider', 'switch did not update activity')
   assert(modelsProbeRequestCount >= 1, 'model refresh did not issue an authenticated /models request')
-  assert(responsesProbeRequestCount >= 2, 'verification and switching did not issue real authenticated /responses probes')
+  assert(responsesProbeRequestCount === responsesBeforeSwitch, 'switch unexpectedly sent a remote compatibility probe')
 
   await writeFile(configPath, 'model = "corrupted"', 'utf8')
   await writeFile(authPath, JSON.stringify({ OPENAI_API_KEY: 'corrupted' }), 'utf8')
@@ -308,14 +309,13 @@ try {
   assert(failedProfile?.lastVerificationStage === 'billing', 'insufficient-credit provider did not record the diagnostic stage')
   assert(failedProfile?.lastVerificationProviderCode === 'insufficient_quota', 'insufficient-credit provider did not record the provider code')
   assert(responsesProbeRequestCount >= 1, 'DasuAPI quota verification did not issue the real request probe')
-  const backupsBeforeBlockedSwitch = failedVerification.backups.length
-  const blockedError = await expectApiFailure('/api/profiles/switch', { profileId: noCredit.id })
-  assert(blockedError.includes('切换已阻止'), 'unverified provider did not report a blocked switch')
-  assert(await readFile(configPath, 'utf8') === originalConfig, 'blocked switch changed config.toml')
-  assert(await readFile(authPath, 'utf8') === originalAuth, 'blocked switch changed auth.json')
-  const afterBlockedSwitch = await api('/api/state')
-  assert(afterBlockedSwitch.backups.length === backupsBeforeBlockedSwitch, 'blocked switch created a backup')
-  assert(afterBlockedSwitch.activity[0]?.title === '切换已阻止', 'blocked switch was not recorded')
+  const responsesBeforeInconclusiveSwitch = responsesProbeRequestCount
+  const switchedAfterInconclusiveProbe = await api('/api/profiles/switch', { profileId: noCredit.id })
+  assert(switchedAfterInconclusiveProbe.currentProfileId === noCredit.id, 'an inconclusive probe blocked a safe local switch')
+  assert(responsesProbeRequestCount === responsesBeforeInconclusiveSwitch, 'switch retried a remote compatibility probe')
+  const restoredAfterInconclusiveSwitch = await api('/api/backup/restore-latest', {})
+  assert(await readFile(configPath, 'utf8') === originalConfig, 'restore did not recover the config after an inconclusive probe switch')
+  assert(restoredAfterInconclusiveSwitch.activity[0]?.title === '已恢复最近备份', 'restore after inconclusive switch was not recorded')
 
   const endpointMismatch = { ...profile, id: 'endpoint-mismatch', name: 'Endpoint mismatch', apiKey: 'sk-endpoint-mismatch' }
   await api('/api/profiles/save', { profile: endpointMismatch })
@@ -352,12 +352,12 @@ try {
       'save persisted provider and activity',
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models and deduplicated results',
-      'real authenticated /v1/responses probes gate every provider using its selected model',
-      'DasuAPI request probe identifies insufficient quota instead of trusting /v1/models availability',
+      'explicit authenticated /v1/responses probes record compatibility for the selected model',
+      'inconclusive quota probes do not block local safe switching or trigger a second remote probe',
       'verification diagnostics classify endpoint, protocol, billing, and service errors without changing Codex config/auth',
       'default selection persisted',
       'switch wrote config/auth, preserved unrelated data, and created a manifest-backed backup',
-      'insufficient balance blocks switching without touching config/auth or backups',
+      'same-address profiles retain the selected current-provider identity after a safe switch',
       'restore recovered both files and updated timeline',
       'delete removed a non-current non-default provider',
     ],

@@ -119,10 +119,10 @@ function profileChecks(
   const verificationStatus = profile?.verificationStatus ?? 'not_checked'
   checks.push({
     id: 'provider-auth-probe',
-    label: '已认证服务端探针',
+    label: '兼容性探测（可选）',
     ok: verificationStatus === 'verified' && Boolean(profile?.verified),
     detail: verificationDetail(profile),
-    severity: 'required',
+    severity: 'info',
   })
 
   if (model.length > 0 && modelCatalog?.status === 'ok') {
@@ -133,7 +133,7 @@ function profileChecks(
       ok: modelIds.has(model),
       detail: modelIds.has(model)
         ? '当前模型存在于最近一次服务商模型目录。'
-        : '当前模型不在最近一次服务商模型目录中；可继续手动保存，但切换前需要确认。',
+        : '当前模型不在最近一次服务商模型目录中；保存时需要二次确认，兼容性探测可选。',
       severity: 'warning',
     })
   }
@@ -143,7 +143,7 @@ function profileChecks(
 
 function verificationDetail(profile: ProviderProfile | undefined) {
   if (!profile?.lastVerificationDetail) {
-    return '请先保存服务商，然后运行一次真实服务商检查。'
+    return '可选诊断：使用最小 Responses 请求检查兼容性，不影响切换。'
   }
 
   const diagnostics = [
@@ -158,23 +158,23 @@ function verificationDetail(profile: ProviderProfile | undefined) {
 
 function verificationLabel(profile: ProviderProfile | undefined) {
   if (!profile) return '未保存'
-  if (profile.verified && profile.verificationStatus === 'verified') return '可用'
+  if (profile.verified && profile.verificationStatus === 'verified') return '探测通过'
   const labels: Record<Exclude<ProviderProfile['verificationStatus'], 'verified'>, string> = {
-    not_checked: '待验证',
-    missing_key: '缺少密钥',
-    invalid_profile: '配置不完整',
-    unauthorized: '鉴权失败',
-    billing_unavailable: '额度不足',
-    rate_limited: '服务商限流',
-    model_unavailable: '模型不可用',
-    endpoint_or_model_unavailable: '接口或模型不可用',
-    request_incompatible: '请求不兼容',
-    protocol_incompatible: '协议不兼容',
-    service_error: '服务端异常',
-    timeout: '请求超时',
-    network_error: '网络不可达',
-    transport_error: '传输失败',
-    provider_error: '服务商错误',
+    not_checked: '未运行探测',
+    missing_key: '探测未执行',
+    invalid_profile: '探测未执行',
+    unauthorized: '探测未确认',
+    billing_unavailable: '探测未确认',
+    rate_limited: '探测未确认',
+    model_unavailable: '探测未确认',
+    endpoint_or_model_unavailable: '探测未确认',
+    request_incompatible: '探测未确认',
+    protocol_incompatible: '探测未确认',
+    service_error: '探测未确认',
+    timeout: '探测未确认',
+    network_error: '探测未确认',
+    transport_error: '探测未确认',
+    provider_error: '探测未确认',
   }
   return labels[profile.verificationStatus] ?? '待验证'
 }
@@ -185,8 +185,8 @@ function requiresManualModelConfirmation(
   catalog: ModelCatalog | undefined
 ) {
   const model = draft.model.trim()
-  if (!model || !catalog || catalog.status !== 'ok' || model === profile?.model) return false
-  return !catalog.models.some((item) => item.id.toLocaleLowerCase() === model.toLocaleLowerCase())
+  if (!model || model === profile?.model) return false
+  return catalog?.status !== 'ok' || !catalog.models.some((item) => item.id.toLocaleLowerCase() === model.toLocaleLowerCase())
 }
 
 function draftMatchesProfile(draft: EditableProfile, profile: ProviderProfile | undefined) {
@@ -270,8 +270,8 @@ function App() {
   const latestActivity = state?.activity[0]
   const canSwitch = Boolean(
     selectedProfile &&
+      state?.runtimeMode !== 'browser_preview_mock' &&
       !selectedProfile.active &&
-      selectedProfile.verified &&
       !hasUnsavedChanges &&
       requiredFailures === 0 &&
       busy === null
@@ -820,7 +820,7 @@ function ProviderWorkspace({
           </label>
         </div>
         <div className="command-row">
-          <button className="primary-button" type="button" disabled={!draft.name || !draft.baseUrl || busy !== null} onClick={saveCurrentProfile}>
+          <button className="primary-button" type="button" disabled={!draft.name || !draft.baseUrl || busy !== null} onClick={() => void saveCurrentProfile()}>
             <Save size={16} />
             保存更改
           </button>
@@ -917,8 +917,10 @@ function ModelsWorkspace({
                   <strong>{model.id}</strong>
                   {model.aliases.length > 0 && <small>别名：{model.aliases.join(', ')}</small>}
                   <div className="model-meta">
-                    <span>目录来源</span>
-                    <span>{model.verifiedForResponses === 'verified' ? 'Responses 已验证' : 'Responses 未验证'}</span>
+                    <span>服务商目录</span>
+                    {selectedProfile?.model.toLocaleLowerCase() === model.id.toLocaleLowerCase() && model.verifiedForResponses === 'verified' && (
+                      <span>当前模型探测通过</span>
+                    )}
                     {model.tags.map((tag) => <span key={tag}>{tag}</span>)}
                   </div>
                 </span>
@@ -964,7 +966,7 @@ function ManualModelConfirmDialog({
         <div>
           <span className="eyebrow">未验证模型</span>
           <h2 id="manual-model-dialog-title">确认保存手动模型？</h2>
-          <p>{model} 不在最近刷新到的服务商模型目录中。保存后仍需运行真实 Responses 检查，确认该模型可用于 Codex。</p>
+          <p>{model} 不在最近刷新到的服务商模型目录中。保存后可运行兼容性探测；探测未确认不代表已有 Codex 使用会失败。</p>
         </div>
         <div className="command-row">
           <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
@@ -1007,9 +1009,9 @@ function SafetyWorkspace({
         </div>
         <div>
           <KeyRound size={22} />
-          <span>本次检查</span>
-          <strong>真实 Responses 请求</strong>
-          <small>使用当前模型，不写入 Codex 配置。</small>
+          <span>兼容性探测</span>
+          <strong>可选</strong>
+          <small>短时 Responses 诊断，不作为切换门槛。</small>
         </div>
         <button
           className="primary-button safety-run-button"
@@ -1018,7 +1020,7 @@ function SafetyWorkspace({
           disabled={!selectedProfile || hasUnsavedChanges || busy !== null}
         >
           <ShieldCheck size={16} />
-          {hasUnsavedChanges ? '请先保存更改' : '运行真实检查'}
+          {hasUnsavedChanges ? '请先保存更改' : '运行兼容性探测'}
         </button>
       </section>
       <section className="surface-panel">
@@ -1027,7 +1029,7 @@ function SafetyWorkspace({
             <span>当前服务商</span>
             <strong>{selectedProfile?.name ?? '未选择'}</strong>
           </div>
-          <small>使用当前模型发起最小 Responses 请求，不会写入 Codex 配置或凭据。</small>
+          <small>使用当前模型发起短时 Responses 诊断；未确认不代表服务商不能使用。</small>
         </div>
         <div className="check-list">
           {providerChecks.map((check) => {
@@ -1050,7 +1052,7 @@ function SafetyWorkspace({
             <span className="eyebrow">切换门禁</span>
             <h3>Codex 配置状态</h3>
           </div>
-          <span className="section-meta">真实检查不会写入此处</span>
+          <span className="section-meta">兼容性探测不会写入此处</span>
         </div>
         <div className="check-list compact-check-list">
           {configChecks.map((check) => {
@@ -1072,8 +1074,8 @@ function SafetyWorkspace({
             <strong>只有切换时才生成恢复点</strong>
           </div>
           <div>
-            <span>本次真实检查</span>
-            <strong>使用当前模型，不会修改 Codex 配置或凭据</strong>
+            <span>兼容性探测</span>
+            <strong>只作诊断，未确认不阻止切换</strong>
           </div>
         </div>
       </section>

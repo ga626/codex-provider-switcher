@@ -1216,6 +1216,20 @@ textarea {
     justify-self: end;
   }
 
+  .check-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .check-section-heading small {
+    width: 100%;
+    overflow: visible;
+    text-align: left;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
   .recovery-row {
     align-items: stretch;
     flex-direction: column;
