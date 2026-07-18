@@ -6,11 +6,13 @@
 
 ## 当前状态
 
-当前已发布版本是 `0.4.0-alpha`。本分支准备 `0.4.1-alpha`，修复已验证更新被手动 Release 页地址校验错误拦截的问题：
+当前已发布版本是 `0.4.0-alpha`。本分支准备 `0.5.0-alpha`，同时收束签名更新热修与真实服务商验证、模型选择能力：
 
 - React/Vite 前端。
 - Tauri/Rust 桌面窗口、本地文件、profiles、backup、validation、restore 基础。
-- Provider 模型目录缓存和只读 `/models` 刷新入口。
+- Provider 模型目录缓存和只读 `/models` 刷新入口；目录只说明服务商列出了模型，不等同于 Responses 已验证。
+- 所有服务商验证与切换前复验统一发送最小的已认证 `/responses` 请求，并要求返回有效 Responses `id`；不会写入 Codex 配置或凭据。
+- 目录外的手动模型保存前要求二次确认，保存后仍必须通过真实 Responses 检查。
 - Windows 桌面安装资产：setup exe。
 - Tauri 签名更新通道：正式 Release 生成 `latest.json`、签名 setup 更新包和 `.sig` 文件；没有发布私钥时不会生成可冒充正式版的更新资产。
 - 正式发布由 GitHub Actions 在推送新 `v*` 标签后完成；用户不需要密钥或口令。Alpha 版本仍使用新版本号和新 tag，但 GitHub Release 必须保持 `Latest`，以便自动更新地址可用。
@@ -21,7 +23,8 @@
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
 - 安全检查中的恢复中心：展示最近恢复点，并在恢复前要求二次确认。
 - 每次切换生成不含凭据内容的备份 manifest，记录时间、原因和备份文件名。
-- 对已安装 `0.3.2-alpha` 或 `0.4.0-alpha` 的用户，`0.4.1-alpha` 需要从 Release 手动安装一次；之后的已验证更新不会再被手动下载页校验拦截。
+- `0.3.2-alpha` 与 `0.4.0-alpha` 的已验证更新按钮会被错误的手动 Release 页校验拦截。用户需要手动安装一次 `0.5.0-alpha`；之后的已验证更新将直接使用 Tauri 的签名安装路径。
+- `0.5.0-alpha` 本身是修复后的自动更新基线；需要在下一个更高版本发布时，才能从它完成真实的应用内升级验收。
 
 [下载当前已发布的 0.4.0-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.4.0-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
 
@@ -51,9 +54,9 @@ npm run qa:stable-install -- -ExplainOnly
 
 本版本明确保留的后续边界：
 
-- Codex/Responses 与中转站模型名的完整行为兼容验证策略。
+- 以实际生产服务商和模型完成最终 cutover 前的兼容性验收。
 - 本机替换的发布后验收。
-- UI 信息架构重构。
+- API key 迁移到 Windows Credential Manager、DPAPI 或 Tauri Stronghold。
 
 ## 本机替换边界
 

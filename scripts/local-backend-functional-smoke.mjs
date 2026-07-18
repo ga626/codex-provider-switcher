@@ -91,14 +91,14 @@ const providerServer = createServer((request, response) => {
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify([
       {
-        tag_name: 'v0.5.0-alpha',
-        html_url: 'https://github.com/ga626/codex-provider-switcher/releases/tag/v0.5.0-alpha',
+        tag_name: 'v0.5.1-alpha',
+        html_url: 'https://github.com/ga626/codex-provider-switcher/releases/tag/v0.5.1-alpha',
         draft: false,
         published_at: '2026-07-16T00:00:00Z',
         assets: [
           {
-            name: 'CodeXProviderSwitcher-windows-x64-0.5.0-alpha-setup.exe',
-            browser_download_url: 'https://github.com/ga626/codex-provider-switcher/releases/download/v0.5.0-alpha/CodeXProviderSwitcher-windows-x64-0.5.0-alpha-setup.exe',
+            name: 'CodeXProviderSwitcher-windows-x64-0.5.1-alpha-setup.exe',
+            browser_download_url: 'https://github.com/ga626/codex-provider-switcher/releases/download/v0.5.1-alpha/CodeXProviderSwitcher-windows-x64-0.5.1-alpha-setup.exe',
           },
         ],
       },
@@ -147,9 +147,30 @@ const providerServer = createServer((request, response) => {
     responsesProbeRequestCount += 1
     request.resume()
     request.on('end', () => {
-      if (request.headers.authorization === 'Bearer sk-no-credit') {
+      const authorization = request.headers.authorization
+      if (authorization === 'Bearer sk-fixture') {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ id: 'resp_fixture', object: 'response' }))
+        return
+      }
+      if (authorization === 'Bearer sk-no-credit') {
         response.writeHead(402, { 'Content-Type': 'application/json' })
         response.end(JSON.stringify({ error: { code: 'insufficient_quota', message: 'insufficient balance' } }))
+        return
+      }
+      if (authorization === 'Bearer sk-endpoint-mismatch') {
+        response.writeHead(404, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ error: { code: 'not_found', message: 'responses route unavailable' } }))
+        return
+      }
+      if (authorization === 'Bearer sk-protocol-mismatch') {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ object: 'response' }))
+        return
+      }
+      if (authorization === 'Bearer sk-service-error') {
+        response.writeHead(503, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ error: { code: 'service_unavailable', message: 'upstream unavailable' } }))
         return
       }
       response.writeHead(401, { 'Content-Type': 'application/json' })
@@ -187,7 +208,7 @@ try {
 
   const update = await api('/api/update/check')
   assert(update.available, 'update check did not detect a newer semantic version')
-  assert(update.latestVersion === '0.5.0-alpha', 'update check returned the wrong latest version')
+  assert(update.latestVersion === '0.5.1-alpha', 'update check returned the wrong latest version')
   assert(update.downloadUrl?.endsWith('-setup.exe'), 'update check did not select the Windows setup asset')
 
   const profile = {
@@ -212,18 +233,34 @@ try {
   const verifiedProfile = verified.profiles.find((item) => item.id === profile.id)
   assert(verifiedProfile?.verified, 'real authenticated server probe did not pass')
   assert(verifiedProfile?.verificationStatus === 'verified', 'verification did not record the verified status')
-  assert(verifiedProfile?.lastVerificationStage === 'authenticated_server_probe', 'verification did not record the verification stage')
+  assert(verifiedProfile?.lastVerificationStage === 'authenticated_response_probe', 'verification did not record the verification stage')
   assert(verifiedProfile?.lastVerificationHttpStatus === 200, 'verification did not record the HTTP status')
+  assert(
+    verified.modelCatalogs
+      .find((item) => item.providerId === profile.id)
+      ?.models.find((item) => item.id === profile.model)
+      ?.verifiedForResponses === 'verified',
+    'successful Responses verification did not mark the catalog model as verified'
+  )
   assert(verified.activity[0]?.title === '验证完成', 'verification did not update activity')
   assert(await readFile(configPath, 'utf8') === originalConfig, 'verification changed config.toml')
   assert(await readFile(authPath, 'utf8') === originalAuth, 'verification changed auth.json')
+
+  const refreshedAfterVerification = await api('/api/models/refresh', { profileId: profile.id })
+  assert(
+    refreshedAfterVerification.modelCatalogs
+      .find((item) => item.providerId === profile.id)
+      ?.models.find((item) => item.id === profile.model)
+      ?.verifiedForResponses === 'verified',
+    'refresh discarded the verified status for an unchanged catalog model'
+  )
 
   const modelless = { ...profile, id: 'model-less', name: 'Model-less Probe', model: '' }
   await api('/api/profiles/save', { profile: modelless })
   const modelLessVerification = await api('/api/profiles/verify', { profileId: modelless.id })
   const modelLessProfile = modelLessVerification.profiles.find((item) => item.id === modelless.id)
-  assert(modelLessProfile?.verified, 'authenticated server probe incorrectly required a model')
-  assert(modelLessProfile?.lastVerificationStage === 'authenticated_server_probe', 'model-less probe used the wrong stage')
+  assert(!modelLessProfile?.verified, 'real Responses probe incorrectly accepted a missing model')
+  assert(modelLessProfile?.verificationStatus === 'invalid_profile', 'model-less probe did not report an incomplete profile')
 
   const defaulted = await api('/api/profiles/default', { profileId: profile.id })
   assert(defaulted.profiles.find((item) => item.id === profile.id)?.isDefault, 'default provider was not updated')
@@ -245,7 +282,8 @@ try {
   assert(manifest.reason === 'before_switch', 'backup manifest did not record its reason')
   assert(Array.isArray(manifest.files) && manifest.files.includes('config.toml') && manifest.files.includes('auth.json'), 'backup manifest did not list protected files')
   assert(switched.activity[0]?.title === '已切换到 Fixture Provider', 'switch did not update activity')
-  assert(modelsProbeRequestCount >= 3, 'verification and switching did not issue real authenticated /models probes')
+  assert(modelsProbeRequestCount >= 1, 'model refresh did not issue an authenticated /models request')
+  assert(responsesProbeRequestCount >= 2, 'verification and switching did not issue real authenticated /responses probes')
 
   await writeFile(configPath, 'model = "corrupted"', 'utf8')
   await writeFile(authPath, JSON.stringify({ OPENAI_API_KEY: 'corrupted' }), 'utf8')
@@ -314,7 +352,7 @@ try {
       'save persisted provider and activity',
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models and deduplicated results',
-      'real authenticated /v1/models probes gate A6/OWL without requiring a selected model',
+      'real authenticated /v1/responses probes gate every provider using its selected model',
       'DasuAPI request probe identifies insufficient quota instead of trusting /v1/models availability',
       'verification diagnostics classify endpoint, protocol, billing, and service errors without changing Codex config/auth',
       'default selection persisted',

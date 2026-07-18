@@ -105,6 +105,12 @@ try {
   await desktop.getByRole('button', { name: '刷新模型目录' }).click()
   await desktop.getByText('已返回 6 个示例模型。').first().waitFor()
   await desktop.locator('.model-table').waitFor()
+  await desktop.getByPlaceholder('搜索模型、别名或标签').fill('fast-current')
+  await desktop.locator('.model-row').filter({ hasText: 'provider-fast-current' }).waitFor()
+  if (await desktop.locator('.model-row').count() !== 1) {
+    throw new Error('Model search did not filter the catalog to the matching entry.')
+  }
+  await desktop.getByPlaceholder('搜索模型、别名或标签').fill('')
   const modelRow = desktop.locator('.model-row').filter({ hasText: 'provider-reasoning-current' })
   await modelRow.getByRole('button', { name: '使用' }).click()
   await modelRow.getByRole('button', { name: '当前模型' }).waitFor()
@@ -115,6 +121,13 @@ try {
   if (await desktop.getByLabel('默认模型').inputValue() !== 'provider-reasoning-current') {
     throw new Error('Selecting a model from the catalog did not persist it to the provider profile.')
   }
+  await desktop.getByLabel('默认模型').fill('manual-smoke-model')
+  await desktop.getByRole('button', { name: '保存更改' }).click()
+  await desktop.getByRole('dialog', { name: '确认保存手动模型？' }).waitFor()
+  await desktop.getByRole('button', { name: '取消' }).click()
+  await desktop.getByRole('dialog', { name: '确认保存手动模型？' }).waitFor({ state: 'detached' })
+  await desktop.getByLabel('默认模型').fill('provider-reasoning-current')
+  await desktop.getByRole('button', { name: '保存更改' }).click()
 
   await desktop.getByRole('button', { name: '新增服务商' }).click()
   await desktop.getByLabel('服务商名称').fill('Smoke Test API')

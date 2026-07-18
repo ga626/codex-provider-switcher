@@ -948,11 +948,6 @@ fn provider_probe_endpoint(base_url: &str, probe_path: &str) -> Result<String, S
         .map_err(|_| "无法由接口地址构造服务商探针路径。".to_string())
 }
 
-fn uses_request_probe(profile: &StoredProfile) -> bool {
-    let identity = format!("{} {}", profile.name, profile.base_url).to_ascii_lowercase();
-    identity.contains("dasuapi") || identity.contains("dasu")
-}
-
 fn provider_error_code(error_body: &str) -> Option<String> {
     let value = serde_json::from_str::<Value>(error_body).ok()?;
     value
@@ -1011,19 +1006,17 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
             None,
         );
     }
-    let request_probe = uses_request_probe(profile);
-    if request_probe && profile.model.trim().is_empty() {
+    if profile.model.trim().is_empty() {
         return verification_outcome(
             false,
             "invalid_profile",
             "profile",
-            "该服务商的额度探针需要默认模型，无法确认实际请求额度。",
+            "缺少默认模型，无法发送与 Codex 相同的 Responses 请求。",
             None,
             None,
         );
     }
-    let probe_path = if request_probe { "responses" } else { "models" };
-    let endpoint = match provider_probe_endpoint(&profile.base_url, probe_path) {
+    let endpoint = match provider_probe_endpoint(&profile.base_url, "responses") {
         Ok(endpoint) => endpoint,
         Err(detail) => {
             return verification_outcome(false, "invalid_profile", "profile", &detail, None, None)
@@ -1046,19 +1039,15 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
             );
         }
     };
-    let request = if request_probe {
-        client
-            .post(endpoint)
-            .bearer_auth(profile.api_key.trim())
-            .json(&json!({
-                "model": profile.model.trim(),
-                "input": "Reply with OK.",
-                "max_output_tokens": 16,
-                "store": false,
-            }))
-    } else {
-        client.get(endpoint).bearer_auth(profile.api_key.trim())
-    };
+    let request = client
+        .post(endpoint)
+        .bearer_auth(profile.api_key.trim())
+        .json(&json!({
+            "model": profile.model.trim(),
+            "input": "Reply with OK.",
+            "max_output_tokens": 16,
+            "store": false,
+        }));
     let response = match request.send() {
         Ok(response) => response,
         Err(err) => return transport_failure_outcome(&err),
@@ -1067,23 +1056,24 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
     let status = response.status();
     if status.is_success() {
         return match response.json::<Value>() {
-            Ok(body)
-                if body.get("error").is_none() && (!request_probe || body.get("id").is_some()) =>
-            {
+            Ok(body) if body.get("error").is_none() && body.get("id").is_some() => {
                 verification_outcome(
                     true,
                     "verified",
-                    "authenticated_server_probe",
-                    if request_probe {
-                        "已完成真实、已认证的服务请求；服务可用，当前额度足够完成请求。"
-                    } else {
-                        "已完成真实、已认证的服务端探针；服务可用。本次检查不依赖当前模型，也不会写入 Codex 配置。"
-                    },
+                    "authenticated_response_probe",
+                    "已完成真实、已认证的 Responses 请求；服务可用。本次检查不会写入 Codex 配置。",
                     Some(status.as_u16()),
                     None,
                 )
             }
-            Ok(body) => provider_failure_outcome(Some(status.as_u16()), &body.to_string()),
+            Ok(_) => verification_outcome(
+                false,
+                "protocol_incompatible",
+                "response_format",
+                "服务商返回了 JSON，但缺少 Responses 响应标识，未确认可用性。",
+                Some(status.as_u16()),
+                None,
+            ),
             Err(_) => verification_outcome(
                 false,
                 "protocol_incompatible",
@@ -1124,7 +1114,7 @@ fn provider_failure_outcome(
             Some(404 | 405) => (
                 "endpoint_or_model_unavailable",
                 "endpoint",
-                "服务商探针接口不可用或被服务商拒绝。",
+                "接口路径或当前模型不可用，服务商拒绝了 Responses 请求。",
             ),
             Some(400 | 415 | 422) => (
                 "request_incompatible",
@@ -1164,6 +1154,71 @@ fn apply_verification(profile: &mut StoredProfile, outcome: ProviderVerification
     profile.last_verification_stage = Some(outcome.stage);
     profile.last_verification_http_status = outcome.http_status;
     profile.last_verification_provider_code = outcome.provider_code;
+}
+
+fn mark_catalog_model_verified(
+    catalog: &mut StoredCatalog,
+    provider_id: &str,
+    model_id: &str,
+) -> Result<(), SwitcherError> {
+    let Some(value) = catalog.model_catalogs.get(provider_id).cloned() else {
+        return Ok(());
+    };
+    let Ok(mut model_catalog) = serde_json::from_value::<ModelCatalog>(value) else {
+        return Ok(());
+    };
+    if model_catalog.status != "ok" {
+        return Ok(());
+    }
+    if let Some(model) = model_catalog
+        .models
+        .iter_mut()
+        .find(|model| model.id.eq_ignore_ascii_case(model_id.trim()))
+    {
+        model.verified_for_responses = "verified".to_string();
+        catalog.model_catalogs.insert(
+            provider_id.to_string(),
+            serde_json::to_value(model_catalog)?,
+        );
+    }
+    Ok(())
+}
+
+fn invalidate_catalog_model_verifications(catalog: &mut StoredCatalog, provider_id: &str) {
+    let Some(value) = catalog.model_catalogs.get(provider_id).cloned() else {
+        return;
+    };
+    let Ok(mut model_catalog) = serde_json::from_value::<ModelCatalog>(value) else {
+        return;
+    };
+    for model in &mut model_catalog.models {
+        model.verified_for_responses = "unknown".to_string();
+    }
+    if let Ok(value) = serde_json::to_value(model_catalog) {
+        catalog
+            .model_catalogs
+            .insert(provider_id.to_string(), value);
+    }
+}
+
+fn preserve_catalog_model_verifications(previous: Option<&Value>, next: &mut ModelCatalog) {
+    let Some(previous) = previous else {
+        return;
+    };
+    let Ok(previous) = serde_json::from_value::<ModelCatalog>(previous.clone()) else {
+        return;
+    };
+    if previous.status != "ok" || previous.base_url != next.base_url {
+        return;
+    }
+    for model in &mut next.models {
+        if previous.models.iter().any(|previous_model| {
+            previous_model.id.eq_ignore_ascii_case(&model.id)
+                && previous_model.verified_for_responses == "verified"
+        }) {
+            model.verified_for_responses = "verified".to_string();
+        }
+    }
 }
 
 fn normalized_release_version(tag: &str) -> Option<Version> {
@@ -1436,6 +1491,7 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
     };
     let display_name = stored.name.clone();
     catalog.profiles.insert(id, serde_json::to_value(stored)?);
+    invalidate_catalog_model_verifications(&mut catalog, &profile.id);
     save_catalog(&catalog)?;
     app_state_with_activity(
         &format!("{display_name} 已保存"),
@@ -1505,6 +1561,7 @@ pub fn switch_profile_core(profile_id: String) -> Result<AppState, SwitcherError
         return Err(SwitcherError::Message(format!("切换已阻止：{detail}")));
     }
     apply_verification(&mut profile, verification);
+    mark_catalog_model_verified(&mut catalog, &profile_id, &profile.model)?;
     if profile.model.trim().is_empty() {
         let detail = "缺少 Codex 使用的模型名称；服务商已验证，但不能写入空模型。";
         catalog
@@ -1545,6 +1602,9 @@ pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError
     let verified = verification.verified;
     let detail = verification.detail.clone();
     apply_verification(&mut profile, verification);
+    if verified {
+        mark_catalog_model_verified(&mut catalog, &profile_id, &profile.model)?;
+    }
     catalog
         .profiles
         .insert(profile_id, serde_json::to_value(profile)?);
@@ -1577,7 +1637,9 @@ pub fn refresh_models_core(profile_id: String) -> Result<AppState, SwitcherError
         .cloned()
         .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
     let profile: StoredProfile = serde_json::from_value(value)?;
-    let model_catalog = fetch_provider_models(&profile_id, &profile)?;
+    let previous_catalog = catalog.model_catalogs.get(&profile_id).cloned();
+    let mut model_catalog = fetch_provider_models(&profile_id, &profile)?;
+    preserve_catalog_model_verifications(previous_catalog.as_ref(), &mut model_catalog);
     let ok = model_catalog.status == "ok";
     catalog
         .model_catalogs

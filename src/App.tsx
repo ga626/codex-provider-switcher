@@ -13,6 +13,7 @@ import {
   RefreshCcw,
   RotateCcw,
   Save,
+  Search,
   Server,
   ShieldCheck,
   Star,
@@ -160,22 +161,32 @@ function verificationLabel(profile: ProviderProfile | undefined) {
   if (profile.verified && profile.verificationStatus === 'verified') return '可用'
   const labels: Record<Exclude<ProviderProfile['verificationStatus'], 'verified'>, string> = {
     not_checked: '待验证',
-    missing_key: '鉴权失败',
-    invalid_profile: '鉴权失败',
+    missing_key: '缺少密钥',
+    invalid_profile: '配置不完整',
     unauthorized: '鉴权失败',
     billing_unavailable: '额度不足',
-    rate_limited: '网络失败',
-    model_unavailable: '网络失败',
-    endpoint_or_model_unavailable: '网络失败',
-    request_incompatible: '网络失败',
-    protocol_incompatible: '网络失败',
-    service_error: '网络失败',
-    timeout: '网络失败',
-    network_error: '网络失败',
-    transport_error: '网络失败',
-    provider_error: '网络失败',
+    rate_limited: '服务商限流',
+    model_unavailable: '模型不可用',
+    endpoint_or_model_unavailable: '接口或模型不可用',
+    request_incompatible: '请求不兼容',
+    protocol_incompatible: '协议不兼容',
+    service_error: '服务端异常',
+    timeout: '请求超时',
+    network_error: '网络不可达',
+    transport_error: '传输失败',
+    provider_error: '服务商错误',
   }
   return labels[profile.verificationStatus] ?? '待验证'
+}
+
+function requiresManualModelConfirmation(
+  draft: EditableProfile,
+  profile: ProviderProfile | undefined,
+  catalog: ModelCatalog | undefined
+) {
+  const model = draft.model.trim()
+  if (!model || !catalog || catalog.status !== 'ok' || model === profile?.model) return false
+  return !catalog.models.some((item) => item.id.toLocaleLowerCase() === model.toLocaleLowerCase())
 }
 
 function draftMatchesProfile(draft: EditableProfile, profile: ProviderProfile | undefined) {
@@ -199,6 +210,7 @@ function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [restoreConfirm, setRestoreConfirm] = useState<BackupItem | null>(null)
+  const [manualModelConfirm, setManualModelConfirm] = useState<string | null>(null)
 
   useEffect(() => {
     async function loadInitialState() {
@@ -317,7 +329,11 @@ function App() {
     }
   }
 
-  async function saveCurrentProfile() {
+  async function saveCurrentProfile(manualModelConfirmed = false) {
+    if (!manualModelConfirmed && requiresManualModelConfirmation(draft, selectedProfile, selectedModelCatalog)) {
+      setManualModelConfirm(draft.model.trim())
+      return
+    }
     await saveEditableProfile(draft, 'save')
   }
 
@@ -471,6 +487,18 @@ function App() {
         />
       )}
 
+      {manualModelConfirm && (
+        <ManualModelConfirmDialog
+          model={manualModelConfirm}
+          busy={busy !== null}
+          onCancel={() => setManualModelConfirm(null)}
+          onConfirm={() => {
+            setManualModelConfirm(null)
+            void saveCurrentProfile(true)
+          }}
+        />
+      )}
+
       <section className="workbench">
         <aside className="navigation-pane">
           <section className="sidebar-workspaces" aria-labelledby="workspace-nav-title">
@@ -547,6 +575,7 @@ function App() {
             )}
             {activeView === 'models' && (
               <ModelsWorkspace
+                key={selectedProfile?.id ?? 'no-provider'}
                 selectedProfile={selectedProfile}
                 selectedModelCatalog={selectedModelCatalog}
                 busy={busy}
@@ -837,9 +866,18 @@ function ModelsWorkspace({
   selectModel: (model: string) => Promise<void>
   runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
 }) {
+  const [query, setQuery] = useState('')
+  const normalizedQuery = query.trim().toLocaleLowerCase()
   const visibleModels = Array.from(
     new Map((selectedModelCatalog?.models ?? []).map((model) => [model.id, model])).values()
-  )
+  ).filter((model) => {
+    if (!normalizedQuery) return true
+    return [model.id, ...model.aliases, ...model.tags]
+      .join(' ')
+      .toLocaleLowerCase()
+      .includes(normalizedQuery)
+  })
+  const totalModels = selectedModelCatalog?.models.length ?? 0
 
   return (
     <div className="workspace-stack">
@@ -849,21 +887,27 @@ function ModelsWorkspace({
           <strong>{selectedProfile?.name ?? '未选择'}</strong>
           <small>{selectedProfile?.baseUrl ?? '选择左侧服务商后刷新模型目录'}</small>
         </div>
-        <button
-          className="primary-button"
-          type="button"
-          onClick={() => selectedProfile && runAction('refresh-models', () => refreshModels(selectedProfile.id))}
-          disabled={!selectedProfile || busy !== null}
-        >
-          <RefreshCcw size={16} />
-          刷新模型目录
-        </button>
+        <div className="model-toolbar-actions">
+          <label className="model-search">
+            <Search size={15} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型、别名或标签" />
+          </label>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => selectedProfile && runAction('refresh-models', () => refreshModels(selectedProfile.id))}
+            disabled={!selectedProfile || busy !== null}
+          >
+            <RefreshCcw size={16} />
+            刷新模型目录
+          </button>
+        </div>
       </section>
 
       <section className="surface-panel">
         <div className="model-table">
           <div className="model-table-head">
-            <span>模型</span>
+            <span>模型 {normalizedQuery ? `(${visibleModels.length}/${totalModels})` : `(${totalModels})`}</span>
             <span>选择</span>
           </div>
           {visibleModels.length ? (
@@ -872,6 +916,11 @@ function ModelsWorkspace({
                 <span>
                   <strong>{model.id}</strong>
                   {model.aliases.length > 0 && <small>别名：{model.aliases.join(', ')}</small>}
+                  <div className="model-meta">
+                    <span>目录来源</span>
+                    <span>{model.verifiedForResponses === 'verified' ? 'Responses 已验证' : 'Responses 未验证'}</span>
+                    {model.tags.map((tag) => <span key={tag}>{tag}</span>)}
+                  </div>
                 </span>
                 <button
                   className="ghost-button compact-button"
@@ -886,13 +935,42 @@ function ModelsWorkspace({
           ) : (
             <div className="empty-state">
               <Boxes size={28} />
-              <strong>还没有可展示的模型</strong>
-              <span>{selectedModelCatalog?.statusDetail ?? '刷新后只展示服务商实际返回的模型列表。'}</span>
+              <strong>{normalizedQuery ? '没有匹配的模型' : '还没有可展示的模型'}</strong>
+              <span>{normalizedQuery ? '尝试更换关键词，或清空搜索条件。' : selectedModelCatalog?.statusDetail ?? '刷新后只展示服务商实际返回的模型列表。'}</span>
             </div>
           )}
         </div>
       </section>
 
+    </div>
+  )
+}
+
+function ManualModelConfirmDialog({
+  model,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  model: string
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div className="confirm-backdrop" role="presentation">
+      <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="manual-model-dialog-title">
+        <div className="confirm-dialog-icon"><AlertTriangle size={20} /></div>
+        <div>
+          <span className="eyebrow">未验证模型</span>
+          <h2 id="manual-model-dialog-title">确认保存手动模型？</h2>
+          <p>{model} 不在最近刷新到的服务商模型目录中。保存后仍需运行真实 Responses 检查，确认该模型可用于 Codex。</p>
+        </div>
+        <div className="command-row">
+          <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
+          <button className="danger-button" type="button" onClick={onConfirm} disabled={busy}>仍然保存</button>
+        </div>
+      </section>
     </div>
   )
 }
@@ -930,7 +1008,8 @@ function SafetyWorkspace({
         <div>
           <KeyRound size={22} />
           <span>本次检查</span>
-          <strong>已认证服务端探针</strong>
+          <strong>真实 Responses 请求</strong>
+          <small>使用当前模型，不写入 Codex 配置。</small>
         </div>
         <button
           className="primary-button safety-run-button"
@@ -948,7 +1027,7 @@ function SafetyWorkspace({
             <span>当前服务商</span>
             <strong>{selectedProfile?.name ?? '未选择'}</strong>
           </div>
-          <small>不依赖当前模型；模型仅在切换写入前必填。</small>
+          <small>使用当前模型发起最小 Responses 请求，不会写入 Codex 配置或凭据。</small>
         </div>
         <div className="check-list">
           {providerChecks.map((check) => {
@@ -994,7 +1073,7 @@ function SafetyWorkspace({
           </div>
           <div>
             <span>本次真实检查</span>
-            <strong>不依赖模型，不会修改 Codex 配置或凭据</strong>
+            <strong>使用当前模型，不会修改 Codex 配置或凭据</strong>
           </div>
         </div>
       </section>

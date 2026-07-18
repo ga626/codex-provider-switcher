@@ -163,6 +163,8 @@ fallback zip 应包含 `CodeXProviderSwitcher.cmd`、`CodeXProviderSwitcher.ps1`
 
 发布新 tag 后，先运行 `npm run qa:updater-release -- -CurrentVersion <旧版本> -TargetVersion <新版本> -Collect`，再进行应用内更新验收。
 
+如果本次 Release 修复的是旧版本自身无法进入签名安装路径的问题，不能用该旧版本宣称自动升级已经验证。先在发布说明和安装文档写明一次性手动安装路径；在下一个更高版本发布时，才以本次已安装版本为旧版本运行 `qa:updater-release` 和真实应用内更新验收。
+
 只有完成这条路径，才能说产品已交付。
 
 如果在 PR 合并前只需要确认当前 GitHub Release 资产仍可下载、校验文件匹配远端 zip、包内结构正确，可以使用结构验证模式：

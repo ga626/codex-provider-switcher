@@ -71,6 +71,12 @@ assert(adapterTs.includes("if (isTauri) {\n    return invoke<AppState>('load_sta
 assert(adapterTs.includes('function isTrustedProjectReleaseUrl(value: string)'), 'Updater fallback URLs must use a dedicated trust check')
 assert(adapterTs.includes("parsed.pathname === '/ga626/codex-provider-switcher/releases'"), 'Updater trust check must allow the canonical project Release page')
 assert(adapterTs.indexOf('if (isTauri && pendingTauriUpdate)') < adapterTs.indexOf('if (!isTrustedProjectReleaseUrl(url))'), 'Signed Tauri updates must not be blocked by the fallback URL guard')
+assert(libRs.includes('provider_probe_endpoint(&profile.base_url, "responses")'), 'Provider verification must call the Responses endpoint')
+assert(libRs.includes('.post(endpoint)'), 'Provider verification must send the Responses request with POST')
+assert(libRs.includes('"authenticated_response_probe"'), 'Provider verification must record the Responses probe stage')
+assert(libRs.includes('body.get("id").is_some()'), 'Provider verification must require a Responses id')
+assert(libRs.includes('mark_catalog_model_verified'), 'Successful Responses verification must update the matching catalog model')
+assertNotIncludes(libRs, 'uses_request_probe', 'src-tauri/src/lib.rs')
 assert(mockDataTs.includes('trayEnabled: false'), 'Browser preview mock must not imply a default tray')
 
 console.log('[PASS] Tauri desktop boundary smoke passed.')
