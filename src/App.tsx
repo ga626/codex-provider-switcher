@@ -71,11 +71,7 @@ function getCheckVisual(check: { ok: boolean; severity: 'required' | 'warning' |
   return { icon: <XCircle size={16} />, className: 'danger' }
 }
 
-function profileChecks(
-  profile: ProviderProfile | undefined,
-  draft: EditableProfile,
-  modelCatalog: ModelCatalog | undefined
-): ValidationCheck[] {
+function profileConfigurationChecks(profile: ProviderProfile | undefined, draft: EditableProfile): ValidationCheck[] {
   if (!profile && !draft.name && !draft.baseUrl) {
     return []
   }
@@ -116,25 +112,33 @@ function profileChecks(
     },
   ]
 
-  const verificationStatus = profile?.verificationStatus ?? 'not_checked'
-  checks.push({
-    id: 'provider-auth-probe',
-    label: '兼容性探测（可选）',
-    ok: verificationStatus === 'verified' && Boolean(profile?.verified),
+  return checks
+}
+
+function providerAvailabilityChecks(
+  profile: ProviderProfile | undefined,
+  modelCatalog: ModelCatalog | undefined
+): ValidationCheck[] {
+  if (!profile) return []
+
+  const checks: ValidationCheck[] = [{
+    id: 'provider-inference-probe',
+    label: '服务商可用性测试（可选）',
+    ok: profile.verified && profile.verificationStatus === 'verified',
     detail: verificationDetail(profile),
     severity: 'info',
-  })
+  }]
 
-  if (model.length > 0 && modelCatalog?.status === 'ok') {
+  if (profile.model.length > 0 && modelCatalog?.status === 'ok') {
     const modelIds = new Set(modelCatalog.models.map((item) => item.id))
     checks.push({
       id: 'profile-model-catalog',
       label: '模型目录匹配',
-      ok: modelIds.has(model),
-      detail: modelIds.has(model)
+      ok: modelIds.has(profile.model),
+      detail: modelIds.has(profile.model)
         ? '当前模型存在于最近一次服务商模型目录。'
-        : '当前模型不在最近一次服务商模型目录中；保存时需要二次确认，兼容性探测可选。',
-      severity: 'warning',
+        : '当前模型不在最近一次服务商模型目录中；这只影响模型选择提示，不代表模型不能调用。',
+      severity: 'info',
     })
   }
 
@@ -143,7 +147,7 @@ function profileChecks(
 
 function verificationDetail(profile: ProviderProfile | undefined) {
   if (!profile?.lastVerificationDetail) {
-    return '可选诊断：使用最小 Responses 请求检查兼容性，不影响切换。'
+    return '尚未运行可用性测试。测试会发送一笔短时、低 token 的 Responses 请求，不影响切换。'
   }
 
   const diagnostics = [
@@ -158,23 +162,29 @@ function verificationDetail(profile: ProviderProfile | undefined) {
 
 function verificationLabel(profile: ProviderProfile | undefined) {
   if (!profile) return '未保存'
-  if (profile.verified && profile.verificationStatus === 'verified') return '探测通过'
+  if (profile.verified && profile.verificationStatus === 'verified') {
+    return profile.verificationResponseShape === 'compatible_response'
+      ? '可调用（兼容响应）'
+      : '可调用（标准 Responses）'
+  }
   const labels: Record<Exclude<ProviderProfile['verificationStatus'], 'verified'>, string> = {
-    not_checked: '未运行探测',
-    missing_key: '探测未执行',
-    invalid_profile: '探测未执行',
-    unauthorized: '探测未确认',
-    billing_unavailable: '探测未确认',
-    rate_limited: '探测未确认',
-    model_unavailable: '探测未确认',
-    endpoint_or_model_unavailable: '探测未确认',
-    request_incompatible: '探测未确认',
-    protocol_incompatible: '探测未确认',
-    service_error: '探测未确认',
-    timeout: '探测未确认',
-    network_error: '探测未确认',
-    transport_error: '探测未确认',
-    provider_error: '探测未确认',
+    not_checked: '未运行测试',
+    missing_key: '测试未执行',
+    invalid_profile: '测试未执行',
+    unauthorized: '认证被拒绝',
+    billing_unavailable: '额度或配额不足',
+    rate_limited: '服务商正在限流',
+    model_unavailable: '模型不可用',
+    endpoint_or_model_unavailable: '路径或模型不可用',
+    request_incompatible: '请求不被接受',
+    protocol_incompatible: '旧版协议结果',
+    response_shape_unconfirmed: '服务端已响应，结果待确认',
+    response_unparseable: '服务端已响应，无法解析',
+    service_error: '服务商异常',
+    timeout: '请求超时，未得出结论',
+    network_error: '网络不可达',
+    transport_error: '传输过程异常',
+    provider_error: '服务商返回错误',
   }
   return labels[profile.verificationStatus] ?? '待验证'
 }
@@ -260,12 +270,15 @@ function App() {
     return state?.modelCatalogs.find((catalog) => catalog.providerId === selectedId)
   }, [selectedId, state])
 
-  const providerChecks = useMemo(() => {
-    return profileChecks(selectedProfile, draft, selectedModelCatalog)
-  }, [draft, selectedModelCatalog, selectedProfile])
+  const profileConfigChecks = useMemo(() => {
+    return profileConfigurationChecks(selectedProfile, draft)
+  }, [draft, selectedProfile])
+  const availabilityChecks = useMemo(() => {
+    return providerAvailabilityChecks(selectedProfile, selectedModelCatalog)
+  }, [selectedModelCatalog, selectedProfile])
   const configChecks = state?.checks ?? []
-  const displayChecks = [...configChecks, ...providerChecks]
-  const requiredFailures = displayChecks.filter((check) => !check.ok && check.severity === 'required').length
+  const switchGateChecks = [...configChecks, ...profileConfigChecks]
+  const requiredFailures = switchGateChecks.filter((check) => !check.ok && check.severity === 'required').length
   const hasUnsavedChanges = !draftMatchesProfile(draft, selectedProfile)
   const latestActivity = state?.activity[0]
   const canSwitch = Boolean(
@@ -585,7 +598,8 @@ function App() {
             )}
             {activeView === 'safety' && (
               <SafetyWorkspace
-                providerChecks={providerChecks}
+                availabilityChecks={availabilityChecks}
+                profileConfigChecks={profileConfigChecks}
                 configChecks={configChecks}
                 safeMode={state.safeMode}
                 selectedProfile={selectedProfile}
@@ -668,11 +682,11 @@ function App() {
 
           <div className="inspector-section checks-mini">
             <div className="panel-heading">
-              <span>切换检查</span>
-              <strong>{displayChecks.length} 项</strong>
+              <span>切换前置条件</span>
+              <strong>{switchGateChecks.length} 项</strong>
             </div>
             <div className="mini-check-list">
-              {displayChecks.slice(0, 7).map((check) => {
+              {switchGateChecks.slice(0, 7).map((check) => {
                 const visual = getCheckVisual(check)
                 return (
                   <div className={`mini-check ${visual.className}`} key={check.id}>
@@ -919,7 +933,7 @@ function ModelsWorkspace({
                   <div className="model-meta">
                     <span>服务商目录</span>
                     {selectedProfile?.model.toLocaleLowerCase() === model.id.toLocaleLowerCase() && model.verifiedForResponses === 'verified' && (
-                      <span>当前模型探测通过</span>
+                      <span>当前模型可用性测试通过</span>
                     )}
                     {model.tags.map((tag) => <span key={tag}>{tag}</span>)}
                   </div>
@@ -966,7 +980,7 @@ function ManualModelConfirmDialog({
         <div>
           <span className="eyebrow">未验证模型</span>
           <h2 id="manual-model-dialog-title">确认保存手动模型？</h2>
-          <p>{model} 不在最近刷新到的服务商模型目录中。保存后可运行兼容性探测；探测未确认不代表已有 Codex 使用会失败。</p>
+          <p>{model} 不在最近刷新到的服务商模型目录中。保存后可运行可用性测试；测试未确认不代表已有 Codex 使用会失败。</p>
         </div>
         <div className="command-row">
           <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
@@ -978,7 +992,8 @@ function ManualModelConfirmDialog({
 }
 
 function SafetyWorkspace({
-  providerChecks,
+  availabilityChecks,
+  profileConfigChecks,
   configChecks,
   safeMode,
   selectedProfile,
@@ -988,7 +1003,8 @@ function SafetyWorkspace({
   onRestoreRequested,
   runAction,
 }: {
-  providerChecks: ValidationCheck[]
+  availabilityChecks: ValidationCheck[]
+  profileConfigChecks: ValidationCheck[]
   configChecks: ValidationCheck[]
   safeMode: boolean
   selectedProfile: ProviderProfile | undefined
@@ -1009,9 +1025,9 @@ function SafetyWorkspace({
         </div>
         <div>
           <KeyRound size={22} />
-          <span>兼容性探测</span>
+          <span>服务商可用性测试</span>
           <strong>可选</strong>
-          <small>短时 Responses 诊断，不作为切换门槛。</small>
+          <small>发起一笔短时、低 token 的 Responses 请求，不作为切换门槛。</small>
         </div>
         <button
           className="primary-button safety-run-button"
@@ -1020,19 +1036,19 @@ function SafetyWorkspace({
           disabled={!selectedProfile || hasUnsavedChanges || busy !== null}
         >
           <ShieldCheck size={16} />
-          {hasUnsavedChanges ? '请先保存更改' : '运行兼容性探测'}
+          {hasUnsavedChanges ? '请先保存更改' : '运行可用性测试'}
         </button>
       </section>
       <section className="surface-panel">
         <div className="check-section-heading">
           <div>
-            <span>当前服务商</span>
+            <span>目标服务商可用性</span>
             <strong>{selectedProfile?.name ?? '未选择'}</strong>
           </div>
-          <small>使用当前模型发起短时 Responses 诊断；未确认不代表服务商不能使用。</small>
+          <small>测试只覆盖一次短请求；它不替代长上下文、工具调用或最终 Codex 验收。</small>
         </div>
         <div className="check-list">
-          {providerChecks.map((check) => {
+          {availabilityChecks.map((check) => {
             const visual = getCheckVisual(check)
             return (
               <div className={`check-row ${visual.className}`} key={check.id}>
@@ -1050,12 +1066,12 @@ function SafetyWorkspace({
         <div className="section-heading-row">
           <div>
             <span className="eyebrow">切换门禁</span>
-            <h3>Codex 配置状态</h3>
+            <h3>目标配置完整性</h3>
           </div>
-          <span className="section-meta">兼容性探测不会写入此处</span>
+          <span className="section-meta">仅检查保存的地址、模型和密钥</span>
         </div>
         <div className="check-list compact-check-list">
-          {configChecks.map((check) => {
+          {profileConfigChecks.map((check) => {
             const visual = getCheckVisual(check)
             return (
               <div className={`check-row ${visual.className}`} key={check.id}>
@@ -1074,9 +1090,32 @@ function SafetyWorkspace({
             <strong>只有切换时才生成恢复点</strong>
           </div>
           <div>
-            <span>兼容性探测</span>
-            <strong>只作诊断，未确认不阻止切换</strong>
+            <span>可用性测试</span>
+            <strong>手动运行，不写入 Codex 配置</strong>
           </div>
+        </div>
+      </section>
+      <section className="surface-panel compact-surface">
+        <div className="section-heading-row">
+          <div>
+            <span className="eyebrow">切换门禁</span>
+            <h3>Codex 当前配置</h3>
+          </div>
+          <span className="section-meta">切换后仍须保持的本地不变量</span>
+        </div>
+        <div className="check-list compact-check-list">
+          {configChecks.map((check) => {
+            const visual = getCheckVisual(check)
+            return (
+              <div className={`check-row ${visual.className}`} key={check.id}>
+                {visual.icon}
+                <div>
+                  <strong>{check.label}</strong>
+                  <span>{check.detail}</span>
+                </div>
+              </div>
+            )
+          })}
         </div>
       </section>
       <section className="surface-panel recovery-panel">

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Reworked provider availability testing so a successful payload with `"error": null` is not misclassified as a provider failure.
+- Separated callable-result evidence, standard Responses shape, and an unconfirmed response shape in the UI and diagnostics.
+- Renamed the user-facing provider check to "服务商可用性测试" and kept it non-blocking for safe local switching.
+
 ## 0.4.1-alpha - 2026-07-18
 
 - Fixed the Tauri updater action so a verified pending update is installed directly instead of being rejected by the manual Release-page URL guard.

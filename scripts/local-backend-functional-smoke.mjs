@@ -168,6 +168,11 @@ const providerServer = createServer((request, response) => {
         response.end(JSON.stringify({ object: 'response' }))
         return
       }
+      if (authorization === 'Bearer fixture-compatible-response') {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ error: null, object: 'response', output_text: 'OK' }))
+        return
+      }
       if (authorization === 'Bearer sk-service-error') {
         response.writeHead(503, { 'Content-Type': 'application/json' })
         response.end(JSON.stringify({ error: { code: 'service_unavailable', message: 'upstream unavailable' } }))
@@ -233,7 +238,8 @@ try {
   const verifiedProfile = verified.profiles.find((item) => item.id === profile.id)
   assert(verifiedProfile?.verified, 'real authenticated server probe did not pass')
   assert(verifiedProfile?.verificationStatus === 'verified', 'verification did not record the verified status')
-  assert(verifiedProfile?.lastVerificationStage === 'authenticated_response_probe', 'verification did not record the verification stage')
+  assert(verifiedProfile?.verificationResponseShape === 'standard_responses', 'verification did not record the standard Responses shape')
+  assert(verifiedProfile?.lastVerificationStage === 'inference', 'verification did not record the inference stage')
   assert(verifiedProfile?.lastVerificationHttpStatus === 200, 'verification did not record the HTTP status')
   assert(
     verified.modelCatalogs
@@ -242,7 +248,7 @@ try {
       ?.verifiedForResponses === 'verified',
     'successful Responses verification did not mark the catalog model as verified'
   )
-  assert(verified.activity[0]?.title === '兼容性探测通过', 'compatibility probe did not update activity')
+  assert(verified.activity[0]?.title === '服务商可用性测试通过', 'provider availability test did not update activity')
   assert(await readFile(configPath, 'utf8') === originalConfig, 'verification changed config.toml')
   assert(await readFile(authPath, 'utf8') === originalAuth, 'verification changed auth.json')
 
@@ -328,7 +334,17 @@ try {
   await api('/api/profiles/save', { profile: protocolMismatch })
   const protocolVerification = await api('/api/profiles/verify', { profileId: protocolMismatch.id })
   const protocolProfile = protocolVerification.profiles.find((item) => item.id === protocolMismatch.id)
-  assert(protocolProfile?.verificationStatus === 'protocol_incompatible', 'invalid successful response was not classified as protocol incompatible')
+  assert(!protocolProfile?.verified, 'unconfirmed response shape was incorrectly marked as callable')
+  assert(protocolProfile?.verificationStatus === 'response_shape_unconfirmed', 'successful JSON without model output was not classified as response shape unconfirmed')
+  assert(protocolProfile?.lastVerificationStage === 'response_shape', 'unconfirmed response shape did not retain its diagnostic stage')
+
+  const compatibleResponse = { ...profile, id: 'compatible-response', name: 'Compatible response', apiKey: 'fixture-compatible-response' }
+  await api('/api/profiles/save', { profile: compatibleResponse })
+  const compatibleVerification = await api('/api/profiles/verify', { profileId: compatibleResponse.id })
+  const compatibleProfile = compatibleVerification.profiles.find((item) => item.id === compatibleResponse.id)
+  assert(compatibleProfile?.verified, 'recognized compatible response was not marked callable')
+  assert(compatibleProfile?.verificationStatus === 'verified', 'recognized compatible response did not record a successful inference result')
+  assert(compatibleProfile?.verificationResponseShape === 'compatible_response', 'compatible response shape was not preserved')
 
   const serviceError = { ...profile, id: 'service-error', name: 'Service error', apiKey: 'sk-service-error' }
   await api('/api/profiles/save', { profile: serviceError })
@@ -352,9 +368,9 @@ try {
       'save persisted provider and activity',
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models and deduplicated results',
-      'explicit authenticated /v1/responses probes record compatibility for the selected model',
+      'authenticated /v1/responses probes distinguish standard, compatible, and unconfirmed response shapes',
       'inconclusive quota probes do not block local safe switching or trigger a second remote probe',
-      'verification diagnostics classify endpoint, protocol, billing, and service errors without changing Codex config/auth',
+      'verification diagnostics classify endpoint, response shape, billing, and service errors without changing Codex config/auth',
       'default selection persisted',
       'switch wrote config/auth, preserved unrelated data, and created a manifest-backed backup',
       'same-address profiles retain the selected current-provider identity after a safe switch',

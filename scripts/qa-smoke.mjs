@@ -143,7 +143,7 @@ try {
   await desktop.getByRole('heading', { name: '编辑 Smoke Test API' }).waitFor()
 
   await desktop.getByRole('button', { name: /安全检查/ }).click()
-  await desktop.getByRole('button', { name: '运行兼容性探测' }).click()
+  await desktop.getByRole('button', { name: '运行可用性测试' }).click()
   await desktop.getByText('没有连接远端服务商').waitFor()
   await desktop.getByRole('button', { name: /服务商/ }).first().click()
   if (!await desktop.getByRole('button', { name: '切换到 Smoke Test API' }).isDisabled()) {
@@ -165,7 +165,7 @@ try {
   await desktop.getByRole('button', { name: /安全检查/ }).click()
   await desktop.getByRole('heading', { name: '安全检查' }).waitFor()
   await desktop.locator('.check-list').first().waitFor()
-  await desktop.locator('.check-list.compact-check-list').waitFor()
+  await desktop.locator('.check-list.compact-check-list').first().waitFor()
   const safetyLayout = await desktop.evaluate(() => {
     const button = document.querySelector('.safety-run-button')?.getBoundingClientRect()
     const summary = document.querySelector('.safety-summary')?.getBoundingClientRect()

@@ -49,6 +49,7 @@ pub struct ProviderProfile {
     pub note: String,
     pub verified: bool,
     pub verification_status: String,
+    pub verification_response_shape: Option<String>,
     pub is_default: bool,
     pub active: bool,
     pub has_api_key: bool,
@@ -178,6 +179,8 @@ struct StoredProfile {
     #[serde(default = "default_verification_status")]
     verification_status: String,
     #[serde(default)]
+    verification_response_shape: Option<String>,
+    #[serde(default)]
     default: bool,
     #[serde(default)]
     note: String,
@@ -203,6 +206,7 @@ struct ProviderVerificationOutcome {
     stage: String,
     http_status: Option<u16>,
     provider_code: Option<String>,
+    response_shape: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -431,6 +435,7 @@ fn catalog_profiles(catalog: &StoredCatalog, current_id: &str) -> Vec<ProviderPr
                     note: profile.note,
                     verified: profile.verified && profile.verification_status == "verified",
                     verification_status: profile.verification_status,
+                    verification_response_shape: profile.verification_response_shape,
                     is_default: profile.default,
                     active: id == current_id,
                     has_api_key: !profile.api_key.trim().is_empty(),
@@ -818,6 +823,25 @@ mod tests {
             .tags
             .contains(&"vision".to_string()));
     }
+
+    #[test]
+    fn treats_null_error_as_a_success_payload_and_recognizes_compatible_output() {
+        let body = json!({
+            "error": null,
+            "object": "response",
+            "output_text": "OK"
+        });
+
+        assert!(!has_provider_error(&body));
+        assert!(has_compatible_response_output(&body));
+    }
+
+    #[test]
+    fn preserves_non_null_error_as_a_provider_failure() {
+        let body = json!({"error": {"code": "insufficient_quota"}});
+
+        assert!(has_provider_error(&body));
+    }
 }
 
 fn build_model_catalog(
@@ -951,7 +975,75 @@ fn verification_outcome(
         stage: stage.to_string(),
         http_status,
         provider_code,
+        response_shape: None,
     }
+}
+
+fn inference_outcome(
+    response_shape: &str,
+    detail: &str,
+    http_status: u16,
+) -> ProviderVerificationOutcome {
+    ProviderVerificationOutcome {
+        verified: true,
+        status: "verified".to_string(),
+        detail: detail.to_string(),
+        stage: "inference".to_string(),
+        http_status: Some(http_status),
+        provider_code: None,
+        response_shape: Some(response_shape.to_string()),
+    }
+}
+
+fn nonempty_text(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty())
+}
+
+fn has_provider_error(body: &Value) -> bool {
+    body.get("error").is_some_and(|error| !error.is_null())
+}
+
+fn has_compatible_response_output(body: &Value) -> bool {
+    if nonempty_text(body.get("output_text"))
+        || nonempty_text(body.get("content"))
+        || body
+            .get("message")
+            .is_some_and(|message| nonempty_text(message.get("content")))
+    {
+        return true;
+    }
+
+    if body
+        .get("output")
+        .and_then(Value::as_array)
+        .is_some_and(|output| {
+            output.iter().any(|item| {
+                nonempty_text(item.get("text"))
+                    || nonempty_text(item.get("content"))
+                    || item
+                        .get("content")
+                        .and_then(Value::as_array)
+                        .is_some_and(|content| {
+                            content.iter().any(|part| nonempty_text(part.get("text")))
+                        })
+            })
+        })
+    {
+        return true;
+    }
+
+    body.get("choices")
+        .and_then(Value::as_array)
+        .is_some_and(|choices| {
+            choices.iter().any(|choice| {
+                nonempty_text(choice.get("text"))
+                    || choice
+                        .get("message")
+                        .is_some_and(|message| nonempty_text(message.get("content")))
+            })
+        })
 }
 
 fn provider_probe_endpoint(base_url: &str, probe_path: &str) -> Result<String, String> {
@@ -1084,29 +1176,32 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
     let status = response.status();
     if status.is_success() {
         return match response.json::<Value>() {
-            Ok(body) if body.get("error").is_none() && body.get("id").is_some() => {
-                verification_outcome(
-                    true,
-                    "verified",
-                    "authenticated_response_probe",
-                    "短时兼容性探测已通过：服务商返回了有效 Responses 响应。本次检查不会写入 Codex 配置。",
-                    Some(status.as_u16()),
-                    None,
-                )
+            Ok(body) if has_provider_error(&body) => {
+                provider_failure_outcome(Some(status.as_u16()), &body.to_string())
             }
+            Ok(body) if body.get("id").is_some() => inference_outcome(
+                "standard_responses",
+                "可用性测试已通过：当前模型返回了标准 Responses 结果。本次检查不会写入 Codex 配置。",
+                status.as_u16(),
+            ),
+            Ok(body) if has_compatible_response_output(&body) => inference_outcome(
+                "compatible_response",
+                "可用性测试已通过：当前模型返回了可识别的兼容响应。标准 Responses 形状尚未完全确认。",
+                status.as_u16(),
+            ),
             Ok(_) => verification_outcome(
                 false,
-                "protocol_incompatible",
-                "response_format",
-                "兼容性探测收到了 JSON，但不符合本工具的最小 Responses 形状；这不代表服务商不能被 Codex 使用。",
+                "response_shape_unconfirmed",
+                "response_shape",
+                "服务端已响应并返回 JSON，但本工具尚不能从中确认模型输出；这不代表服务商不能被 Codex 使用。",
                 Some(status.as_u16()),
                 None,
             ),
             Err(_) => verification_outcome(
                 false,
-                "protocol_incompatible",
-                "response_format",
-                "兼容性探测没有收到可解析的 JSON 响应；这不代表服务商不能被 Codex 使用。",
+                "response_unparseable",
+                "response_shape",
+                "服务端已响应，但返回内容无法按 JSON 解析；本工具无法确认模型输出。",
                 Some(status.as_u16()),
                 None,
             ),
@@ -1182,6 +1277,7 @@ fn apply_verification(profile: &mut StoredProfile, outcome: ProviderVerification
     profile.last_verification_stage = Some(outcome.stage);
     profile.last_verification_http_status = outcome.http_status;
     profile.last_verification_provider_code = outcome.provider_code;
+    profile.verification_response_shape = outcome.response_shape;
 }
 
 fn mark_catalog_model_verified(
@@ -1503,6 +1599,7 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
             .unwrap_or_else(default_reasoning),
         verified: false,
         verification_status: default_verification_status(),
+        verification_response_shape: None,
         default: existing_profile
             .as_ref()
             .map(|p| p.default)
@@ -1615,6 +1712,7 @@ pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError
     let display_name = profile.name.clone();
     let verification = verify_provider_auth_probe(&profile);
     let verified = verification.verified;
+    let status = verification.status.clone();
     let detail = verification.detail.clone();
     apply_verification(&mut profile, verification);
     if verified {
@@ -1626,14 +1724,20 @@ pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError
     save_catalog(&catalog)?;
     if verified {
         app_state_with_activity(
-            "兼容性探测通过",
-            &format!("{display_name} 已通过短时、已认证的 Responses 兼容性探测。"),
+            "服务商可用性测试通过",
+            &format!("{display_name} 已完成短时、已认证的可用性测试。"),
             "success",
+        )
+    } else if status == "response_shape_unconfirmed" || status == "response_unparseable" {
+        app_state_with_activity(
+            "服务端已响应，结果待确认",
+            &format!("{display_name} 的可用性测试未能确认模型输出：{detail}"),
+            "warning",
         )
     } else {
         app_state_with_activity(
-            "兼容性探测未确认",
-            &format!("{display_name} 的兼容性探测未确认：{detail}"),
+            "服务商可用性测试未确认",
+            &format!("{display_name} 的可用性测试未确认：{detail}"),
             "warning",
         )
     }
