@@ -15,12 +15,17 @@ const exePath = join(
   'debug',
   process.platform === 'win32' ? 'local_backend.exe' : 'local_backend'
 )
+const packageMetadata = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8'))
+const versionMatch = /^(\d+)\.(\d+)\.(\d+)(-.+)?$/.exec(packageMetadata.version)
+if (!versionMatch) throw new Error(`Unsupported package version for update fixture: ${packageMetadata.version}`)
+const fixtureLatestVersion = `${versionMatch[1]}.${versionMatch[2]}.${Number(versionMatch[3]) + 1}${versionMatch[4] ?? ''}`
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'codex-switcher-functional-'))
 const userHome = join(fixtureRoot, 'user')
 const localAppData = join(fixtureRoot, 'local-app-data')
 const codexDir = join(userHome, '.codex')
 const configPath = join(codexDir, 'config.toml')
 const authPath = join(codexDir, 'auth.json')
+const profilesPath = join(localAppData, 'CodeX Provider Switcher', 'profiles.json')
 let modelsProbeRequestCount = 0
 let responsesProbeRequestCount = 0
 
@@ -91,14 +96,14 @@ const providerServer = createServer((request, response) => {
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify([
       {
-        tag_name: 'v0.5.1-alpha',
-        html_url: 'https://github.com/ga626/codex-provider-switcher/releases/tag/v0.5.1-alpha',
+        tag_name: `v${fixtureLatestVersion}`,
+        html_url: `https://github.com/ga626/codex-provider-switcher/releases/tag/v${fixtureLatestVersion}`,
         draft: false,
         published_at: '2026-07-16T00:00:00Z',
         assets: [
           {
-            name: 'CodeXProviderSwitcher-windows-x64-0.5.1-alpha-setup.exe',
-            browser_download_url: 'https://github.com/ga626/codex-provider-switcher/releases/download/v0.5.1-alpha/CodeXProviderSwitcher-windows-x64-0.5.1-alpha-setup.exe',
+            name: `CodeXProviderSwitcher-windows-x64-${fixtureLatestVersion}-setup.exe`,
+            browser_download_url: `https://github.com/ga626/codex-provider-switcher/releases/download/v${fixtureLatestVersion}/CodeXProviderSwitcher-windows-x64-${fixtureLatestVersion}-setup.exe`,
           },
         ],
       },
@@ -213,7 +218,7 @@ try {
 
   const update = await api('/api/update/check')
   assert(update.available, 'update check did not detect a newer semantic version')
-  assert(update.latestVersion === '0.5.1-alpha', 'update check returned the wrong latest version')
+  assert(update.latestVersion === fixtureLatestVersion, 'update check returned the wrong latest version')
   assert(update.downloadUrl?.endsWith('-setup.exe'), 'update check did not select the Windows setup asset')
 
   const profile = {
@@ -227,6 +232,10 @@ try {
   const saved = await api('/api/profiles/save', { profile })
   assert(saved.profiles.some((item) => item.id === profile.id), 'save did not persist the provider')
   assert(saved.activity[0]?.title.includes('已保存'), 'save did not update activity')
+  const persistedProfiles = await readFile(profilesPath, 'utf8')
+  const persistedProfile = JSON.parse(persistedProfiles).profiles[profile.id]
+  assert(persistedProfile.api_key === '', 'profile store persisted a non-empty API key field')
+  assert(typeof persistedProfile.api_key_protected === 'string' && persistedProfile.api_key_protected.length > 20, 'profile store did not use protected credential storage')
 
   const refreshed = await api('/api/models/refresh', { profileId: profile.id })
   const catalog = refreshed.modelCatalogs.find((item) => item.providerId === profile.id)
@@ -287,7 +296,20 @@ try {
   const backupLabels = await readdir(join(localAppData, 'CodeX Provider Switcher', 'backups'))
   const manifest = JSON.parse(await readFile(join(localAppData, 'CodeX Provider Switcher', 'backups', backupLabels[0], 'manifest.json'), 'utf8'))
   assert(manifest.reason === 'before_switch', 'backup manifest did not record its reason')
-  assert(Array.isArray(manifest.files) && manifest.files.includes('config.toml') && manifest.files.includes('auth.json'), 'backup manifest did not list protected files')
+  assert(
+    Array.isArray(manifest.files) && manifest.files.includes('config.toml.dpapi') && manifest.files.includes('auth.json.dpapi'),
+    'backup manifest did not list protected files'
+  )
+  const backupFiles = await readdir(join(localAppData, 'CodeX Provider Switcher', 'backups', backupLabels[0]))
+  assert(!backupFiles.includes('config.toml') && !backupFiles.includes('auth.json'), 'backup retained plaintext credential files')
+
+  const driftedConfig = switchedConfig.replace('model = "reasoning-current"', 'model = "reasoning-current-drift"')
+  const authBeforeSync = await readFile(authPath, 'utf8')
+  await writeFile(configPath, driftedConfig, 'utf8')
+  const synced = await api('/api/config/sync-current', {})
+  assert(synced.profiles.find((item) => item.id === profile.id)?.model === 'reasoning-current-drift', 'current configuration sync did not update the profile model')
+  assert(await readFile(configPath, 'utf8') === driftedConfig, 'current configuration sync wrote config.toml')
+  assert(await readFile(authPath, 'utf8') === authBeforeSync, 'current configuration sync wrote auth.json')
   assert(switched.activity[0]?.title === '已切换到 Fixture Provider', 'switch did not update activity')
   assert(modelsProbeRequestCount >= 1, 'model refresh did not issue an authenticated /models request')
   assert(responsesProbeRequestCount === responsesBeforeSwitch, 'switch unexpectedly sent a remote compatibility probe')
@@ -366,6 +388,7 @@ try {
     isolationRoot: fixtureRoot,
     assertions: [
       'save persisted provider and activity',
+      'profile keys and backup credential copies are DPAPI-protected at rest',
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models and deduplicated results',
       'authenticated /v1/responses probes distinguish standard, compatible, and unconfirmed response shapes',
@@ -375,6 +398,7 @@ try {
       'switch wrote config/auth, preserved unrelated data, and created a manifest-backed backup',
       'same-address profiles retain the selected current-provider identity after a safe switch',
       'restore recovered both files and updated timeline',
+      'current configuration sync updates only the local profile directory',
       'delete removed a non-current non-default provider',
     ],
   }, null, 2))

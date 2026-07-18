@@ -1,7 +1,7 @@
 {
   "name": "codex-provider-switcher",
   "private": true,
-  "version": "0.5.0-alpha",
+  "version": "0.6.0-alpha",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,11 +11,13 @@
     "preview:start": "powershell -ExecutionPolicy Bypass -File scripts/start-preview.ps1",
     "preview:stop": "powershell -ExecutionPolicy Bypass -File scripts/stop-preview.ps1",
     "qa:smoke": "node scripts/qa-smoke.mjs",
+    "qa:preview-smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/run-preview-smoke.ps1",
     "qa:dev-desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/start-dev-desktop.ps1",
     "qa:install-release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/prepare-install-release-qa.ps1",
     "qa:updater-release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/prepare-updater-release-qa.ps1",
     "qa:stable-install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/stable-install.ps1",
-    "backend:build": "cargo build --manifest-path src-tauri/Cargo.toml --bin local_backend",
+    "qa:cutover-preflight": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/cutover-preflight.ps1",
+    "backend:build": "cargo build --manifest-path src-tauri/Cargo.toml --bin local_backend --jobs 1",
     "backend:smoke": "node scripts/local-backend-smoke.mjs",
     "backend:functional-smoke": "node scripts/local-backend-functional-smoke.mjs",
     "backend:ui-smoke": "node scripts/local-backend-ui-smoke.mjs",
@@ -26,6 +28,7 @@
     "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/build-codex-provider-switcher-release.ps1",
     "release:verify-local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-local-release-package.ps1",
     "release:verify-upload-assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-release-upload-assets.ps1",
+    "release:verify-remote": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-github-release-asset.ps1 -RemoteStructureOnly",
     "release:assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/generate-installer-assets.ps1",
     "tauri:dev": "powershell -NoProfile -Command \"$env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL='development'; npx tauri dev\"",
     "tauri:build": "npm run release:assets && tauri build"

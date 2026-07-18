@@ -57,6 +57,9 @@ if ($LASTEXITCODE -eq 0) {
     if ($release.draft -or $release.prerelease) {
         throw "Existing GitHub Release $Tag is not eligible for the updater latest channel."
     }
+    if (-not $release.immutable) {
+        throw "Existing GitHub Release $Tag is not immutable. Refusing to treat mutable assets as a completed release."
+    }
     $assetNames = @($release.assets | ForEach-Object { $_.name })
     $missingNames = @($expectedNames | Where-Object { $_ -notin $assetNames })
     if ($missingNames.Count -gt 0) {

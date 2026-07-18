@@ -40,11 +40,26 @@ function Invoke-RequestStatus {
     }
 }
 
+function Test-ListeningPort {
+    param([int]$CandidatePort)
+    return @(Get-NetTCPConnection -State Listen -LocalPort $CandidatePort -ErrorAction SilentlyContinue).Count -gt 0
+}
+
 Expand-Archive -LiteralPath $zipFull -DestinationPath $workFull -Force
 
 $packageRoot = Get-ChildItem -LiteralPath $workFull -Directory | Select-Object -First 1
 if (-not $packageRoot) {
     throw "Release zip did not contain a package directory."
+}
+
+if (Test-ListeningPort -CandidatePort $Port) {
+    $requestedPort = $Port
+    $availablePorts = @(47841..47860 | Where-Object { -not (Test-ListeningPort -CandidatePort $_) })
+    if ($availablePorts.Count -eq 0) {
+        throw "No temporary local port is available for Release verification."
+    }
+    $Port = [int]$availablePorts[0]
+    Write-Host "Release verification port $requestedPort is in use; using temporary port $Port."
 }
 
 $launcher = Join-Path $packageRoot.FullName "CodeXProviderSwitcher.ps1"

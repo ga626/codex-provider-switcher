@@ -97,6 +97,14 @@ $release = $releaseJson | ConvertFrom-Json
 if ($release.isDraft -or $release.isPrerelease) {
     throw "GitHub Release $Tag is not eligible for the updater latest channel."
 }
+$releaseApiJson = & gh api "repos/$Repository/releases/tags/$Tag" 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to read immutable Release state for $Repository@$Tag. Output: $releaseApiJson"
+}
+$releaseApi = $releaseApiJson | ConvertFrom-Json
+if (-not $releaseApi.immutable) {
+    throw "GitHub Release $Tag is not immutable. Enable release immutability before publishing and do not treat this release as delivered."
+}
 $assetNames = @($release.assets | ForEach-Object { $_.name })
 if ($assetNames -notcontains "$releaseName.zip") {
     throw "GitHub Release is missing asset: $releaseName.zip"
@@ -208,6 +216,7 @@ try {
     }
     Write-Host "[PASS] GitHub Release SHA256 file matches."
     Write-Host "[PASS] Desktop release assets and SHA256 files are present."
+    Write-Host "[PASS] GitHub Release is immutable."
     if (-not $RemoteStructureOnly) {
         Write-Host "[PASS] GitHub Release notes match local release notes."
     }

@@ -1,7 +1,8 @@
 use codex_switcher_tauri_lib::{
     check_for_update_core, delete_profile_core, load_state_core, refresh_models_core,
     restore_latest_backup_core, save_profile_core, set_default_profile_core, switch_profile_core,
-    toggle_auto_start_core, verify_profile_core, AppState, EditableProfile, SwitcherError,
+    sync_current_configuration_core, toggle_auto_start_core, verify_profile_core, AppState,
+    EditableProfile, SwitcherError,
 };
 use serde_json::{json, Value};
 use std::{
@@ -254,6 +255,7 @@ fn handle_api(
         ("POST", "/api/profiles/default") => {
             set_default_profile_core(profile_id(body)?).map(state_json)
         }
+        ("POST", "/api/config/sync-current") => sync_current_configuration_core().map(state_json),
         ("POST", "/api/auto-start") => {
             let enabled = request_json(body)?
                 .get("enabled")

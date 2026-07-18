@@ -416,3 +416,22 @@ export async function setDefaultProfile(profileId: string): Promise<AppState> {
   })
   return structuredClone(mockState)
 }
+
+export async function syncCurrentConfiguration(): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('sync_current_configuration')
+  }
+  const webState = await tryWebBackend<AppState>('/api/config/sync-current', apiPost())
+  if (webState) {
+    return webState
+  }
+  await mockDelay()
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: '预览未同步当前配置',
+    detail: '开发预览不会读取或改写本机 Codex 配置。',
+    tone: 'warning',
+  })
+  return structuredClone(mockState)
+}

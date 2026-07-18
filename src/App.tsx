@@ -32,6 +32,7 @@ import {
   restoreLatestBackup,
   saveProfile,
   setDefaultProfile,
+  syncCurrentConfiguration,
   switchProfile,
   verifyProfile,
 } from './adapter'
@@ -221,6 +222,7 @@ function App() {
   const [updateBusy, setUpdateBusy] = useState(false)
   const [restoreConfirm, setRestoreConfirm] = useState<BackupItem | null>(null)
   const [manualModelConfirm, setManualModelConfirm] = useState<string | null>(null)
+  const [syncConfirm, setSyncConfirm] = useState(false)
 
   useEffect(() => {
     async function loadInitialState() {
@@ -606,7 +608,9 @@ function App() {
                 busy={busy}
                 hasUnsavedChanges={hasUnsavedChanges}
                 backups={state.backups}
+                configurationDrift={state.configurationDrift}
                 onRestoreRequested={() => setRestoreConfirm(state.backups[0] ?? null)}
+                onSyncRequested={() => setSyncConfirm(true)}
                 runAction={runAction}
               />
             )}
@@ -713,6 +717,17 @@ function App() {
         <span>{state.safeMode ? '安全模式开启' : '安全模式关闭'}</span>
         <span>凭据仅保存在此设备</span>
       </footer>
+      {syncConfirm && state.configurationDrift && (
+        <SyncCurrentConfigurationDialog
+          drift={state.configurationDrift}
+          busy={busy !== null}
+          onCancel={() => setSyncConfirm(false)}
+          onConfirm={() => {
+            setSyncConfirm(false)
+            void runAction('sync-current-config', syncCurrentConfiguration)
+          }}
+        />
+      )}
     </main>
   )
 }
@@ -991,6 +1006,35 @@ function ManualModelConfirmDialog({
   )
 }
 
+function SyncCurrentConfigurationDialog({
+  drift,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  drift: NonNullable<AppState['configurationDrift']>
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div className="confirm-backdrop" role="presentation">
+      <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="sync-dialog-title">
+        <div className="confirm-dialog-icon"><GitCompareArrows size={20} /></div>
+        <div>
+          <span className="eyebrow">同步当前 Codex 配置</span>
+          <h2 id="sync-dialog-title">确认更新切换器目录？</h2>
+          <p>{drift.profileName} 当前保存的是 {drift.savedModel}，Codex 正在使用 {drift.currentModel}。此操作只更新切换器目录，不会写入 Codex 配置、认证文件或发起远端请求。</p>
+        </div>
+        <div className="command-row">
+          <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
+          <button className="primary-button" type="button" onClick={onConfirm} disabled={busy}>确认同步</button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function SafetyWorkspace({
   availabilityChecks,
   profileConfigChecks,
@@ -1000,7 +1044,9 @@ function SafetyWorkspace({
   busy,
   hasUnsavedChanges,
   backups,
+  configurationDrift,
   onRestoreRequested,
+  onSyncRequested,
   runAction,
 }: {
   availabilityChecks: ValidationCheck[]
@@ -1011,7 +1057,9 @@ function SafetyWorkspace({
   busy: string | null
   hasUnsavedChanges: boolean
   backups: BackupItem[]
+  configurationDrift: AppState['configurationDrift']
   onRestoreRequested: () => void
+  onSyncRequested: () => void
   runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
 }) {
   const latestBackup = backups[0]
@@ -1095,6 +1143,24 @@ function SafetyWorkspace({
           </div>
         </div>
       </section>
+      {configurationDrift && (
+        <section className="surface-panel compact-surface configuration-drift-panel">
+          <div className="section-heading-row">
+            <div>
+              <span className="eyebrow">当前配置差异</span>
+              <h3>同步目录前请确认</h3>
+            </div>
+            <span className="section-meta">不会改写 Codex 配置</span>
+          </div>
+          <p>{configurationDrift.detail}</p>
+          <div className="command-row">
+            <button className="primary-button" type="button" onClick={onSyncRequested} disabled={busy !== null}>
+              <GitCompareArrows size={16} />
+              同步当前模型到目录
+            </button>
+          </div>
+        </section>
+      )}
       <section className="surface-panel compact-surface">
         <div className="section-heading-row">
           <div>

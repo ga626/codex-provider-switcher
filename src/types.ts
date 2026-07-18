@@ -101,11 +101,20 @@ export type AppState = {
   autoStart: boolean
   trayEnabled: boolean
   safeMode: boolean
+  configurationDrift?: ConfigurationDrift
   profiles: ProviderProfile[]
   modelCatalogs: ModelCatalog[]
   checks: ValidationCheck[]
   activity: ActivityItem[]
   backups: BackupItem[]
+}
+
+export type ConfigurationDrift = {
+  profileId: string
+  profileName: string
+  currentModel: string
+  savedModel: string
+  detail: string
 }
 
 export type EditableProfile = {

@@ -32,15 +32,17 @@
 ```text
 TAURI_SIGNING_PRIVATE_KEY
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+WINDOWS_CERTIFICATE
+WINDOWS_CERTIFICATE_PASSWORD
 ```
 
-正式发布通过 `.github/workflows/release.yml` 完成。它只响应已经推送到远端的 `v*` 标签，先校验标签、`package.json`、`tauri.conf.json` 和 Cargo 版本一致，再由 GitHub Actions 生成签名资产。workflow 会把新 Release 标记为 GitHub `Latest`，因为 updater 使用 `/releases/latest/download/latest.json`；标签可以继续使用 `0.3.2-alpha` 这样的版本号，但不能把 GitHub Release 标记为 `Pre-release`，否则该下载地址会返回 `404`。GitHub API 的 `isImmutable` 状态不应替代项目自己的不可覆盖策略：旧 tag 和旧资产仍不得被重跑静默覆盖。
+正式发布通过 `.github/workflows/release.yml` 完成。它只响应已经推送到远端的 `v*` 标签，先校验标签、`package.json`、`tauri.conf.json` 和 Cargo 版本一致，再由 GitHub Actions 生成签名资产。workflow 会把新 Release 标记为 GitHub `Latest`，因为 updater 使用 `/releases/latest/download/latest.json`；标签可以继续使用 `0.3.2-alpha` 这样的版本号，但不能把 GitHub Release 标记为 `Pre-release`，否则该下载地址会返回 `404`。仓库已启用 GitHub Release immutability；发布和远端复验都会确认 `immutable=true`，旧 tag 和旧资产不得被重跑静默覆盖。
 
 首次启用或轮换密钥时，维护者只需要在仓库 Settings > Secrets and variables > Actions 中确认上述两个 Secrets 存在。后续日常开发、PR、开发版和本地未签名候选包都不读取私钥；只有推送新版本标签时才由 CI 使用它们。旧版本如果内置了旧公钥，不能直接验证轮换后的新公钥，因此密钥轮换必须伴随一次手动安装迁移，并在发布说明中写明。
 
 密钥对只在首次建立发布信任根时生成一次，后续 Release 复用同一私钥。不能因为某次本地构建失败就重新生成密钥；如果私钥或口令丢失，必须先制定密钥轮换和一次性手动升级计划，再更新 `tauri.conf.json` 中的公钥。已经安装旧公钥的版本不能直接验证新公钥签名的更新。本项目的 `v0.3.0-alpha` 使用旧公钥且已有 Release 资产；切换到新公钥后，`v0.3.0-alpha` 用户必须先手动安装 `v0.3.1-alpha`，之后才能使用自动更新。
 
-Tauri updater 签名只保证更新包的来源和完整性，不等同于 Windows Authenticode/MSIX 代码签名，也不是用户运行软件所需的登录凭据。
+Tauri updater 签名只保证更新包的来源和完整性，不等同于 Windows Authenticode/MSIX 代码签名，也不是用户运行软件所需的登录凭据。`WINDOWS_CERTIFICATE` 是 base64 编码的 PFX，`WINDOWS_CERTIFICATE_PASSWORD` 是其口令；它们只在 Windows runner 临时导入。正式构建会拒绝缺少任一签名边界的发布，并要求 setup 和桌面 exe 的 Authenticode 状态为 `Valid`。
 
 ## Release workflow 结构
 
@@ -115,6 +117,7 @@ git push -u origin codex/bootstrap-github-release-flow
 - 没有真实密钥或本机私有状态进入 diff。
 - README、产品规格和 release checklist 与当前产品形态一致。
 - 如果改动会影响用户启动入口，Release 复验计划已写清楚。
+- `main` 已受保护：必须通过 `validate` CI、合并前同步主线、解决对话；管理员同样受此规则约束。Dependabot security updates 已启用。
 
 用户看当前开发成果时默认走开发版验收：
 
@@ -174,3 +177,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release\verify-git
 ```
 
 合并并重新发布资产后，必须去掉 `-RemoteStructureOnly`，执行完整一致性复验。
+
+发布后、执行最终旧工具替换前，在新的 Codex 会话运行：
+
+```powershell
+npm run qa:cutover-preflight
+```
+
+这个脚本只记录新安装版、旧工具进程和端口、以及 Run/RunOnce、Startup、计划任务、Windows 服务中是否存在旧工具启动入口；它不会停止进程、修改配置或读取密钥。只有预检查、安装发布验收和用户实际 provider 验收都通过后，才由新会话执行旧工具停用与重启复查。

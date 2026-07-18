@@ -7,16 +7,18 @@ const port = Number(process.env.RUNTIME_BOUNDARY_SMOKE_PORT ?? 47841)
 const baseUrl = `http://127.0.0.1:${port}/`
 const outputDir = process.env.QA_OUTPUT_DIR ?? join(process.env.TEMP ?? process.cwd(), 'codex-switcher-runtime-boundary')
 
-function stopProcessTree(child) {
+async function stopProcessTree(child) {
   if (!child.pid || child.exitCode !== null) return
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
-      stdio: 'ignore',
+    const terminator = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
+      stdio: ['ignore', 'ignore', 'ignore'],
       windowsHide: true,
     })
+    await new Promise((resolve) => terminator.once('exit', resolve))
     return
   }
   child.kill()
+  await new Promise((resolve) => child.once('exit', resolve))
 }
 
 async function waitForStaticPreview() {
@@ -75,8 +77,5 @@ try {
   }, null, 2))
 } finally {
   await browser.close()
-  stopProcessTree(child)
-  setTimeout(() => {
-    if (child.exitCode === null) stopProcessTree(child)
-  }, 500)
+  await stopProcessTree(child)
 }

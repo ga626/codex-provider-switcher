@@ -2,6 +2,7 @@ param(
     [string]$Version = "",
     [string]$OutputRoot = "release-assets",
     [switch]$SkipDesktopBundle,
+    [switch]$RequireAuthenticode,
     [switch]$Apply
 )
 
@@ -298,6 +299,9 @@ if (-not $SkipDesktopBundle -and [string]::IsNullOrWhiteSpace($env:TAURI_SIGNING
 }
 
 if (-not $SkipDesktopBundle) {
+    if ($RequireAuthenticode -and [string]::IsNullOrWhiteSpace($env:TAURI_WINDOWS_SIGNING_CONFIG)) {
+        throw "Formal desktop Release requires TAURI_WINDOWS_SIGNING_CONFIG generated from a Windows code-signing certificate."
+    }
     $staleSignatures = @(
         Get-ChildItem -LiteralPath $tauriBundleRoot -Recurse -File -Filter "*.sig" -ErrorAction SilentlyContinue
     )
@@ -313,11 +317,16 @@ try {
     }
     if (-not $SkipDesktopBundle) {
         Invoke-ReleaseBuildPhase -Name "Tauri bundle and NSIS setup" -Action {
-            npm run tauri:build
+            if ([string]::IsNullOrWhiteSpace($env:TAURI_WINDOWS_SIGNING_CONFIG)) {
+                npm run tauri:build
+            } else {
+                npm run release:assets
+                npx tauri build --config $env:TAURI_WINDOWS_SIGNING_CONFIG
+            }
         }
     }
     Invoke-ReleaseBuildPhase -Name "release local backend" -Action {
-        cargo build --manifest-path src-tauri/Cargo.toml --release --bin local_backend
+        cargo build --manifest-path src-tauri/Cargo.toml --release --bin local_backend --jobs 1
     }
 } finally {
     Pop-Location
@@ -393,6 +402,14 @@ Write-Host "[PASS] SHA256: $hash"
 if (-not $SkipDesktopBundle) {
     $setupSource = Find-TauriBundleAsset -Pattern "*setup*.exe" -Label "NSIS setup exe"
     Assert-WindowsGuiExecutable -Path (Join-Path $projectRoot "src-tauri\target\release\codex-provider-switcher.exe") -Label "Tauri desktop binary"
+    if ($RequireAuthenticode) {
+        foreach ($path in @($setupSource, (Join-Path $projectRoot "src-tauri\target\release\codex-provider-switcher.exe"))) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $path
+            if ($signature.Status -ne "Valid") {
+                throw "Windows Authenticode signature is invalid for ${path}: $($signature.Status)"
+            }
+        }
+    }
     Copy-Item -LiteralPath $setupSource -Destination $desktopSetupPath -Force
     $setupHash = Write-Sha256File -Path $desktopSetupPath
     Write-Host "[PASS] Desktop setup copied: $desktopSetupPath"
