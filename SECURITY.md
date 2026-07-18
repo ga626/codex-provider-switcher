@@ -1,34 +1,21 @@
-# Security Policy
+# 安全说明
 
-`CodeX Provider Switcher` operates on local Codex provider configuration. Treat configuration writes and provider credentials as sensitive.
+`CodeX Provider Switcher` 会处理本地 Codex provider 配置。请把配置写入、凭据和恢复副本视为敏感资料。
 
-## 不应提交的内容
+## 请不要公开这些内容
 
-- API keys, tokens, cookies, Personal Access Tokens, provider account files.
-- `C:\Users\<user>\.codex\auth.json` or real `config.toml`.
-- Local `profiles.json`, backups, activity logs, screenshots, or machine-specific evidence.
-- Release artifacts that contain local state or user credentials.
+- API key、token、cookie、Personal Access Token 或证书文件。
+- 真实 `C:\Users\<user>\.codex\auth.json`、完整 `config.toml`、`profiles.json`、备份、活动日志或截图。
+- 含有用户名、私有服务地址或真实 provider 信息的本机证据。
 
-## 本地凭据与备份
+## 产品边界
 
-- provider 目录中的 API key 与本应用创建的 `config.toml`、`auth.json` 恢复副本，使用当前 Windows 用户的 DPAPI 保护。
-- 旧明文 profile 和恢复副本会在首次成功加载时迁移；不要把 `%LOCALAPPDATA%\CodeX Provider Switcher` 直接复制到其他 Windows 用户。
-- Tauri updater 私钥和 Windows Authenticode 证书分别是两套发布凭据，只允许放入 GitHub Actions Secrets，不进入仓库、安装包或普通日志。
-
-## 本地 HTTP 边界
-
-The planned local Web backend must bind to `127.0.0.1` only. Write APIs that modify Codex config, auth, profiles, backups, or update files must be treated as privileged local operations and should include explicit confirmation and audit records.
-
-## 配置写入规则
-
-Before writing Codex config or auth files:
-
-1. Create a backup.
-2. Show the target provider/model and affected files.
-3. Preserve unrelated Codex settings.
-4. Record the action in the local timeline.
-5. Provide a restore path.
+- provider API key 与本工具创建的敏感恢复副本使用当前 Windows 用户的 DPAPI 保护。
+- Tauri updater 签名私钥和 Windows Authenticode 证书是两套不同的发布凭据，只能放在 GitHub Actions Secrets，不进入仓库、安装包或普通日志。
+- 写入 Codex 配置前必须创建备份、显示影响范围、保留无凭据时间线并提供恢复入口。
 
 ## 报告问题
 
-For now, report security issues privately to the repository owner. Do not open public issues containing credentials, local paths with private context, screenshots, or full config/auth files.
+请不要为安全问题创建公开 Issue。通过仓库维护者的私下渠道报告，并只提供脱敏摘要、复现步骤和受影响版本。维护者会确认影响、安排修复版本，并在需要时给出受控升级或回滚说明。
+
+维护者的漏洞依赖处理流程见 [依赖与安全治理](docs/maintainers/dependency-security.zh.md)。

@@ -1,48 +1,20 @@
 # 贡献说明
 
-`CodeX Provider Switcher` 当前处于产品化早期阶段，优先保证本地配置安全、可恢复和可发布。
+感谢参与 `CodeX Provider Switcher`。这是会读写本地 Codex 配置的 Windows 桌面工具，任何改动都应优先保证配置安全、可恢复和可交付。
 
-## 开发流程
+## 开始前
 
-1. 从最新主线创建 `codex/<topic>` 分支。
-2. 保持每个 PR 只解决一个清晰主题。
-3. 涉及 Codex 配置、provider、API key、备份恢复、旧工具迁移的改动，必须在 PR 中说明用户影响和回滚方式。
-4. 不要把旧版工具目录当成可写工作区；它只能作为参考源。
-5. 不要提交本机私有状态、真实密钥、日志、截图或构建产物。
+1. 从最新 `main` 创建 `codex/<topic>` 分支。
+2. 先判断改动是否影响用户入口、桌面壳、安装包、更新、配置写入或 Release。影响其中任一项时，这是发布影响 PR。
+3. 不要修改旧版工具目录；它只作为回滚参考。最终 provider 切换只能在发布后的新 Codex 会话中执行。
+4. 不要提交 API key、token、真实 `auth.json`、`profiles.json`、备份、日志、截图或本机状态。
 
-## 本地验证
+## 开发与验证
 
-基础验证：
+开发环境、按改动类型选择的验证命令、文档同步责任和 PR 前检查，见 [开发与 PR 指南](docs/contributing/development-and-prs.zh.md)。
 
-```powershell
-npm ci
-npm run lint
-npm run build
-git diff --check
-```
+涉及用户可见桌面界面或流程时，PR 前需要准备开发版窗口供人工验收；安装发布验收只在安装器、版本、启动入口、更新或 Release 资产改动时进行。
 
-涉及 Rust/Tauri：
+## 交付边界
 
-```powershell
-cargo check --manifest-path src-tauri/Cargo.toml
-```
-
-涉及界面流程：
-
-```powershell
-npm run preview:start -- --NoOpen
-npm run qa:smoke
-npm run preview:stop
-```
-
-## PR 要求
-
-PR 描述必须包含：
-
-- 改动范围。
-- 已运行的验证命令。
-- 是否影响用户实际入口。
-- 是否会读写 `config.toml`、`auth.json`、profiles、backups。
-- 失败或回滚路径。
-
-合并后如果影响用户实际下载或启动入口，必须从最新主线重新构建 Release 资产，并按普通用户路径复验。
+代码通过 CI 并不自动表示用户已拿到新版本。发布影响 PR 的合并后仍要创建新版本/tag、发布不可变 Release，并按普通用户路径下载、安装、启动和验证。完整规则见 [发布与交付手册](docs/maintainers/release-and-delivery.zh.md)。

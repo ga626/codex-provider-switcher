@@ -1,13 +1,26 @@
-# Documentation
+# 文档导航
 
-`CodeX Provider Switcher` documents are grouped by audience:
+按你的身份选择入口，不需要从头阅读所有文件。
 
-| Path | Purpose |
-|---|---|
-| `docs/product-spec.md` | Product shape, boundaries, and current architecture direction |
-| `docs/user/installation.zh.md` | User-facing install/start guidance |
-| `docs/user/troubleshooting.zh.md` | Common startup, provider, and config problems |
-| `docs/release/github-publish-runbook.md` | GitHub repository and publication process |
-| `docs/release/release-checklist.md` | Release gate and user-path verification |
+## 我在使用软件
 
-Internal archaeology and handoff files may exist locally under `project_status/`; they are ignored and are not part of the public release package.
+- [安装、更新与卸载](user/installation.zh.md)
+- [排错指南](user/troubleshooting.zh.md)
+
+## 我在参与开发
+
+- [开发环境、验证与 PR](contributing/development-and-prs.zh.md)
+- [贡献说明](../CONTRIBUTING.md)
+- [安全说明](../SECURITY.md)
+
+## 我负责发布或仓库维护
+
+- [发布与交付手册](maintainers/release-and-delivery.zh.md)
+- [依赖与安全治理](maintainers/dependency-security.zh.md)
+- [发布说明](release/)
+
+## 我需要了解产品或仓库背景
+
+- [产品规格](reference/product-spec.zh.md)
+- [仓库结构与文件责任](reference/repository-structure.zh.md)
+- [历史材料索引](reference/history/README.md)

@@ -25,12 +25,13 @@
     "tauri:desktop-boundary:smoke": "node scripts/tauri-desktop-boundary-smoke.mjs",
     "backend:dev": "cargo run --manifest-path src-tauri/Cargo.toml --bin local_backend --",
     "verify:doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/doctor-codex-provider-switcher.ps1 -PublicRelease",
+    "release:readiness": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/release-readiness.ps1",
     "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/build-codex-provider-switcher-release.ps1",
     "release:verify-local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-local-release-package.ps1",
     "release:verify-upload-assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-release-upload-assets.ps1",
     "release:verify-remote": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-github-release-asset.ps1 -RemoteStructureOnly",
     "release:assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/generate-installer-assets.ps1",
-    "tauri:dev": "powershell -NoProfile -Command \"$env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL='development'; npx tauri dev\"",
+    "tauri:dev": "powershell -NoProfile -Command \"$env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL='development'; $env:CARGO_BUILD_JOBS='1'; npx tauri dev\"",
     "tauri:build": "npm run release:assets && tauri build"
   },
   "dependencies": {

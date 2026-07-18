@@ -1,41 +1,41 @@
-name: Feature request
-description: Suggest an improvement for CodeX Provider Switcher
-title: "[Feature]: "
+name: 功能建议
+description: 建议如何改进 CodeX Provider Switcher
+title: "[建议]: "
 labels: ["enhancement"]
 body:
   - type: textarea
     id: goal
     attributes:
-      label: Goal
-      description: What workflow should become easier or safer?
+      label: 想解决什么
+      description: 哪个使用流程应该更简单或更安全？
     validations:
       required: true
   - type: textarea
     id: current
     attributes:
-      label: Current workaround
-      description: How do you handle it today?
+      label: 现在如何处理
+      description: 目前的替代做法是什么？
     validations:
       required: false
   - type: dropdown
     id: area
     attributes:
-      label: Area
+      label: 涉及范围
       options:
-        - Provider switching
-        - Model discovery
-        - Backup / restore
-        - Local Web console
-        - Launcher / update flow
-        - Legacy cutover
-        - UI / information architecture
-        - Documentation
+        - Provider 切换
+        - 模型目录
+        - 备份与恢复
+        - 本地 Web 控制台
+        - 启动器与更新流程
+        - 旧工具替换
+        - 界面与信息结构
+        - 文档
     validations:
       required: true
   - type: textarea
     id: risks
     attributes:
-      label: Safety concerns
-      description: Does this touch config.toml, auth.json, API keys, backups, or old-tool migration?
+      label: 安全影响
+      description: 是否会涉及 config.toml、auth.json、API key、备份或旧工具迁移？
     validations:
       required: false
