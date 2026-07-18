@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.6.0-alpha - 2026-07-18
+
+- Added Windows DPAPI protection and one-time migration for provider keys and app-created backup copies.
+- Added an explicit current-configuration sync confirmation so a stale profile cannot silently overwrite the active Codex model.
+- Require Windows Authenticode signing material for formal Release builds and add a remote-only release verification command.
+- Replaced hard-coded current-release links with GitHub Latest Release links.
+
+## 0.5.0-alpha - 2026-07-18
+
 - Reworked provider availability testing so a successful payload with `"error": null` is not misclassified as a provider failure.
 - Separated callable-result evidence, standard Responses shape, and an unconfirmed response shape in the UI and diagnostics.
 - Renamed the user-facing provider check to "服务商可用性测试" and kept it non-blocking for safe local switching.

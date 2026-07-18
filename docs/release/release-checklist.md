@@ -8,10 +8,12 @@
 - [ ] `CONTRIBUTING.md`、`SECURITY.md` 和用户可见文档已更新。
 - [ ] `AGENTS.md`、`.agents/`、`.codex/`、`project_status/` 等本机开发/Agent 状态未进入 Git 跟踪。
 - [ ] `.github/pull_request_template.md` 已覆盖验证、安全和用户影响。
+- [ ] `main` 受保护，要求 `validate` CI、同步主线和已解决对话；Dependabot security updates 已启用。
 - [ ] GitHub CI 包含 lint、build、Rust check、Rust tests、本地 Web 后端 build 和 smoke。
 - [ ] `.gitignore` 排除日志、构建产物、`release-assets/`、本机配置和密钥。
 - [ ] `git diff --check` 通过。
 - [ ] 敏感信息扫描无真实密钥。
+- [ ] provider 目录和本应用创建的恢复副本不含明文 API key、`config.toml` 或 `auth.json`；旧明文数据首次加载后已迁移为当前 Windows 用户的 DPAPI 保护数据。
 
 ## 2. 产品层
 
@@ -54,7 +56,10 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run backend:build
 npm run backend:smoke
+npm run backend:functional-smoke
 npm run backend:ui-smoke
+npm run qa:preview-smoke
+npm run qa:cutover-preflight
 git diff --check
 ```
 
@@ -158,6 +163,9 @@ Release 包必须排除：
 - [ ] dry-run 不修改真实配置。
 - [ ] 最近备份可见，恢复操作要求二次确认。
 - [ ] 备份 manifest 不包含配置内容或凭据。
+- [ ] 使用 `npm run qa:cutover-preflight` 记录新安装版、旧工具进程/端口和持久化入口。该检查只读；实际停用旧工具、真实 provider 切换和重启复查只在发布后的新 Codex 会话执行。
+- [ ] 正式 Release 使用独立的 `TAURI_SIGNING_PRIVATE_KEY*` 与 `WINDOWS_CERTIFICATE*` Actions Secrets，且 setup 与桌面 exe 的 Authenticode 状态均为 `Valid`。
+- [ ] GitHub Release immutability 已启用，发布后的远端复验确认 `immutable=true`；已发布 tag 与资产不覆盖、不重写。
 
 ## 6. 停止条件
 

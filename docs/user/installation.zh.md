@@ -2,9 +2,9 @@
 
 `CodeX Provider Switcher` 当前是 alpha 项目。正式产品路线是 Windows-first 轻量桌面 GUI：桌面安装包启动一个正常应用窗口，默认不弹常驻 CMD、不打开外部浏览器、不要求用户理解端口。
 
-当前已发布的 `0.4.0-alpha` 提供 Windows setup exe、签名更新资产和 fallback zip。本分支准备 `0.5.0-alpha`，修复已验证更新被手动下载页校验错误拦截的问题，并把服务商探测调整为不阻断正常切换的短时诊断。桌面安装包是推荐入口；fallback zip 保留给排障、开发和本地 Web 诊断。它不会自动替换旧版工具。
+当前已发布版本以 GitHub Releases 的 Latest 标记为准。桌面 setup 是推荐入口；fallback zip 只保留给排障和本地 Web 诊断。源码树不会自动替换旧工具。
 
-`0.3.2-alpha` 和 `0.4.0-alpha` 已安装用户需要从 `0.5.0-alpha` Release 手动安装一次。该版本修复后续已验证更新的签名安装路径，不再要求通过手动 Release 页校验；真正的应用内升级验收会在下一个高于 `0.5.0-alpha` 的版本进行。
+`0.3.2-alpha` 和 `0.4.0-alpha` 已安装用户需要先从 `0.5.0-alpha` Release 手动安装一次。`0.6.0-alpha` 发布时，应从已安装的 `0.5.0-alpha` 完成一次真实应用内升级验收，包括下载、签名校验、重启、版本变化和用户数据保留。
 
 项目固定区分三种状态：开发版随源码变化，候选版只在仓库 `release-assets/` 中用于验收，稳定版安装在 `D:\Software\CodeX Provider Switcher`，只随合并后的新 GitHub Release 更新。
 
@@ -22,13 +22,13 @@ npm run qa:dev-desktop
 
 ## 桌面安装包启动
 
-1. 打开 GitHub Release 页面：
+1. 打开 GitHub Latest Release 页面：
 
 ```text
-https://github.com/ga626/codex-provider-switcher/releases/tag/v0.5.0-alpha
+https://github.com/ga626/codex-provider-switcher/releases/latest
 ```
 
-2. 优先下载 `CodeXProviderSwitcher-windows-x64-0.5.0-alpha-setup.exe` 和对应 `.sha256`。
+2. 优先下载名称中带当前版本的 `CodeXProviderSwitcher-windows-x64-<version>-setup.exe` 和对应 `.sha256`。
 3. 安装后从开始菜单或桌面图标打开 `CodeX Provider Switcher`。
 4. 预期行为：打开一个桌面窗口，不弹常驻 CMD，不自动打开外部浏览器。
 
@@ -36,9 +36,9 @@ https://github.com/ga626/codex-provider-switcher/releases/tag/v0.5.0-alpha
 
 fallback zip 用于排障和本地 Web 诊断，不是推荐入口。
 
-1. 下载 `CodeXProviderSwitcher-windows-x64-0.5.0-alpha.zip` 和对应 `.sha256`。
+1. 下载名称中带当前版本的 `CodeXProviderSwitcher-windows-x64-<version>.zip` 和对应 `.sha256`。
 2. 解压 zip 到一个普通目录。
-3. 进入解压出的 `CodeXProviderSwitcher-windows-x64-0.5.0-alpha` 目录。
+3. 进入解压出的 `CodeXProviderSwitcher-windows-x64-<version>` 目录。
 4. 双击 `CodeXProviderSwitcher.cmd`。
 5. 浏览器会打开：
 
@@ -135,6 +135,8 @@ Windows Release 包提供：
 %LOCALAPPDATA%\CodeX Provider Switcher\backups\
 %LOCALAPPDATA%\CodeX Provider Switcher\activity.json
 ```
+
+provider 密钥和应用创建的恢复副本使用当前 Windows 用户的 DPAPI 保护。不要把该目录复制到其他 Windows 账号后直接使用；需要迁移时应在原账号按发布说明完成受控迁移。
 
 卸载只移除程序目录和快捷方式。重新安装同一应用仍应看到原有用户数据；如果要清理用户数据，必须由用户单独删除上述目录，并先确认备份已经导出。
 

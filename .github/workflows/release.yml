@@ -106,6 +106,8 @@ jobs:
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
     steps:
       - name: Checkout tagged commit
         uses: actions/checkout@v7
@@ -134,6 +136,29 @@ jobs:
         run: |
           if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'TAURI_SIGNING_PRIVATE_KEY secret is missing.' }
           if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) { throw 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is missing.' }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)) { throw 'WINDOWS_CERTIFICATE secret is missing.' }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { throw 'WINDOWS_CERTIFICATE_PASSWORD secret is missing.' }
+
+      - name: Import Windows code-signing certificate
+        id: windows_certificate
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ env.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ env.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codex-provider-switcher-signing.pfx'
+          [System.IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          try {
+            $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $certificate = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            if (-not $certificate.HasPrivateKey) { throw 'Imported Windows certificate has no private key.' }
+            $configPath = Join-Path $env:RUNNER_TEMP 'tauri.windows-signing.json'
+            $tauriConfig = @{ bundle = @{ windows = @{ certificateThumbprint = $certificate.Thumbprint } } }
+            $tauriConfig | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $configPath -Encoding UTF8
+            "TAURI_WINDOWS_SIGNING_CONFIG=$configPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } finally {
+            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Build signed release assets with phase timing
         shell: pwsh
@@ -141,7 +166,7 @@ jobs:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
           $version = $env:RELEASE_TAG -replace '^v', ''
-          npm run release:build -- -Version $version -Apply
+          npm run release:build -- -Version $version -Apply -RequireAuthenticode
 
       - name: Verify local release assets
         shell: pwsh

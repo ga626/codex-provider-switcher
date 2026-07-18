@@ -58,6 +58,9 @@ jobs:
       - name: Smoke local web backend
         run: npm run backend:smoke
 
+      - name: Exercise protected credentials and recovery backup
+        run: npm run backend:functional-smoke
+
       - name: Build release package
         run: npm run release:build -- -Apply -SkipDesktopBundle
 

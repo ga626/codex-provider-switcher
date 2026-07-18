@@ -1,6 +1,6 @@
 # CodeX Provider Switcher 产品规格
 
-状态：`0.5.0-alpha` 候选，修复签名更新动作并完成真实服务商验证边界
+状态：`0.6.0-alpha` 发布候选，完成本地凭据保护、配置目录同步和发布签名门槛
 目标：Windows 优先的轻量桌面 GUI
 日期：2026-07-15
 
@@ -198,7 +198,9 @@ Release 包不得包含：
 
 - 当前交付开始提供桌面安装资产，但仍是 alpha。
 - 源码树 `setup.cmd` 仍依赖 Node/npm/Rust 构建环境；Release 包用户入口不依赖这些开发工具。
-- `0.3.2-alpha` 与 `0.4.0-alpha` 不能通过自身自动升级，用户须手动安装一次 `0.5.0-alpha`；下一版本才从 `0.5.0-alpha` 验证真实自动升级。
+- `0.3.2-alpha` 与 `0.4.0-alpha` 不能通过自身自动升级，用户须先手动安装一次 `0.5.0-alpha`；发布 `0.6.0-alpha` 时必须从该基线完成真实自动升级验收。
 - 服务商可用性测试只能提供单一短时 Responses 请求的正向证据，不能代替实际 Codex 使用或最终 cutover 的端到端验证。
-- API key 仍需迁移到 Windows Credential Manager、DPAPI 或 Tauri Stronghold。
-- 代码签名仍不是本版本承诺的 Windows Authenticode 能力；Tauri 更新签名私钥必须留在本机/CI secret。
+- provider 目录中的 API key 和本应用创建的 config/auth 恢复副本使用当前 Windows 用户的 DPAPI 保护。旧明文 profile 和旧备份会在首次成功加载时迁移；受保护数据不能直接复制到另一个 Windows 账号使用。
+- 若当前 Codex provider 能唯一匹配到本地目录，但模型不同，安全检查会显示差异。用户确认后只能把当前模型同步到本地目录；它不会写 `config.toml`、`auth.json` 或向服务商发送请求。
+- 正式 Release 同时要求 Tauri updater 签名和 Windows Authenticode 签名。前者验证更新资产的来源与完整性，后者让 Windows 验证安装程序与桌面程序的发布者；两套凭据都只由 GitHub Actions Secrets 使用。
+- 旧工具的实际停用、最终真实切换和重启后持久化复查必须在发布后的新 Codex 会话执行。本版本只交付前置检查、回滚路径和可验证的发布物。

@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-当前已发布版本是 `0.4.0-alpha`。本分支准备 `0.5.0-alpha`，同时收束签名更新热修与真实服务商验证、模型选择能力：
+当前已发布版本以 [GitHub Releases](https://github.com/ga626/codex-provider-switcher/releases/latest) 为准。`main` 只描述下一次待发布改动，不把未发布源码误写成用户已经拿到的版本：
 
 - React/Vite 前端。
 - Tauri/Rust 桌面窗口、本地文件、profiles、backup、validation、restore 基础。
@@ -23,10 +23,12 @@
 - GitHub CI、PR/Issue 模板、项目规则、安全策略和发布脚本。
 - 安全检查中的恢复中心：展示最近恢复点，并在恢复前要求二次确认。
 - 每次切换生成不含凭据内容的备份 manifest，记录时间、原因和备份文件名。
-- `0.3.2-alpha` 与 `0.4.0-alpha` 的已验证更新按钮会被错误的手动 Release 页校验拦截。用户需要手动安装一次 `0.5.0-alpha`；之后的已验证更新将直接使用 Tauri 的签名安装路径。
-- `0.5.0-alpha` 本身是修复后的自动更新基线；需要在下一个更高版本发布时，才能从它完成真实的应用内升级验收。
+- `0.5.0-alpha` 是自动更新基线；`0.6.0-alpha` 发布后必须从已安装的 `0.5.0-alpha` 完成真实应用内升级验收。
+- provider 目录中的密钥与恢复副本使用当前 Windows 用户的 DPAPI 保护；旧明文目录会在首次成功加载时迁移。
+- 当前 Codex 配置与保存目录出现模型差异时，安全检查会要求明确确认后才同步目录，且不会改写 Codex 配置。
+- 正式 Release 同时要求 Tauri updater 签名和 Windows Authenticode 代码签名。
 
-[下载当前已发布的 0.4.0-alpha](https://github.com/ga626/codex-provider-switcher/releases/tag/v0.4.0-alpha) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
+[下载最新发布版](https://github.com/ga626/codex-provider-switcher/releases/latest) · [安装与启动](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md)
 
 ## 开发验收方式
 
@@ -56,7 +58,7 @@ npm run qa:stable-install -- -ExplainOnly
 
 - 以实际生产服务商和模型完成最终 cutover 前的兼容性验收。
 - 本机替换的发布后验收。
-- API key 迁移到 Windows Credential Manager、DPAPI 或 Tauri Stronghold。
+- Windows Authenticode 代码签名与真实跨版本更新验收。
 
 ## 本机替换边界
 

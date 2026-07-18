@@ -1,8 +1,14 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Local;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::{collections::BTreeSet, env, fs, path::PathBuf, time::Duration};
+use std::{
+    collections::BTreeSet,
+    env, fs,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use thiserror::Error;
 
 const APP_DIR_NAME: &str = "CodeX Provider Switcher";
@@ -14,6 +20,7 @@ const APP_DATA_DIR_ENV: &str = "CODEX_PROVIDER_SWITCHER_APP_DATA_DIR";
 const RELEASES_API_ENV: &str = "CODEX_PROVIDER_SWITCHER_RELEASES_API";
 const RELEASES_API_URL: &str =
     "https://api.github.com/repos/ga626/codex-provider-switcher/releases?per_page=20";
+const PROTECTED_FILE_SUFFIX: &str = ".dpapi";
 
 #[derive(Debug, Error)]
 pub enum SwitcherError {
@@ -159,6 +166,7 @@ pub struct AppState {
     pub auto_start: bool,
     pub tray_enabled: bool,
     pub safe_mode: bool,
+    pub configuration_drift: Option<ConfigurationDrift>,
     pub profiles: Vec<ProviderProfile>,
     pub model_catalogs: Vec<ModelCatalog>,
     pub checks: Vec<ValidationCheck>,
@@ -167,10 +175,23 @@ pub struct AppState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigurationDrift {
+    pub profile_id: String,
+    pub profile_name: String,
+    pub current_model: String,
+    pub saved_model: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredProfile {
     name: String,
     base_url: String,
+    #[serde(default)]
     api_key: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    api_key_protected: String,
     model: String,
     #[serde(default = "default_reasoning")]
     model_reasoning_effort: String,
@@ -284,6 +305,136 @@ fn ensure_dirs() -> Result<(), SwitcherError> {
     Ok(())
 }
 
+fn protect_secret(bytes: &[u8]) -> Result<String, SwitcherError> {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::{
+            Foundation::LocalFree,
+            Security::Cryptography::{
+                CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+            },
+        };
+
+        let mut input = CRYPT_INTEGER_BLOB {
+            cbData: bytes.len() as u32,
+            pbData: bytes.as_ptr() as *mut u8,
+        };
+        let mut output = CRYPT_INTEGER_BLOB {
+            cbData: 0,
+            pbData: std::ptr::null_mut(),
+        };
+        let ok = CryptProtectData(
+            &mut input,
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        );
+        if ok == 0 {
+            return Err(SwitcherError::Message("Windows 凭据保护失败。".to_string()));
+        }
+        let protected = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+        LocalFree(output.pbData as *mut core::ffi::c_void);
+        Ok(BASE64.encode(protected))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = bytes;
+        Err(SwitcherError::Message(
+            "当前平台不支持 Windows 凭据保护。".to_string(),
+        ))
+    }
+}
+
+fn unprotect_secret(value: &str) -> Result<Vec<u8>, SwitcherError> {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::{
+            Foundation::LocalFree,
+            Security::Cryptography::{
+                CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+            },
+        };
+
+        let mut encrypted = BASE64
+            .decode(value)
+            .map_err(|_| SwitcherError::Message("受保护凭据格式无效。".to_string()))?;
+        let mut input = CRYPT_INTEGER_BLOB {
+            cbData: encrypted.len() as u32,
+            pbData: encrypted.as_mut_ptr(),
+        };
+        let mut output = CRYPT_INTEGER_BLOB {
+            cbData: 0,
+            pbData: std::ptr::null_mut(),
+        };
+        let ok = CryptUnprotectData(
+            &mut input,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        );
+        if ok == 0 {
+            return Err(SwitcherError::Message(
+                "无法解锁本机受保护凭据。请在原 Windows 用户下恢复或从备份迁移。".to_string(),
+            ));
+        }
+        let plain = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+        LocalFree(output.pbData as *mut core::ffi::c_void);
+        Ok(plain)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = value;
+        Err(SwitcherError::Message(
+            "当前平台不支持 Windows 凭据保护。".to_string(),
+        ))
+    }
+}
+
+fn protect_file(source: &Path, destination: &Path) -> Result<(), SwitcherError> {
+    let raw = fs::read(source)?;
+    let temporary = destination.with_extension("dpapi.tmp");
+    fs::write(&temporary, protect_secret(&raw)?)?;
+    if destination.exists() {
+        fs::remove_file(destination)?;
+    }
+    fs::rename(temporary, destination)?;
+    Ok(())
+}
+
+fn restore_protected_file(source: &Path, destination: &Path) -> Result<(), SwitcherError> {
+    let protected = fs::read_to_string(source)?;
+    fs::write(destination, unprotect_secret(protected.trim())?)?;
+    Ok(())
+}
+
+fn migrate_legacy_backups() -> Result<(), SwitcherError> {
+    let dir = backups_dir()?;
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        for name in ["config.toml", "auth.json"] {
+            let plain = entry.path().join(name);
+            let protected = entry.path().join(format!("{name}{PROTECTED_FILE_SUFFIX}"));
+            if plain.exists() && !protected.exists() {
+                protect_file(&plain, &protected)?;
+                fs::remove_file(plain)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn normalize_id(name: &str) -> String {
     let mut out = String::new();
     let mut last_dash = false;
@@ -347,14 +498,35 @@ fn load_catalog() -> Result<StoredCatalog, SwitcherError> {
     ensure_dirs()?;
     let path = profiles_path()?;
     if !path.exists() {
-        let catalog = seed_catalog_from_existing()?;
+        let mut catalog = seed_catalog_from_existing()?;
+        hydrate_catalog_secrets(&mut catalog)?;
         save_catalog(&catalog)?;
         return Ok(catalog);
     }
     let text = fs::read_to_string(path)?;
     let mut catalog: StoredCatalog = serde_json::from_str(&text)?;
     normalize_catalog(&mut catalog);
+    let migrated = hydrate_catalog_secrets(&mut catalog)?;
+    migrate_legacy_backups()?;
+    if migrated {
+        save_catalog(&catalog)?;
+    }
     Ok(catalog)
+}
+
+fn hydrate_catalog_secrets(catalog: &mut StoredCatalog) -> Result<bool, SwitcherError> {
+    let mut migrated = false;
+    for value in catalog.profiles.values_mut() {
+        let mut profile: StoredProfile = serde_json::from_value(value.clone())?;
+        if !profile.api_key_protected.is_empty() {
+            profile.api_key = String::from_utf8(unprotect_secret(&profile.api_key_protected)?)
+                .map_err(|_| SwitcherError::Message("受保护凭据不是 UTF-8 文本。".to_string()))?;
+        } else if !profile.api_key.is_empty() {
+            migrated = true;
+        }
+        *value = serde_json::to_value(profile)?;
+    }
+    Ok(migrated)
 }
 
 fn normalize_catalog(catalog: &mut StoredCatalog) {
@@ -371,7 +543,16 @@ fn normalize_catalog(catalog: &mut StoredCatalog) {
 
 fn save_catalog(catalog: &StoredCatalog) -> Result<(), SwitcherError> {
     ensure_dirs()?;
-    let text = serde_json::to_string_pretty(catalog)?;
+    let mut persisted = catalog.clone();
+    for value in persisted.profiles.values_mut() {
+        let mut profile: StoredProfile = serde_json::from_value(value.clone())?;
+        if !profile.api_key.trim().is_empty() {
+            profile.api_key_protected = protect_secret(profile.api_key.as_bytes())?;
+        }
+        profile.api_key.clear();
+        *value = serde_json::to_value(profile)?;
+    }
+    let text = serde_json::to_string_pretty(&persisted)?;
     fs::write(profiles_path()?, text)?;
     Ok(())
 }
@@ -700,11 +881,45 @@ fn app_state() -> Result<AppState, SwitcherError> {
         auto_start: catalog.auto_start,
         tray_enabled: false,
         safe_mode: true,
+        configuration_drift: configuration_drift(&catalog, &config),
         profiles,
         model_catalogs: catalog_model_catalogs(&catalog),
         checks: validation_checks(&config),
         activity: load_activity()?,
         backups: list_backups()?,
+    })
+}
+
+fn current_config_model(config_text: &str) -> Option<String> {
+    toml::from_str::<toml::Value>(config_text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("model")
+                .and_then(toml::Value::as_str)
+                .map(ToString::to_string)
+        })
+}
+
+fn configuration_drift(catalog: &StoredCatalog, config_text: &str) -> Option<ConfigurationDrift> {
+    let profile_id = current_profile_id(catalog, config_text);
+    if profile_id == "unknown" {
+        return None;
+    }
+    let profile = catalog
+        .profiles
+        .get(&profile_id)
+        .and_then(|value| serde_json::from_value::<StoredProfile>(value.clone()).ok())?;
+    let current_model = current_config_model(config_text)?;
+    if current_model.trim().is_empty() || current_model == profile.model {
+        return None;
+    }
+    Some(ConfigurationDrift {
+        profile_id,
+        profile_name: profile.name,
+        saved_model: profile.model,
+        current_model: current_model.clone(),
+        detail: format!("Codex 当前模型为 {current_model}，与保存的服务商模型不同。同步只更新切换器目录，不会写入 Codex 配置。"),
     })
 }
 
@@ -1408,13 +1623,19 @@ fn create_backup() -> Result<PathBuf, SwitcherError> {
     let config = config_path()?;
     let mut files = Vec::new();
     if config.exists() {
-        fs::copy(&config, dir.join("config.toml"))?;
-        files.push("config.toml");
+        protect_file(
+            &config,
+            &dir.join(format!("config.toml{PROTECTED_FILE_SUFFIX}")),
+        )?;
+        files.push(format!("config.toml{PROTECTED_FILE_SUFFIX}"));
     }
     let auth = auth_path()?;
     if auth.exists() {
-        fs::copy(&auth, dir.join("auth.json"))?;
-        files.push("auth.json");
+        protect_file(
+            &auth,
+            &dir.join(format!("auth.json{PROTECTED_FILE_SUFFIX}")),
+        )?;
+        files.push(format!("auth.json{PROTECTED_FILE_SUFFIX}"));
     }
     fs::write(
         dir.join("manifest.json"),
@@ -1592,6 +1813,7 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
         name: profile.name.trim().to_string(),
         base_url: profile.base_url.trim().to_string(),
         api_key,
+        api_key_protected: String::new(),
         model: profile.model.trim().to_string(),
         model_reasoning_effort: existing_profile
             .as_ref()
@@ -1802,6 +2024,51 @@ pub fn set_default_profile_core(profile_id: String) -> Result<AppState, Switcher
 }
 
 #[tauri::command]
+fn sync_current_configuration() -> Result<AppState, SwitcherError> {
+    sync_current_configuration_core()
+}
+
+pub fn sync_current_configuration_core() -> Result<AppState, SwitcherError> {
+    let mut catalog = load_catalog()?;
+    let config = read_config()?;
+    let profile_id = current_profile_id(&catalog, &config);
+    if profile_id == "unknown" {
+        return Err(SwitcherError::Message(
+            "当前 Codex 服务商未能与切换器目录唯一匹配，无法安全同步。请先检查服务商名称和接口地址。".to_string(),
+        ));
+    }
+    let current_model = current_config_model(&config)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            SwitcherError::Message("当前 Codex 配置缺少模型名称，无法安全同步。".to_string())
+        })?;
+    let value =
+        catalog.profiles.get(&profile_id).cloned().ok_or_else(|| {
+            SwitcherError::Message("当前服务商未在切换器目录中找到。".to_string())
+        })?;
+    let mut profile: StoredProfile = serde_json::from_value(value)?;
+    if profile.model == current_model {
+        return app_state_with_activity(
+            "当前配置已一致",
+            "切换器目录与 Codex 当前模型一致，未写入任何配置文件。",
+            "info",
+        );
+    }
+    let previous_model = profile.model.clone();
+    profile.model = current_model.clone();
+    let display_name = profile.name.clone();
+    catalog
+        .profiles
+        .insert(profile_id, serde_json::to_value(profile)?);
+    save_catalog(&catalog)?;
+    app_state_with_activity(
+        "已同步当前 Codex 配置",
+        &format!("{display_name} 的目录模型已从 {previous_model} 同步为 {current_model}；未写入 Codex 配置或凭据。"),
+        "success",
+    )
+}
+
+#[tauri::command]
 fn toggle_auto_start(enabled: bool) -> Result<AppState, SwitcherError> {
     toggle_auto_start_core(enabled)
 }
@@ -1824,17 +2091,25 @@ pub fn restore_latest_backup_core() -> Result<AppState, SwitcherError> {
         .ok_or_else(|| SwitcherError::Message("当前没有可恢复的备份。".to_string()))?;
     let backup_dir = backups_dir()?.join(&latest.label);
     let backup_config = backup_dir.join("config.toml");
+    let protected_config = backup_dir.join(format!("config.toml{PROTECTED_FILE_SUFFIX}"));
     let backup_auth = backup_dir.join("auth.json");
-    let auth_restored = backup_auth.exists();
+    let protected_auth = backup_dir.join(format!("auth.json{PROTECTED_FILE_SUFFIX}"));
+    let auth_restored = backup_auth.exists() || protected_auth.exists();
 
-    if !backup_config.exists() {
+    if !backup_config.exists() && !protected_config.exists() {
         return Err(SwitcherError::Message(
             "最近备份缺少 config.toml。".to_string(),
         ));
     }
 
-    fs::copy(backup_config, config_path()?)?;
-    if auth_restored {
+    if protected_config.exists() {
+        restore_protected_file(&protected_config, &config_path()?)?;
+    } else {
+        fs::copy(backup_config, config_path()?)?;
+    }
+    if protected_auth.exists() {
+        restore_protected_file(&protected_auth, &auth_path()?)?;
+    } else if backup_auth.exists() {
         fs::copy(backup_auth, auth_path()?)?;
     }
 
@@ -1863,6 +2138,7 @@ pub fn run() {
             verify_profile,
             refresh_models,
             set_default_profile,
+            sync_current_configuration,
             toggle_auto_start,
             restore_latest_backup
         ])
