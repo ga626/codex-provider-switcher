@@ -18,6 +18,8 @@ export type ProviderProfile = {
     | 'endpoint_or_model_unavailable'
     | 'request_incompatible'
     | 'protocol_incompatible'
+    | 'response_shape_unconfirmed'
+    | 'response_unparseable'
     | 'service_error'
     | 'timeout'
     | 'network_error'
@@ -32,6 +34,7 @@ export type ProviderProfile = {
   lastVerificationStage?: string
   lastVerificationHttpStatus?: number
   lastVerificationProviderCode?: string
+  verificationResponseShape?: 'standard_responses' | 'compatible_response'
 }
 
 export type ProviderModel = {

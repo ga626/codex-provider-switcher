@@ -49,6 +49,7 @@ pub struct ProviderProfile {
     pub note: String,
     pub verified: bool,
     pub verification_status: String,
+    pub verification_response_shape: Option<String>,
     pub is_default: bool,
     pub active: bool,
     pub has_api_key: bool,
@@ -178,6 +179,8 @@ struct StoredProfile {
     #[serde(default = "default_verification_status")]
     verification_status: String,
     #[serde(default)]
+    verification_response_shape: Option<String>,
+    #[serde(default)]
     default: bool,
     #[serde(default)]
     note: String,
@@ -203,6 +206,7 @@ struct ProviderVerificationOutcome {
     stage: String,
     http_status: Option<u16>,
     provider_code: Option<String>,
+    response_shape: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -377,12 +381,40 @@ fn read_config() -> Result<String, SwitcherError> {
 }
 
 fn current_profile_id(catalog: &StoredCatalog, config_text: &str) -> String {
-    for (id, value) in &catalog.profiles {
-        if let Ok(profile) = serde_json::from_value::<StoredProfile>(value.clone()) {
-            if config_text.contains(&format!("base_url = \"{}\"", profile.base_url)) {
-                return id.to_string();
-            }
+    let custom = toml::from_str::<toml::Value>(config_text)
+        .ok()
+        .and_then(|config| {
+            config
+                .get("model_providers")
+                .and_then(toml::Value::as_table)
+                .and_then(|providers| providers.get("custom"))
+                .cloned()
+        });
+    let current_name = custom
+        .as_ref()
+        .and_then(|provider| provider.get("name"))
+        .and_then(toml::Value::as_str);
+    let current_base_url = custom
+        .as_ref()
+        .and_then(|provider| provider.get("base_url"))
+        .and_then(toml::Value::as_str);
+    let matches = catalog
+        .profiles
+        .iter()
+        .filter_map(|(id, value)| {
+            serde_json::from_value::<StoredProfile>(value.clone())
+                .ok()
+                .map(|profile| (id, profile))
+        })
+        .filter(|(_, profile)| Some(profile.base_url.as_str()) == current_base_url)
+        .collect::<Vec<_>>();
+    if let Some(name) = current_name {
+        if let Some((id, _)) = matches.iter().find(|(_, profile)| profile.name == name) {
+            return (*id).to_string();
         }
+    }
+    if matches.len() == 1 {
+        return matches[0].0.to_string();
     }
     "unknown".to_string()
 }
@@ -403,6 +435,7 @@ fn catalog_profiles(catalog: &StoredCatalog, current_id: &str) -> Vec<ProviderPr
                     note: profile.note,
                     verified: profile.verified && profile.verification_status == "verified",
                     verification_status: profile.verification_status,
+                    verification_response_shape: profile.verification_response_shape,
                     is_default: profile.default,
                     active: id == current_id,
                     has_api_key: !profile.api_key.trim().is_empty(),
@@ -790,6 +823,25 @@ mod tests {
             .tags
             .contains(&"vision".to_string()));
     }
+
+    #[test]
+    fn treats_null_error_as_a_success_payload_and_recognizes_compatible_output() {
+        let body = json!({
+            "error": null,
+            "object": "response",
+            "output_text": "OK"
+        });
+
+        assert!(!has_provider_error(&body));
+        assert!(has_compatible_response_output(&body));
+    }
+
+    #[test]
+    fn preserves_non_null_error_as_a_provider_failure() {
+        let body = json!({"error": {"code": "insufficient_quota"}});
+
+        assert!(has_provider_error(&body));
+    }
 }
 
 fn build_model_catalog(
@@ -923,7 +975,75 @@ fn verification_outcome(
         stage: stage.to_string(),
         http_status,
         provider_code,
+        response_shape: None,
     }
+}
+
+fn inference_outcome(
+    response_shape: &str,
+    detail: &str,
+    http_status: u16,
+) -> ProviderVerificationOutcome {
+    ProviderVerificationOutcome {
+        verified: true,
+        status: "verified".to_string(),
+        detail: detail.to_string(),
+        stage: "inference".to_string(),
+        http_status: Some(http_status),
+        provider_code: None,
+        response_shape: Some(response_shape.to_string()),
+    }
+}
+
+fn nonempty_text(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty())
+}
+
+fn has_provider_error(body: &Value) -> bool {
+    body.get("error").is_some_and(|error| !error.is_null())
+}
+
+fn has_compatible_response_output(body: &Value) -> bool {
+    if nonempty_text(body.get("output_text"))
+        || nonempty_text(body.get("content"))
+        || body
+            .get("message")
+            .is_some_and(|message| nonempty_text(message.get("content")))
+    {
+        return true;
+    }
+
+    if body
+        .get("output")
+        .and_then(Value::as_array)
+        .is_some_and(|output| {
+            output.iter().any(|item| {
+                nonempty_text(item.get("text"))
+                    || nonempty_text(item.get("content"))
+                    || item
+                        .get("content")
+                        .and_then(Value::as_array)
+                        .is_some_and(|content| {
+                            content.iter().any(|part| nonempty_text(part.get("text")))
+                        })
+            })
+        })
+    {
+        return true;
+    }
+
+    body.get("choices")
+        .and_then(Value::as_array)
+        .is_some_and(|choices| {
+            choices.iter().any(|choice| {
+                nonempty_text(choice.get("text"))
+                    || choice
+                        .get("message")
+                        .is_some_and(|message| nonempty_text(message.get("content")))
+            })
+        })
 }
 
 fn provider_probe_endpoint(base_url: &str, probe_path: &str) -> Result<String, String> {
@@ -946,11 +1066,6 @@ fn provider_probe_endpoint(base_url: &str, probe_path: &str) -> Result<String, S
     url.join(probe_path)
         .map(|endpoint| endpoint.to_string())
         .map_err(|_| "无法由接口地址构造服务商探针路径。".to_string())
-}
-
-fn uses_request_probe(profile: &StoredProfile) -> bool {
-    let identity = format!("{} {}", profile.name, profile.base_url).to_ascii_lowercase();
-    identity.contains("dasuapi") || identity.contains("dasu")
 }
 
 fn provider_error_code(error_body: &str) -> Option<String> {
@@ -1011,19 +1126,17 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
             None,
         );
     }
-    let request_probe = uses_request_probe(profile);
-    if request_probe && profile.model.trim().is_empty() {
+    if profile.model.trim().is_empty() {
         return verification_outcome(
             false,
             "invalid_profile",
             "profile",
-            "该服务商的额度探针需要默认模型，无法确认实际请求额度。",
+            "缺少默认模型，无法发送与 Codex 相同的 Responses 请求。",
             None,
             None,
         );
     }
-    let probe_path = if request_probe { "responses" } else { "models" };
-    let endpoint = match provider_probe_endpoint(&profile.base_url, probe_path) {
+    let endpoint = match provider_probe_endpoint(&profile.base_url, "responses") {
         Ok(endpoint) => endpoint,
         Err(detail) => {
             return verification_outcome(false, "invalid_profile", "profile", &detail, None, None)
@@ -1031,7 +1144,7 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
     };
 
     let client = match reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(25))
+        .timeout(Duration::from_secs(8))
         .build()
     {
         Ok(client) => client,
@@ -1046,19 +1159,15 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
             );
         }
     };
-    let request = if request_probe {
-        client
-            .post(endpoint)
-            .bearer_auth(profile.api_key.trim())
-            .json(&json!({
-                "model": profile.model.trim(),
-                "input": "Reply with OK.",
-                "max_output_tokens": 16,
-                "store": false,
-            }))
-    } else {
-        client.get(endpoint).bearer_auth(profile.api_key.trim())
-    };
+    let request = client
+        .post(endpoint)
+        .bearer_auth(profile.api_key.trim())
+        .json(&json!({
+            "model": profile.model.trim(),
+            "input": "Reply with OK.",
+            "max_output_tokens": 16,
+            "store": false,
+        }));
     let response = match request.send() {
         Ok(response) => response,
         Err(err) => return transport_failure_outcome(&err),
@@ -1067,28 +1176,32 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
     let status = response.status();
     if status.is_success() {
         return match response.json::<Value>() {
-            Ok(body)
-                if body.get("error").is_none() && (!request_probe || body.get("id").is_some()) =>
-            {
-                verification_outcome(
-                    true,
-                    "verified",
-                    "authenticated_server_probe",
-                    if request_probe {
-                        "已完成真实、已认证的服务请求；服务可用，当前额度足够完成请求。"
-                    } else {
-                        "已完成真实、已认证的服务端探针；服务可用。本次检查不依赖当前模型，也不会写入 Codex 配置。"
-                    },
-                    Some(status.as_u16()),
-                    None,
-                )
+            Ok(body) if has_provider_error(&body) => {
+                provider_failure_outcome(Some(status.as_u16()), &body.to_string())
             }
-            Ok(body) => provider_failure_outcome(Some(status.as_u16()), &body.to_string()),
+            Ok(body) if body.get("id").is_some() => inference_outcome(
+                "standard_responses",
+                "可用性测试已通过：当前模型返回了标准 Responses 结果。本次检查不会写入 Codex 配置。",
+                status.as_u16(),
+            ),
+            Ok(body) if has_compatible_response_output(&body) => inference_outcome(
+                "compatible_response",
+                "可用性测试已通过：当前模型返回了可识别的兼容响应。标准 Responses 形状尚未完全确认。",
+                status.as_u16(),
+            ),
+            Ok(_) => verification_outcome(
+                false,
+                "response_shape_unconfirmed",
+                "response_shape",
+                "服务端已响应并返回 JSON，但本工具尚不能从中确认模型输出；这不代表服务商不能被 Codex 使用。",
+                Some(status.as_u16()),
+                None,
+            ),
             Err(_) => verification_outcome(
                 false,
-                "protocol_incompatible",
-                "response_format",
-                "服务商探针没有返回兼容的 JSON 响应，未确认可用性。",
+                "response_unparseable",
+                "response_shape",
+                "服务端已响应，但返回内容无法按 JSON 解析；本工具无法确认模型输出。",
                 Some(status.as_u16()),
                 None,
             ),
@@ -1124,7 +1237,7 @@ fn provider_failure_outcome(
             Some(404 | 405) => (
                 "endpoint_or_model_unavailable",
                 "endpoint",
-                "服务商探针接口不可用或被服务商拒绝。",
+                "接口路径或当前模型不可用，服务商拒绝了 Responses 请求。",
             ),
             Some(400 | 415 | 422) => (
                 "request_incompatible",
@@ -1164,6 +1277,72 @@ fn apply_verification(profile: &mut StoredProfile, outcome: ProviderVerification
     profile.last_verification_stage = Some(outcome.stage);
     profile.last_verification_http_status = outcome.http_status;
     profile.last_verification_provider_code = outcome.provider_code;
+    profile.verification_response_shape = outcome.response_shape;
+}
+
+fn mark_catalog_model_verified(
+    catalog: &mut StoredCatalog,
+    provider_id: &str,
+    model_id: &str,
+) -> Result<(), SwitcherError> {
+    let Some(value) = catalog.model_catalogs.get(provider_id).cloned() else {
+        return Ok(());
+    };
+    let Ok(mut model_catalog) = serde_json::from_value::<ModelCatalog>(value) else {
+        return Ok(());
+    };
+    if model_catalog.status != "ok" {
+        return Ok(());
+    }
+    if let Some(model) = model_catalog
+        .models
+        .iter_mut()
+        .find(|model| model.id.eq_ignore_ascii_case(model_id.trim()))
+    {
+        model.verified_for_responses = "verified".to_string();
+        catalog.model_catalogs.insert(
+            provider_id.to_string(),
+            serde_json::to_value(model_catalog)?,
+        );
+    }
+    Ok(())
+}
+
+fn invalidate_catalog_model_verifications(catalog: &mut StoredCatalog, provider_id: &str) {
+    let Some(value) = catalog.model_catalogs.get(provider_id).cloned() else {
+        return;
+    };
+    let Ok(mut model_catalog) = serde_json::from_value::<ModelCatalog>(value) else {
+        return;
+    };
+    for model in &mut model_catalog.models {
+        model.verified_for_responses = "unknown".to_string();
+    }
+    if let Ok(value) = serde_json::to_value(model_catalog) {
+        catalog
+            .model_catalogs
+            .insert(provider_id.to_string(), value);
+    }
+}
+
+fn preserve_catalog_model_verifications(previous: Option<&Value>, next: &mut ModelCatalog) {
+    let Some(previous) = previous else {
+        return;
+    };
+    let Ok(previous) = serde_json::from_value::<ModelCatalog>(previous.clone()) else {
+        return;
+    };
+    if previous.status != "ok" || previous.base_url != next.base_url {
+        return;
+    }
+    for model in &mut next.models {
+        if previous.models.iter().any(|previous_model| {
+            previous_model.id.eq_ignore_ascii_case(&model.id)
+                && previous_model.verified_for_responses == "verified"
+        }) {
+            model.verified_for_responses = "verified".to_string();
+        }
+    }
 }
 
 fn normalized_release_version(tag: &str) -> Option<Version> {
@@ -1420,6 +1599,7 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
             .unwrap_or_else(default_reasoning),
         verified: false,
         verification_status: default_verification_status(),
+        verification_response_shape: None,
         default: existing_profile
             .as_ref()
             .map(|p| p.default)
@@ -1429,17 +1609,18 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
             .as_ref()
             .and_then(|p| p.last_switched_at.clone()),
         last_verified_at: None,
-        last_verification_detail: Some("保存后尚未运行真实服务商检查。".to_string()),
+        last_verification_detail: Some("保存后尚未运行兼容性探测。".to_string()),
         last_verification_stage: Some("profile".to_string()),
         last_verification_http_status: None,
         last_verification_provider_code: None,
     };
     let display_name = stored.name.clone();
     catalog.profiles.insert(id, serde_json::to_value(stored)?);
+    invalidate_catalog_model_verifications(&mut catalog, &profile.id);
     save_catalog(&catalog)?;
     app_state_with_activity(
         &format!("{display_name} 已保存"),
-        "服务商信息已更新；已清除旧验证，需要重新运行真实服务商检查。",
+        "服务商信息已更新；已清除旧兼容性探测结果。",
         "info",
     )
 }
@@ -1489,29 +1670,17 @@ pub fn switch_profile_core(profile_id: String) -> Result<AppState, SwitcherError
         .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
     let mut profile: StoredProfile = serde_json::from_value(value)?;
     let display_name = profile.name.clone();
-    let verification = verify_provider_auth_probe(&profile);
-    if !verification.verified {
-        let detail = verification.detail.clone();
-        apply_verification(&mut profile, verification);
-        catalog
-            .profiles
-            .insert(profile_id, serde_json::to_value(profile)?);
-        save_catalog(&catalog)?;
-        push_activity(
-            "切换已阻止",
-            &format!("{display_name} 未通过实时服务商验证：{detail}"),
-            "warning",
-        )?;
-        return Err(SwitcherError::Message(format!("切换已阻止：{detail}")));
+    if profile.api_key.trim().is_empty() {
+        return Err(SwitcherError::Message(
+            "切换已阻止：缺少 API 密钥。".to_string(),
+        ));
     }
-    apply_verification(&mut profile, verification);
     if profile.model.trim().is_empty() {
-        let detail = "缺少 Codex 使用的模型名称；服务商已验证，但不能写入空模型。";
-        catalog
-            .profiles
-            .insert(profile_id, serde_json::to_value(profile)?);
-        save_catalog(&catalog)?;
-        push_activity("切换已阻止", detail, "warning")?;
+        return Err(SwitcherError::Message(
+            "切换已阻止：缺少 Codex 使用的模型名称。".to_string(),
+        ));
+    }
+    if let Err(detail) = provider_probe_endpoint(&profile.base_url, "responses") {
         return Err(SwitcherError::Message(format!("切换已阻止：{detail}")));
     }
     switch_config(&profile)?;
@@ -1522,7 +1691,7 @@ pub fn switch_profile_core(profile_id: String) -> Result<AppState, SwitcherError
     save_catalog(&catalog)?;
     app_state_with_activity(
         &format!("已切换到 {display_name}"),
-        "已写入 Codex config.toml/auth.json，并生成回滚备份。",
+        "已写入 Codex config.toml/auth.json，并生成回滚备份；未自动执行远端兼容性探测。",
         "success",
     )
 }
@@ -1543,22 +1712,32 @@ pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError
     let display_name = profile.name.clone();
     let verification = verify_provider_auth_probe(&profile);
     let verified = verification.verified;
+    let status = verification.status.clone();
     let detail = verification.detail.clone();
     apply_verification(&mut profile, verification);
+    if verified {
+        mark_catalog_model_verified(&mut catalog, &profile_id, &profile.model)?;
+    }
     catalog
         .profiles
         .insert(profile_id, serde_json::to_value(profile)?);
     save_catalog(&catalog)?;
     if verified {
         app_state_with_activity(
-            "验证完成",
-            &format!("{display_name} 已通过真实、已认证的服务端探针。"),
+            "服务商可用性测试通过",
+            &format!("{display_name} 已完成短时、已认证的可用性测试。"),
             "success",
+        )
+    } else if status == "response_shape_unconfirmed" || status == "response_unparseable" {
+        app_state_with_activity(
+            "服务端已响应，结果待确认",
+            &format!("{display_name} 的可用性测试未能确认模型输出：{detail}"),
+            "warning",
         )
     } else {
         app_state_with_activity(
-            "验证需要处理",
-            &format!("{display_name} 未通过真实服务商验证：{detail}"),
+            "服务商可用性测试未确认",
+            &format!("{display_name} 的可用性测试未确认：{detail}"),
             "warning",
         )
     }
@@ -1577,7 +1756,9 @@ pub fn refresh_models_core(profile_id: String) -> Result<AppState, SwitcherError
         .cloned()
         .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
     let profile: StoredProfile = serde_json::from_value(value)?;
-    let model_catalog = fetch_provider_models(&profile_id, &profile)?;
+    let previous_catalog = catalog.model_catalogs.get(&profile_id).cloned();
+    let mut model_catalog = fetch_provider_models(&profile_id, &profile)?;
+    preserve_catalog_model_verifications(previous_catalog.as_ref(), &mut model_catalog);
     let ok = model_catalog.status == "ok";
     catalog
         .model_catalogs

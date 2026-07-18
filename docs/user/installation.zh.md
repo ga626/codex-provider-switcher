@@ -2,7 +2,9 @@
 
 `CodeX Provider Switcher` 当前是 alpha 项目。正式产品路线是 Windows-first 轻量桌面 GUI：桌面安装包启动一个正常应用窗口，默认不弹常驻 CMD、不打开外部浏览器、不要求用户理解端口。
 
-当前 `0.3.2-alpha` 提供 Windows setup exe、签名更新资产和 fallback zip。桌面安装包是推荐入口；fallback zip 保留给排障、开发和本地 Web 诊断。它不会自动替换旧版工具。
+当前已发布的 `0.4.0-alpha` 提供 Windows setup exe、签名更新资产和 fallback zip。本分支准备 `0.5.0-alpha`，修复已验证更新被手动下载页校验错误拦截的问题，并把服务商探测调整为不阻断正常切换的短时诊断。桌面安装包是推荐入口；fallback zip 保留给排障、开发和本地 Web 诊断。它不会自动替换旧版工具。
+
+`0.3.2-alpha` 和 `0.4.0-alpha` 已安装用户需要从 `0.5.0-alpha` Release 手动安装一次。该版本修复后续已验证更新的签名安装路径，不再要求通过手动 Release 页校验；真正的应用内升级验收会在下一个高于 `0.5.0-alpha` 的版本进行。
 
 项目固定区分三种状态：开发版随源码变化，候选版只在仓库 `release-assets/` 中用于验收，稳定版安装在 `D:\Software\CodeX Provider Switcher`，只随合并后的新 GitHub Release 更新。
 
@@ -23,10 +25,10 @@ npm run qa:dev-desktop
 1. 打开 GitHub Release 页面：
 
 ```text
-https://github.com/ga626/codex-provider-switcher/releases/tag/v0.3.2-alpha
+https://github.com/ga626/codex-provider-switcher/releases/tag/v0.5.0-alpha
 ```
 
-2. 优先下载 `CodeXProviderSwitcher-windows-x64-0.3.2-alpha-setup.exe` 和对应 `.sha256`。
+2. 优先下载 `CodeXProviderSwitcher-windows-x64-0.5.0-alpha-setup.exe` 和对应 `.sha256`。
 3. 安装后从开始菜单或桌面图标打开 `CodeX Provider Switcher`。
 4. 预期行为：打开一个桌面窗口，不弹常驻 CMD，不自动打开外部浏览器。
 
@@ -34,9 +36,9 @@ https://github.com/ga626/codex-provider-switcher/releases/tag/v0.3.2-alpha
 
 fallback zip 用于排障和本地 Web 诊断，不是推荐入口。
 
-1. 下载 `CodeXProviderSwitcher-windows-x64-0.3.2-alpha.zip` 和对应 `.sha256`。
+1. 下载 `CodeXProviderSwitcher-windows-x64-0.5.0-alpha.zip` 和对应 `.sha256`。
 2. 解压 zip 到一个普通目录。
-3. 进入解压出的 `CodeXProviderSwitcher-windows-x64-0.3.2-alpha` 目录。
+3. 进入解压出的 `CodeXProviderSwitcher-windows-x64-0.5.0-alpha` 目录。
 4. 双击 `CodeXProviderSwitcher.cmd`。
 5. 浏览器会打开：
 
@@ -140,6 +142,6 @@ Windows Release 包提供：
 
 ## 恢复最近备份
 
-`0.4.0-alpha` 发布后，“安全检查”会显示最近恢复点。恢复前会要求确认，恢复的是该应用在切换前创建的 Codex 配置和凭据备份。
+“安全检查”会显示最近恢复点。恢复前会要求确认，恢复的是该应用在切换前创建的 Codex 配置和凭据备份。
 
-恢复完成后，应重新运行目标服务商的真实检查；不要把恢复操作当成 provider 可用性的替代证明。
+恢复完成后，可按需运行目标服务商的可用性测试。恢复操作、模型目录或单次测试都不是 provider 实际可用性的唯一证明，应以独立会话中的实际 Codex 使用完成最终判断。

@@ -91,14 +91,14 @@ const providerServer = createServer((request, response) => {
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify([
       {
-        tag_name: 'v0.5.0-alpha',
-        html_url: 'https://github.com/ga626/codex-provider-switcher/releases/tag/v0.5.0-alpha',
+        tag_name: 'v0.5.1-alpha',
+        html_url: 'https://github.com/ga626/codex-provider-switcher/releases/tag/v0.5.1-alpha',
         draft: false,
         published_at: '2026-07-16T00:00:00Z',
         assets: [
           {
-            name: 'CodeXProviderSwitcher-windows-x64-0.5.0-alpha-setup.exe',
-            browser_download_url: 'https://github.com/ga626/codex-provider-switcher/releases/download/v0.5.0-alpha/CodeXProviderSwitcher-windows-x64-0.5.0-alpha-setup.exe',
+            name: 'CodeXProviderSwitcher-windows-x64-0.5.1-alpha-setup.exe',
+            browser_download_url: 'https://github.com/ga626/codex-provider-switcher/releases/download/v0.5.1-alpha/CodeXProviderSwitcher-windows-x64-0.5.1-alpha-setup.exe',
           },
         ],
       },
@@ -147,9 +147,35 @@ const providerServer = createServer((request, response) => {
     responsesProbeRequestCount += 1
     request.resume()
     request.on('end', () => {
-      if (request.headers.authorization === 'Bearer sk-no-credit') {
+      const authorization = request.headers.authorization
+      if (authorization === 'Bearer sk-fixture') {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ id: 'resp_fixture', object: 'response' }))
+        return
+      }
+      if (authorization === 'Bearer sk-no-credit') {
         response.writeHead(402, { 'Content-Type': 'application/json' })
         response.end(JSON.stringify({ error: { code: 'insufficient_quota', message: 'insufficient balance' } }))
+        return
+      }
+      if (authorization === 'Bearer sk-endpoint-mismatch') {
+        response.writeHead(404, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ error: { code: 'not_found', message: 'responses route unavailable' } }))
+        return
+      }
+      if (authorization === 'Bearer sk-protocol-mismatch') {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ object: 'response' }))
+        return
+      }
+      if (authorization === 'Bearer fixture-compatible-response') {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ error: null, object: 'response', output_text: 'OK' }))
+        return
+      }
+      if (authorization === 'Bearer sk-service-error') {
+        response.writeHead(503, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ error: { code: 'service_unavailable', message: 'upstream unavailable' } }))
         return
       }
       response.writeHead(401, { 'Content-Type': 'application/json' })
@@ -187,7 +213,7 @@ try {
 
   const update = await api('/api/update/check')
   assert(update.available, 'update check did not detect a newer semantic version')
-  assert(update.latestVersion === '0.5.0-alpha', 'update check returned the wrong latest version')
+  assert(update.latestVersion === '0.5.1-alpha', 'update check returned the wrong latest version')
   assert(update.downloadUrl?.endsWith('-setup.exe'), 'update check did not select the Windows setup asset')
 
   const profile = {
@@ -212,22 +238,40 @@ try {
   const verifiedProfile = verified.profiles.find((item) => item.id === profile.id)
   assert(verifiedProfile?.verified, 'real authenticated server probe did not pass')
   assert(verifiedProfile?.verificationStatus === 'verified', 'verification did not record the verified status')
-  assert(verifiedProfile?.lastVerificationStage === 'authenticated_server_probe', 'verification did not record the verification stage')
+  assert(verifiedProfile?.verificationResponseShape === 'standard_responses', 'verification did not record the standard Responses shape')
+  assert(verifiedProfile?.lastVerificationStage === 'inference', 'verification did not record the inference stage')
   assert(verifiedProfile?.lastVerificationHttpStatus === 200, 'verification did not record the HTTP status')
-  assert(verified.activity[0]?.title === '验证完成', 'verification did not update activity')
+  assert(
+    verified.modelCatalogs
+      .find((item) => item.providerId === profile.id)
+      ?.models.find((item) => item.id === profile.model)
+      ?.verifiedForResponses === 'verified',
+    'successful Responses verification did not mark the catalog model as verified'
+  )
+  assert(verified.activity[0]?.title === '服务商可用性测试通过', 'provider availability test did not update activity')
   assert(await readFile(configPath, 'utf8') === originalConfig, 'verification changed config.toml')
   assert(await readFile(authPath, 'utf8') === originalAuth, 'verification changed auth.json')
+
+  const refreshedAfterVerification = await api('/api/models/refresh', { profileId: profile.id })
+  assert(
+    refreshedAfterVerification.modelCatalogs
+      .find((item) => item.providerId === profile.id)
+      ?.models.find((item) => item.id === profile.model)
+      ?.verifiedForResponses === 'verified',
+    'refresh discarded the verified status for an unchanged catalog model'
+  )
 
   const modelless = { ...profile, id: 'model-less', name: 'Model-less Probe', model: '' }
   await api('/api/profiles/save', { profile: modelless })
   const modelLessVerification = await api('/api/profiles/verify', { profileId: modelless.id })
   const modelLessProfile = modelLessVerification.profiles.find((item) => item.id === modelless.id)
-  assert(modelLessProfile?.verified, 'authenticated server probe incorrectly required a model')
-  assert(modelLessProfile?.lastVerificationStage === 'authenticated_server_probe', 'model-less probe used the wrong stage')
+  assert(!modelLessProfile?.verified, 'real Responses probe incorrectly accepted a missing model')
+  assert(modelLessProfile?.verificationStatus === 'invalid_profile', 'model-less probe did not report an incomplete profile')
 
   const defaulted = await api('/api/profiles/default', { profileId: profile.id })
   assert(defaulted.profiles.find((item) => item.id === profile.id)?.isDefault, 'default provider was not updated')
 
+  const responsesBeforeSwitch = responsesProbeRequestCount
   const switched = await api('/api/profiles/switch', { profileId: profile.id })
   const switchedConfig = await readFile(configPath, 'utf8')
   const switchedAuth = JSON.parse(await readFile(authPath, 'utf8'))
@@ -245,7 +289,8 @@ try {
   assert(manifest.reason === 'before_switch', 'backup manifest did not record its reason')
   assert(Array.isArray(manifest.files) && manifest.files.includes('config.toml') && manifest.files.includes('auth.json'), 'backup manifest did not list protected files')
   assert(switched.activity[0]?.title === '已切换到 Fixture Provider', 'switch did not update activity')
-  assert(modelsProbeRequestCount >= 3, 'verification and switching did not issue real authenticated /models probes')
+  assert(modelsProbeRequestCount >= 1, 'model refresh did not issue an authenticated /models request')
+  assert(responsesProbeRequestCount === responsesBeforeSwitch, 'switch unexpectedly sent a remote compatibility probe')
 
   await writeFile(configPath, 'model = "corrupted"', 'utf8')
   await writeFile(authPath, JSON.stringify({ OPENAI_API_KEY: 'corrupted' }), 'utf8')
@@ -270,14 +315,13 @@ try {
   assert(failedProfile?.lastVerificationStage === 'billing', 'insufficient-credit provider did not record the diagnostic stage')
   assert(failedProfile?.lastVerificationProviderCode === 'insufficient_quota', 'insufficient-credit provider did not record the provider code')
   assert(responsesProbeRequestCount >= 1, 'DasuAPI quota verification did not issue the real request probe')
-  const backupsBeforeBlockedSwitch = failedVerification.backups.length
-  const blockedError = await expectApiFailure('/api/profiles/switch', { profileId: noCredit.id })
-  assert(blockedError.includes('切换已阻止'), 'unverified provider did not report a blocked switch')
-  assert(await readFile(configPath, 'utf8') === originalConfig, 'blocked switch changed config.toml')
-  assert(await readFile(authPath, 'utf8') === originalAuth, 'blocked switch changed auth.json')
-  const afterBlockedSwitch = await api('/api/state')
-  assert(afterBlockedSwitch.backups.length === backupsBeforeBlockedSwitch, 'blocked switch created a backup')
-  assert(afterBlockedSwitch.activity[0]?.title === '切换已阻止', 'blocked switch was not recorded')
+  const responsesBeforeInconclusiveSwitch = responsesProbeRequestCount
+  const switchedAfterInconclusiveProbe = await api('/api/profiles/switch', { profileId: noCredit.id })
+  assert(switchedAfterInconclusiveProbe.currentProfileId === noCredit.id, 'an inconclusive probe blocked a safe local switch')
+  assert(responsesProbeRequestCount === responsesBeforeInconclusiveSwitch, 'switch retried a remote compatibility probe')
+  const restoredAfterInconclusiveSwitch = await api('/api/backup/restore-latest', {})
+  assert(await readFile(configPath, 'utf8') === originalConfig, 'restore did not recover the config after an inconclusive probe switch')
+  assert(restoredAfterInconclusiveSwitch.activity[0]?.title === '已恢复最近备份', 'restore after inconclusive switch was not recorded')
 
   const endpointMismatch = { ...profile, id: 'endpoint-mismatch', name: 'Endpoint mismatch', apiKey: 'sk-endpoint-mismatch' }
   await api('/api/profiles/save', { profile: endpointMismatch })
@@ -290,7 +334,17 @@ try {
   await api('/api/profiles/save', { profile: protocolMismatch })
   const protocolVerification = await api('/api/profiles/verify', { profileId: protocolMismatch.id })
   const protocolProfile = protocolVerification.profiles.find((item) => item.id === protocolMismatch.id)
-  assert(protocolProfile?.verificationStatus === 'protocol_incompatible', 'invalid successful response was not classified as protocol incompatible')
+  assert(!protocolProfile?.verified, 'unconfirmed response shape was incorrectly marked as callable')
+  assert(protocolProfile?.verificationStatus === 'response_shape_unconfirmed', 'successful JSON without model output was not classified as response shape unconfirmed')
+  assert(protocolProfile?.lastVerificationStage === 'response_shape', 'unconfirmed response shape did not retain its diagnostic stage')
+
+  const compatibleResponse = { ...profile, id: 'compatible-response', name: 'Compatible response', apiKey: 'fixture-compatible-response' }
+  await api('/api/profiles/save', { profile: compatibleResponse })
+  const compatibleVerification = await api('/api/profiles/verify', { profileId: compatibleResponse.id })
+  const compatibleProfile = compatibleVerification.profiles.find((item) => item.id === compatibleResponse.id)
+  assert(compatibleProfile?.verified, 'recognized compatible response was not marked callable')
+  assert(compatibleProfile?.verificationStatus === 'verified', 'recognized compatible response did not record a successful inference result')
+  assert(compatibleProfile?.verificationResponseShape === 'compatible_response', 'compatible response shape was not preserved')
 
   const serviceError = { ...profile, id: 'service-error', name: 'Service error', apiKey: 'sk-service-error' }
   await api('/api/profiles/save', { profile: serviceError })
@@ -314,12 +368,12 @@ try {
       'save persisted provider and activity',
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models and deduplicated results',
-      'real authenticated /v1/models probes gate A6/OWL without requiring a selected model',
-      'DasuAPI request probe identifies insufficient quota instead of trusting /v1/models availability',
-      'verification diagnostics classify endpoint, protocol, billing, and service errors without changing Codex config/auth',
+      'authenticated /v1/responses probes distinguish standard, compatible, and unconfirmed response shapes',
+      'inconclusive quota probes do not block local safe switching or trigger a second remote probe',
+      'verification diagnostics classify endpoint, response shape, billing, and service errors without changing Codex config/auth',
       'default selection persisted',
       'switch wrote config/auth, preserved unrelated data, and created a manifest-backed backup',
-      'insufficient balance blocks switching without touching config/auth or backups',
+      'same-address profiles retain the selected current-provider identity after a safe switch',
       'restore recovered both files and updated timeline',
       'delete removed a non-current non-default provider',
     ],

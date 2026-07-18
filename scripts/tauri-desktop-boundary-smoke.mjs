@@ -36,6 +36,10 @@ const [packageJsonText, tauriConfigText, cargoToml, libRs, adapterTs, mockDataTs
 
 const tauriConfig = JSON.parse(tauriConfigText)
 const packageJson = JSON.parse(packageJsonText)
+const switchProfileCore = libRs.slice(
+  libRs.indexOf('pub fn switch_profile_core'),
+  libRs.indexOf('#[tauri::command]\nfn verify_profile')
+)
 
 assert(tauriConfig.productName === 'CodeX Provider Switcher', 'Tauri productName must stay stable')
 assert(tauriConfig.mainBinaryName === 'codex-provider-switcher', 'Tauri must bundle the desktop binary, not local_backend')
@@ -68,6 +72,19 @@ assertNotIncludes(libRs, 'install_tray', 'src-tauri/src/lib.rs')
 assert(libRs.includes('runtime_mode: "tauri_native".to_string()'), 'Tauri app state must report tauri_native')
 assert(libRs.includes('tray_enabled: false'), 'Tauri app state must report trayEnabled=false')
 assert(adapterTs.includes("if (isTauri) {\n    return invoke<AppState>('load_state')"), 'Tauri frontend must use invoke(load_state)')
+assert(adapterTs.includes('function isTrustedProjectReleaseUrl(value: string)'), 'Updater fallback URLs must use a dedicated trust check')
+assert(adapterTs.includes("parsed.pathname === '/ga626/codex-provider-switcher/releases'"), 'Updater trust check must allow the canonical project Release page')
+assert(adapterTs.indexOf('if (isTauri && pendingTauriUpdate)') < adapterTs.indexOf('if (!isTrustedProjectReleaseUrl(url))'), 'Signed Tauri updates must not be blocked by the fallback URL guard')
+assert(libRs.includes('provider_probe_endpoint(&profile.base_url, "responses")'), 'Provider verification must call the Responses endpoint')
+assert(libRs.includes('.post(endpoint)'), 'Provider verification must send the Responses request with POST')
+assert(libRs.includes('stage: "inference".to_string()'), 'Provider verification must record the inference stage')
+assert(libRs.includes('body.get("id").is_some()'), 'Provider verification must identify a standard Responses shape')
+assert(libRs.includes('has_compatible_response_output(&body)'), 'Provider verification must recognize a compatible response with model output')
+assert(libRs.includes('"response_shape_unconfirmed"'), 'Provider verification must distinguish an unconfirmed response shape from a provider failure')
+assert(libRs.includes('mark_catalog_model_verified'), 'Successful inference verification must update the matching catalog model')
+assert(libRs.includes('.timeout(Duration::from_secs(8))'), 'Compatibility probes must use the short timeout budget')
+assertNotIncludes(switchProfileCore, 'verify_provider_auth_probe', 'Switching must not trigger a remote compatibility probe')
+assertNotIncludes(libRs, 'uses_request_probe', 'src-tauri/src/lib.rs')
 assert(mockDataTs.includes('trayEnabled: false'), 'Browser preview mock must not imply a default tray')
 
 console.log('[PASS] Tauri desktop boundary smoke passed.')
