@@ -53,6 +53,13 @@ if (-not $Apply) {
 
 Push-Location $projectRoot
 try {
+    # The development desktop executable shares the release output path with Tauri's build.
+    # Stop it before compiling so Rust can replace the binary on Windows.
+    $running = @(Get-Process -Name "codex-provider-switcher" -ErrorAction SilentlyContinue)
+    foreach ($processItem in $running) {
+        Stop-Process -Id $processItem.Id -Force
+    }
+
     npm run release:assets
     if ($LASTEXITCODE -ne 0) { throw "Installer asset generation failed." }
 
@@ -64,11 +71,6 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Desktop candidate build failed." }
 
     $setupPath = Get-SetupPath
-    $running = @(Get-Process -Name "codex-provider-switcher" -ErrorAction SilentlyContinue)
-    foreach ($processItem in $running) {
-        Stop-Process -Id $processItem.Id -Force
-    }
-
     New-Item -ItemType Directory -Path (Split-Path -Parent $InstallRoot) -Force | Out-Null
     $installer = Start-Process -FilePath $setupPath -ArgumentList @("/S", "/D=$InstallRoot") -Wait -PassThru
     if ($installer.ExitCode -ne 0) {
