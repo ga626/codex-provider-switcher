@@ -150,17 +150,17 @@ try {
     throw new Error('Preview mode must not enable a simulated provider switch.')
   }
 
-  await desktop.locator('.provider-row').filter({ hasText: 'OWL' }).click()
+  await desktop.locator('.provider-row').filter({ hasText: '示例服务商 C' }).click()
   await desktop.getByRole('button', { name: '复制配置' }).click()
-  await desktop.getByLabel('服务商名称').fill('OWL Smoke Copy')
+  await desktop.getByLabel('服务商名称').fill('Example Provider Smoke Copy')
   await desktop.getByRole('button', { name: '保存更改' }).click()
-  await desktop.locator('.provider-row').filter({ hasText: 'OWL Smoke Copy' }).waitFor()
+  await desktop.locator('.provider-row').filter({ hasText: 'Example Provider Smoke Copy' }).waitFor()
   await desktop.getByRole('button', { name: '删除服务商' }).click()
-  await desktop.locator('.provider-row').filter({ hasText: 'OWL Smoke Copy' }).waitFor({ state: 'detached' })
+  await desktop.locator('.provider-row').filter({ hasText: 'Example Provider Smoke Copy' }).waitFor({ state: 'detached' })
 
-  await desktop.locator('.provider-row').filter({ hasText: 'DasuAPI' }).click()
+  await desktop.locator('.provider-row').filter({ hasText: '示例服务商 B' }).click()
   await desktop.getByRole('button', { name: '设为默认' }).click()
-  await desktop.locator('.provider-row').filter({ hasText: 'DasuAPI' }).locator('svg').waitFor()
+  await desktop.locator('.provider-row').filter({ hasText: '示例服务商 B' }).locator('svg').waitFor()
 
   await desktop.getByRole('button', { name: /安全检查/ }).click()
   await desktop.getByRole('heading', { name: '安全检查' }).waitFor()

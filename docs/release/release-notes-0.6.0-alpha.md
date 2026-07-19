@@ -10,6 +10,8 @@
 - 安全检查可识别当前 Codex 模型与本地 provider 目录的差异。用户确认后只能更新本地目录，不写 Codex 配置、不写认证文件，也不会请求服务商。
 - 桌面 Release 同时要求 Tauri updater 签名和 Windows Authenticode 签名。GitHub Actions 缺少任一签名凭据时会停止正式发布。
 - 增加只读 cutover preflight，用于发布后的新会话确认新安装版、旧工具进程/端口和启动入口状态。
+- 服务商可用性测试现在是切换前置条件：地址、模型或密钥变化后，必须重新完成一次已认证的短时 Responses 请求；额度或配额不足会阻止写入 Codex 配置。
+- README、安装和交接文档已按使用者、贡献者和维护者分层；公开演示不包含真实 provider 或本机资料。
 - 限制桌面 WebView CSP，并将预览 smoke 编排为单个命令。
 
 ## 用户影响

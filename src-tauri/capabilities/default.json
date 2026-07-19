@@ -5,8 +5,15 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:default",
-    "process:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://github.com/ga626/codex-provider-switcher/releases*"
+        }
+      ]
+    },
+    "process:allow-restart",
     "updater:default"
   ]
 }

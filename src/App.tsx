@@ -124,10 +124,10 @@ function providerAvailabilityChecks(
 
   const checks: ValidationCheck[] = [{
     id: 'provider-inference-probe',
-    label: '服务商可用性测试（可选）',
+    label: '服务商可用性测试',
     ok: profile.verified && profile.verificationStatus === 'verified',
     detail: verificationDetail(profile),
-    severity: 'info',
+    severity: 'required',
   }]
 
   if (profile.model.length > 0 && modelCatalog?.status === 'ok') {
@@ -148,7 +148,7 @@ function providerAvailabilityChecks(
 
 function verificationDetail(profile: ProviderProfile | undefined) {
   if (!profile?.lastVerificationDetail) {
-    return '尚未运行可用性测试。测试会发送一笔短时、低 token 的 Responses 请求，不影响切换。'
+    return '尚未运行可用性测试。切换前必须发送一笔短时、低 token 的 Responses 请求。'
   }
 
   const diagnostics = [
@@ -213,7 +213,7 @@ function draftMatchesProfile(draft: EditableProfile, profile: ProviderProfile | 
 
 function App() {
   const [state, setState] = useState<AppState | null>(null)
-  const [selectedId, setSelectedId] = useState('a6api')
+  const [selectedId, setSelectedId] = useState('example-provider-a')
   const [activeView, setActiveView] = useState<ViewId>('providers')
   const [draft, setDraft] = useState<EditableProfile>(emptyProfile)
   const [busy, setBusy] = useState<string | null>(null)
@@ -279,7 +279,7 @@ function App() {
     return providerAvailabilityChecks(selectedProfile, selectedModelCatalog)
   }, [selectedModelCatalog, selectedProfile])
   const configChecks = state?.checks ?? []
-  const switchGateChecks = [...configChecks, ...profileConfigChecks]
+  const switchGateChecks = [...configChecks, ...profileConfigChecks, ...availabilityChecks]
   const requiredFailures = switchGateChecks.filter((check) => !check.ok && check.severity === 'required').length
   const hasUnsavedChanges = !draftMatchesProfile(draft, selectedProfile)
   const latestActivity = state?.activity[0]
@@ -1074,8 +1074,8 @@ function SafetyWorkspace({
         <div>
           <KeyRound size={22} />
           <span>服务商可用性测试</span>
-          <strong>可选</strong>
-          <small>发起一笔短时、低 token 的 Responses 请求，不作为切换门槛。</small>
+          <strong>切换前必须通过</strong>
+          <small>发起一笔短时、低 token 的已认证 Responses 请求。未通过时不会改写 Codex 配置。</small>
         </div>
         <button
           className="primary-button safety-run-button"
@@ -1093,7 +1093,7 @@ function SafetyWorkspace({
             <span>目标服务商可用性</span>
             <strong>{selectedProfile?.name ?? '未选择'}</strong>
           </div>
-          <small>测试只覆盖一次短请求；它不替代长上下文、工具调用或最终 Codex 验收。</small>
+          <small>测试只覆盖一次短请求；它是切换门槛，但不替代长上下文、工具调用或最终 Codex 验收。</small>
         </div>
         <div className="check-list">
           {availabilityChecks.map((check) => {
@@ -1116,7 +1116,7 @@ function SafetyWorkspace({
             <span className="eyebrow">切换门禁</span>
             <h3>目标配置完整性</h3>
           </div>
-          <span className="section-meta">仅检查保存的地址、模型和密钥</span>
+          <span className="section-meta">地址、模型、密钥与真实可用性测试都必须通过</span>
         </div>
         <div className="check-list compact-check-list">
           {profileConfigChecks.map((check) => {

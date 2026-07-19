@@ -310,6 +310,9 @@ try {
   assert(synced.profiles.find((item) => item.id === profile.id)?.model === 'reasoning-current-drift', 'current configuration sync did not update the profile model')
   assert(await readFile(configPath, 'utf8') === driftedConfig, 'current configuration sync wrote config.toml')
   assert(await readFile(authPath, 'utf8') === authBeforeSync, 'current configuration sync wrote auth.json')
+  const syncedProfile = synced.profiles.find((item) => item.id === profile.id)
+  assert(!syncedProfile?.verified, 'current configuration sync retained a verification result for the previous model')
+  assert(syncedProfile?.verificationStatus === 'not_checked', 'current configuration sync did not invalidate the old verification status')
   assert(switched.activity[0]?.title === '已切换到 Fixture Provider', 'switch did not update activity')
   assert(modelsProbeRequestCount >= 1, 'model refresh did not issue an authenticated /models request')
   assert(responsesProbeRequestCount === responsesBeforeSwitch, 'switch unexpectedly sent a remote compatibility probe')
@@ -337,13 +340,12 @@ try {
   assert(failedProfile?.lastVerificationStage === 'billing', 'insufficient-credit provider did not record the diagnostic stage')
   assert(failedProfile?.lastVerificationProviderCode === 'insufficient_quota', 'insufficient-credit provider did not record the provider code')
   assert(responsesProbeRequestCount >= 1, 'DasuAPI quota verification did not issue the real request probe')
-  const responsesBeforeInconclusiveSwitch = responsesProbeRequestCount
-  const switchedAfterInconclusiveProbe = await api('/api/profiles/switch', { profileId: noCredit.id })
-  assert(switchedAfterInconclusiveProbe.currentProfileId === noCredit.id, 'an inconclusive probe blocked a safe local switch')
-  assert(responsesProbeRequestCount === responsesBeforeInconclusiveSwitch, 'switch retried a remote compatibility probe')
-  const restoredAfterInconclusiveSwitch = await api('/api/backup/restore-latest', {})
-  assert(await readFile(configPath, 'utf8') === originalConfig, 'restore did not recover the config after an inconclusive probe switch')
-  assert(restoredAfterInconclusiveSwitch.activity[0]?.title === '已恢复最近备份', 'restore after inconclusive switch was not recorded')
+  const responsesBeforeBlockedSwitch = responsesProbeRequestCount
+  const blockedSwitchMessage = await expectApiFailure('/api/profiles/switch', { profileId: noCredit.id })
+  assert(blockedSwitchMessage.includes('服务商可用性测试'), 'billing failure did not explain the switch gate')
+  assert(responsesProbeRequestCount === responsesBeforeBlockedSwitch, 'switch retried a remote compatibility probe')
+  assert(await readFile(configPath, 'utf8') === originalConfig, 'blocked DasuAPI switch changed config.toml')
+  assert(await readFile(authPath, 'utf8') === originalAuth, 'blocked DasuAPI switch changed auth.json')
 
   const endpointMismatch = { ...profile, id: 'endpoint-mismatch', name: 'Endpoint mismatch', apiKey: 'sk-endpoint-mismatch' }
   await api('/api/profiles/save', { profile: endpointMismatch })
@@ -392,13 +394,13 @@ try {
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models and deduplicated results',
       'authenticated /v1/responses probes distinguish standard, compatible, and unconfirmed response shapes',
-      'inconclusive quota probes do not block local safe switching or trigger a second remote probe',
+      'verified Responses probes are required before switching and insufficient-credit probes block config writes',
       'verification diagnostics classify endpoint, response shape, billing, and service errors without changing Codex config/auth',
       'default selection persisted',
       'switch wrote config/auth, preserved unrelated data, and created a manifest-backed backup',
       'same-address profiles retain the selected current-provider identity after a safe switch',
       'restore recovered both files and updated timeline',
-      'current configuration sync updates only the local profile directory',
+      'current configuration sync updates only the local profile directory and invalidates the previous model verification',
       'delete removed a non-current non-default provider',
     ],
   }, null, 2))

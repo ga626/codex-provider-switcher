@@ -1495,6 +1495,17 @@ fn apply_verification(profile: &mut StoredProfile, outcome: ProviderVerification
     profile.verification_response_shape = outcome.response_shape;
 }
 
+fn reset_profile_verification(profile: &mut StoredProfile, detail: &str) {
+    profile.verified = false;
+    profile.verification_status = default_verification_status();
+    profile.verification_response_shape = None;
+    profile.last_verified_at = None;
+    profile.last_verification_detail = Some(detail.to_string());
+    profile.last_verification_stage = Some("profile".to_string());
+    profile.last_verification_http_status = None;
+    profile.last_verification_provider_code = None;
+}
+
 fn mark_catalog_model_verified(
     catalog: &mut StoredCatalog,
     provider_id: &str,
@@ -1809,7 +1820,7 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
     } else {
         profile.api_key.trim().to_string()
     };
-    let stored = StoredProfile {
+    let mut stored = StoredProfile {
         name: profile.name.trim().to_string(),
         base_url: profile.base_url.trim().to_string(),
         api_key,
@@ -1831,11 +1842,12 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
             .as_ref()
             .and_then(|p| p.last_switched_at.clone()),
         last_verified_at: None,
-        last_verification_detail: Some("保存后尚未运行兼容性探测。".to_string()),
-        last_verification_stage: Some("profile".to_string()),
+        last_verification_detail: None,
+        last_verification_stage: None,
         last_verification_http_status: None,
         last_verification_provider_code: None,
     };
+    reset_profile_verification(&mut stored, "保存后需要重新运行服务商可用性测试。");
     let display_name = stored.name.clone();
     catalog.profiles.insert(id, serde_json::to_value(stored)?);
     invalidate_catalog_model_verifications(&mut catalog, &profile.id);
@@ -1905,6 +1917,16 @@ pub fn switch_profile_core(profile_id: String) -> Result<AppState, SwitcherError
     if let Err(detail) = provider_probe_endpoint(&profile.base_url, "responses") {
         return Err(SwitcherError::Message(format!("切换已阻止：{detail}")));
     }
+    if !profile.verified || profile.verification_status != "verified" {
+        let detail = profile
+            .last_verification_detail
+            .as_deref()
+            .unwrap_or("尚未运行服务商可用性测试。")
+            .trim();
+        return Err(SwitcherError::Message(format!(
+            "切换已阻止：目标服务商尚未通过服务商可用性测试。{detail}"
+        )));
+    }
     switch_config(&profile)?;
     profile.last_switched_at = Some(now_label());
     catalog
@@ -1913,7 +1935,7 @@ pub fn switch_profile_core(profile_id: String) -> Result<AppState, SwitcherError
     save_catalog(&catalog)?;
     app_state_with_activity(
         &format!("已切换到 {display_name}"),
-        "已写入 Codex config.toml/auth.json，并生成回滚备份；未自动执行远端兼容性探测。",
+        "已写入 Codex config.toml/auth.json，并生成回滚备份；切换前的真实服务商可用性测试已通过。",
         "success",
     )
 }
@@ -2056,6 +2078,11 @@ pub fn sync_current_configuration_core() -> Result<AppState, SwitcherError> {
     }
     let previous_model = profile.model.clone();
     profile.model = current_model.clone();
+    reset_profile_verification(
+        &mut profile,
+        "Codex 当前模型已同步到本地目录；模型变化后需要重新运行服务商可用性测试。",
+    );
+    invalidate_catalog_model_verifications(&mut catalog, &profile_id);
     let display_name = profile.name.clone();
     catalog
         .profiles
@@ -2063,7 +2090,7 @@ pub fn sync_current_configuration_core() -> Result<AppState, SwitcherError> {
     save_catalog(&catalog)?;
     app_state_with_activity(
         "已同步当前 Codex 配置",
-        &format!("{display_name} 的目录模型已从 {previous_model} 同步为 {current_model}；未写入 Codex 配置或凭据。"),
+        &format!("{display_name} 的目录模型已从 {previous_model} 同步为 {current_model}；旧测试结果已失效，未写入 Codex 配置或凭据。"),
         "success",
     )
 }

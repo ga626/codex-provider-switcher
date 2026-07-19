@@ -23,16 +23,18 @@ function assertBmp(buffer, width, height, label) {
   assert(Math.abs(buffer.readInt32LE(22)) === height, `${label} must be ${height}px high`)
 }
 
-const [packageJsonText, tauriConfigText, cargoToml, libRs, adapterTs, mockDataTs, headerBmp, sidebarBmp] = await Promise.all([
+const [packageJsonText, tauriConfigText, cargoToml, libRs, adapterTs, mockDataTs, preflightScript, headerBmp, sidebarBmp] = await Promise.all([
   readText('package.json'),
   readText('src-tauri/tauri.conf.json'),
   readText('src-tauri/Cargo.toml'),
   readText('src-tauri/src/lib.rs'),
   readText('src/adapter.ts'),
   readText('src/mockData.ts'),
+  readText('scripts/qa/cutover-preflight.ps1'),
   readFile(join(root, 'src-tauri/installer/header.bmp')),
   readFile(join(root, 'src-tauri/installer/sidebar.bmp')),
 ])
+const capabilityText = await readText('src-tauri/capabilities/default.json')
 
 const tauriConfig = JSON.parse(tauriConfigText)
 const packageJson = JSON.parse(packageJsonText)
@@ -68,6 +70,10 @@ assertNotIncludes(cargoToml, 'tray-icon', 'src-tauri/Cargo.toml')
 assertNotIncludes(libRs, 'tauri_plugin_autostart', 'src-tauri/src/lib.rs')
 assertNotIncludes(libRs, 'TrayIconBuilder', 'src-tauri/src/lib.rs')
 assertNotIncludes(libRs, 'install_tray', 'src-tauri/src/lib.rs')
+assert(capabilityText.includes('process:allow-restart'), 'Tauri capability must grant only process restart')
+assertNotIncludes(capabilityText, 'process:default', 'Tauri capability')
+assert(capabilityText.includes('opener:allow-open-url'), 'Tauri capability must explicitly allow the update Release URL')
+assertNotIncludes(capabilityText, 'opener:default', 'Tauri capability')
 
 assert(libRs.includes('runtime_mode: "tauri_native".to_string()'), 'Tauri app state must report tauri_native')
 assert(libRs.includes('tray_enabled: false'), 'Tauri app state must report trayEnabled=false')
@@ -83,8 +89,13 @@ assert(libRs.includes('has_compatible_response_output(&body)'), 'Provider verifi
 assert(libRs.includes('"response_shape_unconfirmed"'), 'Provider verification must distinguish an unconfirmed response shape from a provider failure')
 assert(libRs.includes('mark_catalog_model_verified'), 'Successful inference verification must update the matching catalog model')
 assert(libRs.includes('.timeout(Duration::from_secs(8))'), 'Compatibility probes must use the short timeout budget')
+assert(switchProfileCore.includes('profile.verification_status != "verified"'), 'Switching must require a successful provider availability test')
 assertNotIncludes(switchProfileCore, 'verify_provider_auth_probe', 'Switching must not trigger a remote compatibility probe')
 assertNotIncludes(libRs, 'uses_request_probe', 'src-tauri/src/lib.rs')
 assert(mockDataTs.includes('trayEnabled: false'), 'Browser preview mock must not imply a default tray')
+assert(preflightScript.includes('Cutover preflight (read-only)'), 'Cutover preflight must remain read-only')
+assert(preflightScript.includes('New installation signature:'), 'Cutover preflight must report the installed app signature')
+assert(preflightScript.includes('Legacy process details:'), 'Cutover preflight must report legacy process ownership evidence')
+assert(preflightScript.includes('Codex invariant model_provider=custom:'), 'Cutover preflight must report configuration invariants without exposing values')
 
 console.log('[PASS] Tauri desktop boundary smoke passed.')

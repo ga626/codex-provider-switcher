@@ -38,7 +38,7 @@ npm run release:readiness -- -ReportOnly
 git diff --check
 ```
 
-`release:readiness` 不读取 Secret 值，也不会创建 Release。它会把“可合并的代码”与“现在能不能正式交付”分开报告。
+`release:readiness` 不读取 Secret 值，也不会创建 Release。发布影响 PR 必须在 PR 描述的“发布计划/后续动作”中记录它的结论：没有可信 Windows 代码签名凭据时，可以讨论是否合并代码，但状态必须明确写成“代码已合并，产品未交付”。
 
 本机 Tauri 开发版启动会固定使用单任务 Cargo 构建，避免 Windows 上并行全量编译占满内存：
 
@@ -70,4 +70,4 @@ npm run qa:dev-desktop
 
 PR 前应确认工作区干净、目标分支最新、文档已同步、无冲突标记、测试通过、用户会经过的路径可运行。创建 PR 后，GitHub 的 `validate` 是该分支的权威云端验证；不要额外等待重复的功能分支 push CI。
 
-发布影响 PR 合并后仍不是交付完成。必须在最新主线创建新 tag 和不可变 Release，再以普通用户路径下载、安装、启动和验证；任何一步被签名、版本、权限或安全告警阻断时，只能写“代码已合并，产品未交付”。
+发布影响 PR 合并后仍不是交付完成。必须在最新主线创建新 tag 和不可变 Release，再以普通用户路径下载、安装、启动和验证；任何一步被签名、版本、权限或安全告警阻断时，只能写“代码已合并，产品未交付”。需要替换旧工具时，继续按 [旧工具替换手册](../maintainers/legacy-cutover.zh.md) 在新的 Codex 会话完成，不得在当前开发会话直接停用旧工具。
