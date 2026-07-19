@@ -1,52 +1,79 @@
 # CodeX Provider Switcher
 
-一个本地优先的 Windows 工具，用来管理 Codex provider、在写入前检查配置，并保留可恢复的备份。
+`CodeX Provider Switcher` 是给 Windows 上 Codex 用户使用的本地 provider 管理工具。它把原本需要手工修改的 `config.toml` 和 `auth.json` 收进一个桌面窗口：先检查目标服务商能否完成真实请求，再创建恢复点，然后才切换。
 
-它适合希望在多个兼容服务商之间切换、又不想手工改 `config.toml` 和 `auth.json` 的 Codex 用户。应用默认是一个普通桌面窗口：不常驻 CMD、不自动打开浏览器、不要求理解端口；关闭窗口即退出。
+![CodeX Provider Switcher 桌面界面示意](docs/assets/desktop-preview.png)
 
-> 当前处于 alpha 阶段。请以 [GitHub Releases](https://github.com/ga626/codex-provider-switcher/releases/latest) 中的 Latest 为准。源码里的新功能不等于已经交付给安装用户。
+> 截图使用不连接网络的示例配置生成，不包含真实服务商、地址、密钥或本机资料。
 
-## 开始使用
+当前发布线仍处于 alpha 阶段。请以 [GitHub Releases](https://github.com/ga626/codex-provider-switcher/releases/latest) 的 Latest 为下载入口；源码分支中的功能不等于已经交付给安装用户。
+
+## 它适合谁
+
+- 你需要在多个兼容服务商之间切换，但不想手工编辑 Codex 配置文件。
+- 你希望切换前先确认地址、密钥和模型能完成一次真实的 Responses 请求。
+- 你希望每次写配置前都有恢复点，出问题时能回到上一次状态。
+
+## 一次安全切换怎么完成
+
+1. 在“服务商”中保存名称、接口地址、默认模型和 API 密钥。
+2. 运行“服务商可用性测试”。它会用当前模型发送一笔短时、已认证的 Responses 请求。
+3. 测试通过后，应用才会开放“切换”按钮。切换前会自动创建恢复点。
+4. 关闭当前 Codex 会话，打开一个新会话确认实际工作正常；需要回退时，使用应用中的恢复入口。
+
+这项测试保证的是“当前地址、密钥和模型能完成最小真实请求”。它不能替代长上下文、工具调用或你自己的实际工作验收。
+
+## 你会得到什么
+
+| 能力 | 实际作用 |
+| --- | --- |
+| 服务商目录 | 保存多个 provider 配置，密钥不以明文留在本工具目录中。 |
+| 模型目录 | 从服务商读取可见模型，避免把某个固定模型名当作通用默认值。 |
+| 可用性测试 | 用当前模型发送短时 Responses 请求；认证、额度、模型、路径和网络问题会给出可理解的结果。 |
+| 安全切换 | 未通过测试不写 Codex 配置；通过后先备份，再更新 `config.toml` 和 `auth.json`。 |
+| 恢复与时间线 | 保留本工具创建的恢复点和不含凭据内容的活动记录。 |
+| 更新 | 已发布版本可检查 GitHub Release 中的签名更新；用户不需要私钥、口令或发布配置。 |
+
+## 安装与更新
 
 1. 打开 [最新发布版](https://github.com/ga626/codex-provider-switcher/releases/latest)。
-2. 下载名称带有 `setup.exe` 的 Windows 安装包和对应的 `.sha256` 文件。
-3. 安装后从开始菜单或桌面图标启动 `CodeX Provider Switcher`。
+2. 下载名称带 `setup.exe` 的 Windows 安装包及同名 `.sha256` 文件。
+3. 从开始菜单或桌面图标启动 `CodeX Provider Switcher`。
 
-完整步骤、更新与卸载说明见 [安装与更新](docs/user/installation.zh.md)。遇到问题先看 [排错指南](docs/user/troubleshooting.zh.md)。
+正常入口只打开一个应用窗口：不需要浏览器、不需要输入端口、不应留下 CMD 窗口。完整的安装、升级和卸载说明在 [安装与更新](docs/user/installation.zh.md)。
 
-## 它会做什么
+## 数据和安全边界
 
-- 保存多个 provider 目录，并从服务商读取可见模型目录。
-- 在写入 Codex 配置前显示影响范围，创建恢复点，并保留时间线。
-- 让你主动运行短时可用性测试；测试结果不会替代你在 Codex 中的真实使用判断。
-- 恢复本工具创建的最近备份，避免为了回滚手工覆盖配置。
+- provider API key 与本工具创建的敏感恢复副本使用当前 Windows 用户的 DPAPI 保护。
+- 应用写入前会创建备份；不要用它在正在工作的同一个 Codex 会话中做最终 provider 切换。
+- 不要把 `%LOCALAPPDATA%\CodeX Provider Switcher` 中的 profiles、备份或日志发送到公开 Issue。
+- 应用不提供默认开机自启、托盘常驻或后台 daemon；关闭窗口即退出。
+- 应用内更新签名和 Windows 代码签名是两条不同的安全链路。每个版本是否已经完成完整交付，以对应 Release 页面和版本说明为准。
 
-## 数据与安全边界
+## 常见问题
 
-- provider API key 和本工具创建的敏感恢复副本使用当前 Windows 用户的 DPAPI 保护。
-- 不要把 `%LOCALAPPDATA%\CodeX Provider Switcher` 中的资料复制给其他 Windows 用户，也不要把真实 `auth.json`、`profiles.json`、备份或日志提交到公开仓库。
-- 本工具写入前必须先创建备份；最终 provider 切换应在新的 Codex 会话中完成，不能在正在工作的会话里直接执行。
-- 应用内“检查更新”只验证发布包，不会要求你输入发布密钥或口令。
+### 为什么测试通过了，仍要在新 Codex 会话里确认？
 
-## 版本状态
+测试只做最小真实请求，用来避免把明显不可用的配置写进去。实际工作还会受到上下文长度、工具调用、服务商策略和网络状态影响，所以最终确认必须在新会话完成。
 
-这里区分三件不同的事：
+### 为什么服务商余额不足时不能切换？
 
-| 状态 | 含义 |
-| --- | --- |
-| 开发中 | 当前源码树正在变化，只用于开发验证 |
-| 代码已合并 | 改动已进入 `main`，但可能还没有发布包 |
-| 产品已交付 | 新 tag 和 GitHub Release 已创建，并完成下载、安装、启动与更新验收 |
+因为这代表当前密钥无法完成真实请求。继续写入该配置只会让 Codex 在切换后立即不可用。补足额度或配额后重新测试即可。
 
-只有第三种状态才表示安装用户可以获得更新。每个版本的用户变化可在 [变更记录](CHANGELOG.md) 和对应 Release 页面查看。
+### 旧切换工具什么时候可以停？
 
-## 需要帮助或参与
+先完成新版本下载、安装、启动、更新和真实服务商验收；再在新的 Codex 会话中运行只读交接预检并完成一次新工具切换。通过后才停止旧工具，旧目录先保留作回滚参考。详细条件见 [旧工具替换手册](docs/maintainers/legacy-cutover.zh.md)。
 
-- 使用问题：先看 [排错指南](docs/user/troubleshooting.zh.md)，再通过 [Issue](https://github.com/ga626/codex-provider-switcher/issues) 提供脱敏信息。
-- 安全问题：见 [安全说明](https://github.com/ga626/codex-provider-switcher/blob/main/SECURITY.md)，不要在公开 Issue 中贴凭据或完整配置。
-- 参与开发：见 [贡献说明](https://github.com/ga626/codex-provider-switcher/blob/main/CONTRIBUTING.md)。
-- 全部文档：从 [文档导航](https://github.com/ga626/codex-provider-switcher/tree/main/docs) 开始。
+### 遇到问题怎么办？
 
-## 开发者入口
+先查看 [排错指南](docs/user/troubleshooting.zh.md)。提交 Issue 时只提供版本、操作步骤、脱敏错误摘要和时间，不要提交密钥、完整配置、profiles、备份或私有截图。
 
-仓库开发、验证、发布和脚本资料与使用说明分开维护。开发者请从 [贡献说明](https://github.com/ga626/codex-provider-switcher/blob/main/CONTRIBUTING.md) 开始；发布维护者请看 [发布与交付手册](https://github.com/ga626/codex-provider-switcher/blob/main/docs/maintainers/release-and-delivery.zh.md)。
+## 文档与参与
+
+- 使用软件：[安装、更新与卸载](docs/user/installation.zh.md) / [排错指南](docs/user/troubleshooting.zh.md)
+- 了解边界：[产品规格](docs/reference/product-spec.zh.md) / [安全说明](SECURITY.md)
+- 参与开发：[贡献说明](CONTRIBUTING.md) / [开发与 PR 指南](docs/contributing/development-and-prs.zh.md)
+- 维护发布：[发布与交付手册](docs/maintainers/release-and-delivery.zh.md) / [依赖与安全治理](docs/maintainers/dependency-security.zh.md)
+- 查看历史：[变更记录](CHANGELOG.md) / [Release 页面](https://github.com/ga626/codex-provider-switcher/releases)
+
+维护者：本项目由仓库维护者和贡献者共同维护。安全问题请按 [SECURITY.md](SECURITY.md) 的私密路径报告。

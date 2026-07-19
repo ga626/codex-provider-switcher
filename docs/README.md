@@ -16,6 +16,7 @@
 ## 我负责发布或仓库维护
 
 - [发布与交付手册](maintainers/release-and-delivery.zh.md)
+- [旧工具替换手册](maintainers/legacy-cutover.zh.md)
 - [依赖与安全治理](maintainers/dependency-security.zh.md)
 - [发布说明](release/)
 
