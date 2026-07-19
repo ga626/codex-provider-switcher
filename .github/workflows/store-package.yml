@@ -1,0 +1,117 @@
+name: Microsoft Store package
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/store-package.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'scripts/release/build-store-msix.ps1'
+      - 'scripts/verify/store-package.ps1'
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to package for Microsoft Store"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+concurrency:
+  group: store-package-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Build unsigned MSIX for Partner Center
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || env.RELEASE_TAG }}
+
+      - name: Verify tag and product version
+        id: version
+        shell: pwsh
+        run: |
+          $package = Get-Content -Raw -LiteralPath 'package.json' | ConvertFrom-Json
+          $version = [string]$package.version
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw 'package.json version is empty.'
+          }
+          if ('${{ github.event_name }}' -ne 'pull_request') {
+            $tagVersion = $env:RELEASE_TAG -replace '^v', ''
+            if ($env:RELEASE_TAG -notmatch '^v' -or [string]::IsNullOrWhiteSpace($tagVersion)) {
+              throw "Release tag must start with v. Received: $env:RELEASE_TAG"
+            }
+            if ($version -ne $tagVersion) {
+              throw "package.json version does not match tag: $version != $tagVersion"
+            }
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust and Tauri build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install WinApp CLI
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'winappcli-x64.zip'
+          $toolRoot = Join-Path $env:RUNNER_TEMP 'WinAppCLI'
+          Invoke-WebRequest -Uri 'https://github.com/microsoft/WinAppCli/releases/download/v0.4.0/winappcli-x64.zip' -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $toolRoot -Force
+          $winapp = Get-ChildItem -LiteralPath $toolRoot -Recurse -File -Filter 'winapp.exe' | Select-Object -First 1
+          if (-not $winapp) { throw 'WinApp CLI archive did not contain winapp.exe.' }
+          $winapp.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $winapp.FullName --version
+
+      - name: Verify Store manifest and version mapping
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: npm run store:verify-package -- -Version $env:RELEASE_VERSION
+
+      - name: Build unsigned Store MSIX
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: npm run store:build-msix -- -Version $env:RELEASE_VERSION -Apply
+
+      - name: Verify generated Store MSIX
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: npm run store:verify-package -- -Version $env:RELEASE_VERSION -PackagePath "store-assets/CodeXProviderSwitcher-windows-x64-$env:RELEASE_VERSION.msix"
+
+      - name: Upload Partner Center package
+        uses: actions/upload-artifact@v4
+        with:
+          name: microsoft-store-msix-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || env.RELEASE_TAG }}
+          path: store-assets/*.msix
+          if-no-files-found: error
+          retention-days: 14

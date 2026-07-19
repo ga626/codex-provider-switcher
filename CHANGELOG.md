@@ -1,12 +1,14 @@
 # 变更记录
 
-这里记录已合并版本线的用户可见变化。是否已经可下载安装，以 [GitHub Releases](https://github.com/ga626/codex-provider-switcher/releases/latest) 为准。
+这里记录已合并版本线的用户可见变化。是否已经可下载安装，以对应版本的发布说明和实际用户渠道为准。
 
 ## 未发布
 
 - 仓库与文档产品化：使用者、贡献者、发布维护者和历史资料分层；新增发布就绪检查和依赖风险登记。
 - 服务商可用性测试成为切换门槛：只有当前地址、模型和密钥通过真实短请求，才会写入 Codex 配置；同步模型或保存配置会使旧测试失效。
 - 新增旧工具替换手册与更完整的只读交接预检，公开 README 改为面向使用者的产品首页，并使用无敏感示例截图。
+- 新增 Microsoft Store MSIX 打包、身份校验和 tag 触发的构建 artifact；Store 安装版不加载 GitHub updater，更新由 Store 管理。
+- GitHub setup 改为受控直装备用渠道；它不再因 Store 发布 tag 自动触发，仍要求 updater 和 Windows Authenticode 双签名。
 
 ## 0.6.0-alpha - 2026-07-18
 

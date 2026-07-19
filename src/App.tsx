@@ -26,6 +26,7 @@ import './App.css'
 import {
   deleteProfile,
   checkForUpdate,
+  isStoreManagedBuild,
   loadState,
   openUpdate,
   refreshModels,
@@ -380,6 +381,20 @@ function App() {
   }
 
   async function handleUpdate() {
+    if (isStoreManagedBuild) {
+      setUpdateBusy(true)
+      try {
+        const next = await checkForUpdate()
+        setUpdateInfo(next)
+        await openUpdate(next.releaseUrl)
+        setError(null)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '无法打开 Microsoft Store。')
+      } finally {
+        setUpdateBusy(false)
+      }
+      return
+    }
     if (updateInfo?.available) {
       try {
         await openUpdate(updateInfo.downloadUrl ?? updateInfo.releaseUrl)
@@ -442,6 +457,8 @@ function App() {
   const switchCardState = selectedIsCurrent ? 'current' : hasUnsavedChanges || requiredFailures > 0 ? 'blocked' : 'ready'
   const updateLabel = updateBusy
     ? '正在检查'
+    : isStoreManagedBuild
+      ? '在 Store 检查更新'
     : updateInfo?.available
       ? `下载 v${updateInfo.latestVersion}`
       : updateInfo
@@ -464,11 +481,11 @@ function App() {
             type="button"
             onClick={handleUpdate}
             disabled={updateBusy}
-            title={updateInfo?.available ? `下载 ${updateInfo.latestVersion} 安装包` : '检查 GitHub Release 更新'}
+            title={isStoreManagedBuild ? '在 Microsoft Store 中检查更新' : updateInfo?.available ? `下载 ${updateInfo.latestVersion} 安装包` : '检查 GitHub Release 更新'}
           >
             {updateBusy
               ? <RefreshCcw className="spin" size={15} />
-              : updateInfo && !updateInfo.available
+              : updateInfo && !updateInfo.available && !isStoreManagedBuild
                 ? <CheckCircle2 size={15} />
                 : <Download size={15} />}
             {updateLabel}

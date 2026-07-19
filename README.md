@@ -6,7 +6,7 @@
 
 > 截图使用不连接网络的示例配置生成，不包含真实服务商、地址、密钥或本机资料。
 
-当前发布线仍处于 alpha 阶段。请以 [GitHub Releases](https://github.com/ga626/codex-provider-switcher/releases/latest) 的 Latest 为下载入口；源码分支中的功能不等于已经交付给安装用户。
+当前发布线仍处于 alpha 阶段。Microsoft Store 是下一次正式发布的优先渠道，但首个 Store 版本尚未通过认证；在此之前，请继续以 [GitHub Releases](https://github.com/ga626/codex-provider-switcher/releases/latest) 的 Latest 为下载入口。源码分支中的功能不等于已经交付给安装用户。
 
 ## 它适合谁
 
@@ -32,7 +32,7 @@
 | 可用性测试 | 用当前模型发送短时 Responses 请求；认证、额度、模型、路径和网络问题会给出可理解的结果。 |
 | 安全切换 | 未通过测试不写 Codex 配置；通过后先备份，再更新 `config.toml` 和 `auth.json`。 |
 | 恢复与时间线 | 保留本工具创建的恢复点和不含凭据内容的活动记录。 |
-| 更新 | 已发布版本可检查 GitHub Release 中的签名更新；用户不需要私钥、口令或发布配置。 |
+| 更新 | 当前 GitHub 安装版可检查签名更新；首个 Store 版本认证后，Store 安装版将由 Microsoft Store 管理更新。用户不需要私钥、口令或发布配置。 |
 
 ## 安装与更新
 
@@ -48,7 +48,7 @@
 - 应用写入前会创建备份；不要用它在正在工作的同一个 Codex 会话中做最终 provider 切换。
 - 不要把 `%LOCALAPPDATA%\CodeX Provider Switcher` 中的 profiles、备份或日志发送到公开 Issue。
 - 应用不提供默认开机自启、托盘常驻或后台 daemon；关闭窗口即退出。
-- 应用内更新签名和 Windows 代码签名是两条不同的安全链路。每个版本是否已经完成完整交付，以对应 Release 页面和版本说明为准。
+- 当前 GitHub 安装版的 updater 签名与 Windows 代码签名是两条独立安全链路。首个 Store 版本认证后，Store 的包签名和更新将由 Microsoft Store 管理。每个版本是否已经完成完整交付，以对应渠道的版本说明为准。
 
 ## 常见问题
 

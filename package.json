@@ -1,7 +1,7 @@
 {
   "name": "codex-provider-switcher",
   "private": true,
-  "version": "0.6.0-alpha",
+  "version": "0.7.0-alpha",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -31,6 +31,8 @@
     "release:verify-upload-assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-release-upload-assets.ps1",
     "release:verify-remote": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-github-release-asset.ps1 -RemoteStructureOnly",
     "release:assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/generate-installer-assets.ps1",
+    "store:build-msix": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/build-store-msix.ps1",
+    "store:verify-package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/store-package.ps1",
     "tauri:dev": "powershell -NoProfile -Command \"$env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL='development'; $env:CARGO_BUILD_JOBS='1'; npx tauri dev\"",
     "tauri:build": "npm run release:assets && tauri build"
   },

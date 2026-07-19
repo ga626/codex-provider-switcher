@@ -24,6 +24,6 @@
 
 ## 发布边界
 
-发布包优先级是桌面 setup、fallback Web zip、开发预览。自动更新的 updater 签名与 Windows Authenticode 是不同的安全边界。发布必须使用新版本/tag，不覆盖既有不可变 Release；只有 GitHub 下载、安装、启动和更新路径验证完成后，才能称为产品已交付。
+发布包的目标优先级是经 Microsoft Store 认证的 MSIX、受控 GitHub 直装 setup、fallback Web zip、开发预览。首个 Store 版本认证前，当前交付仍是 GitHub setup，文档不得提前把 Store 页面写成可下载入口。Store 版本由 Microsoft Store 签名和更新，GitHub 直装版的 updater 签名与 Windows Authenticode 是另一条独立边界。发布必须使用新版本/tag，不覆盖既有不可变 Release；只有 Store 认证完成并从 Store 安装、启动和检查更新后，才能称为 Store 产品已交付。
 
 实现和验证细节见 [开发与 PR 指南](../contributing/development-and-prs.zh.md)、[发布与交付手册](../maintainers/release-and-delivery.zh.md) 与 [旧工具替换手册](../maintainers/legacy-cutover.zh.md)。

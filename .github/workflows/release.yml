@@ -1,13 +1,10 @@
-name: Release
+name: GitHub direct-install fallback
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing version tag to verify or publish"
+        description: "Existing version tag for the signed GitHub fallback"
         required: true
         type: string
 
@@ -17,7 +14,7 @@ permissions:
   security-events: read
 
 env:
-  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  RELEASE_TAG: ${{ inputs.tag }}
 
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -43,7 +40,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify\release-readiness.ps1 -Tag $env:RELEASE_TAG -SkipRepositorySettings
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify\release-readiness.ps1 -Channel github-direct -Tag $env:RELEASE_TAG -SkipRepositorySettings
 
       - name: Validate tag and version metadata
         id: identity
