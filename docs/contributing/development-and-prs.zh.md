@@ -41,6 +41,8 @@ git diff --check
 
 `release:readiness` 默认按 Microsoft Store 渠道检查，不读取 Secret 值，也不会创建 Release 或 Store 提交。发布影响 PR 必须在 PR 描述的“发布计划/后续动作”中记录它的结论：Store 包构建完成不等于已交付，必须等 Partner Center 认证和 Store 安装验收。只有 GitHub 直装备用渠道才需要可信 Windows 代码签名凭据；用 `-Channel github-direct` 检查。
 
+涉及 Store 打包文件时，创建 PR 后必须等待 `Microsoft Store package` 检查通过。该检查只构建临时 artifact，既不上传 Partner Center，也不发布给用户。
+
 本机 Tauri 开发版启动会固定使用单任务 Cargo 构建，避免 Windows 上并行全量编译占满内存：
 
 ```powershell

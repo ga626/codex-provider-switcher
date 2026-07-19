@@ -35,7 +35,7 @@ npm run release:readiness
 3. 确认 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 版本一致。
 4. 写用户能看懂的 `docs/release/release-notes-<version>.md`。
 5. 创建新 `v<version>` tag 并推送。不要覆盖旧 tag。
-6. 等待 `Microsoft Store package` workflow 生成 MSIX artifact。它只打包，不会替你创建提交、上传或发布。
+6. PR 阶段的 `Microsoft Store package` 已先构建临时 MSIX artifact；tag 后再等待同一 workflow 生成用于 Partner Center 的 MSIX artifact。它只打包，不会替你创建提交、上传或发布。
 7. 从 workflow artifact 下载 MSIX，在 Partner Center 对 Store ID `9P7PGV62WKK6` 创建提交并上传。Microsoft Store 会在提交后签名，不需要把 PFX、私钥或口令放入本机或仓库。
 8. 填完 Store 必需的商店资料，提交认证。认证通过后，从 [Microsoft Store 产品页](https://apps.microsoft.com/detail/9P7PGV62WKK6) 按普通用户路径安装、启动，并在应用中打开“在 Store 检查更新”。
 9. 确认新版本和数据保留后，才标记“产品已交付”。若这次要替换旧工具，继续在新的 Codex 会话按 [旧工具替换手册](legacy-cutover.zh.md) 完成受控交接。

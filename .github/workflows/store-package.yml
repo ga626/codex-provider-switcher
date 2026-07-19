@@ -1,6 +1,15 @@
 name: Microsoft Store package
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/store-package.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'scripts/release/build-store-msix.ps1'
+      - 'scripts/verify/store-package.ps1'
   push:
     tags:
       - "v*"
@@ -30,19 +39,25 @@ jobs:
       - name: Checkout tagged commit
         uses: actions/checkout@v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || env.RELEASE_TAG }}
 
       - name: Verify tag and product version
         id: version
         shell: pwsh
         run: |
-          $version = $env:RELEASE_TAG -replace '^v', ''
-          if ($env:RELEASE_TAG -notmatch '^v' -or [string]::IsNullOrWhiteSpace($version)) {
-            throw "Release tag must start with v. Received: $env:RELEASE_TAG"
-          }
           $package = Get-Content -Raw -LiteralPath 'package.json' | ConvertFrom-Json
-          if ($package.version -ne $version) {
-            throw "package.json version does not match tag: $($package.version) != $version"
+          $version = [string]$package.version
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw 'package.json version is empty.'
+          }
+          if ('${{ github.event_name }}' -ne 'pull_request') {
+            $tagVersion = $env:RELEASE_TAG -replace '^v', ''
+            if ($env:RELEASE_TAG -notmatch '^v' -or [string]::IsNullOrWhiteSpace($tagVersion)) {
+              throw "Release tag must start with v. Received: $env:RELEASE_TAG"
+            }
+            if ($version -ne $tagVersion) {
+              throw "package.json version does not match tag: $version != $tagVersion"
+            }
           }
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
@@ -96,7 +111,7 @@ jobs:
       - name: Upload Partner Center package
         uses: actions/upload-artifact@v4
         with:
-          name: microsoft-store-msix-${{ env.RELEASE_TAG }}
+          name: microsoft-store-msix-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || env.RELEASE_TAG }}
           path: store-assets/*.msix
           if-no-files-found: error
           retention-days: 14
