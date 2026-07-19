@@ -7,7 +7,7 @@
 ## 主要改动
 
 - 新增 Store MSIX 清单，绑定 Partner Center 已分配的应用身份、发布者和 Store ID。
-- 产品 SemVer 会映射为四段 MSIX 版本；无法映射或版本来源不一致时停止构建。
+- 产品 SemVer 会映射为四段 MSIX 版本，且 Microsoft Store 要求最后的 revision 固定为 `0`；预发布标签保留在产品/tag 版本中，每次新的 Store 候选包必须提高前三段之一。无法映射或版本来源不一致时停止构建。
 - 新增 tag 触发的 `Microsoft Store package` workflow，构建 MSIX 并作为 Actions artifact 交给维护者上传 Partner Center；它不会自行创建提交或发布商店版本。
 - Store 渠道编译时不初始化 GitHub updater，应用中的更新入口会打开对应的 Microsoft Store 页面。
 - GitHub 直装 workflow 改为手动运行，继续要求 updater 签名和 Windows Authenticode 签名，避免没有商业证书时阻塞 Store 发布。

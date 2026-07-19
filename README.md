@@ -71,6 +71,7 @@
 ## 文档与参与
 
 - 使用软件：[安装、更新与卸载](docs/user/installation.zh.md) / [排错指南](docs/user/troubleshooting.zh.md)
+- 隐私与支持：[隐私政策](docs/user/privacy-policy.zh.md) / [获取帮助](SUPPORT.md)
 - 了解边界：[产品规格](docs/reference/product-spec.zh.md) / [安全说明](SECURITY.md)
 - 参与开发：[贡献说明](CONTRIBUTING.md) / [开发与 PR 指南](docs/contributing/development-and-prs.zh.md)
 - 维护发布：[发布与交付手册](docs/maintainers/release-and-delivery.zh.md) / [依赖与安全治理](docs/maintainers/dependency-security.zh.md)
