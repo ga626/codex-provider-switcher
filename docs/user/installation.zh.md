@@ -13,7 +13,7 @@
 
 ## 第一次使用
 
-首次保存或切换前，确认应用界面已经展示目标 provider、模型和会影响的文件。先运行“服务商可用性测试”：它会用当前模型发送一次短时、已认证的 Responses 请求。只有测试通过，应用才会允许切换并创建恢复点；不要为了测试而手工覆盖 Codex 的 `config.toml` 或 `auth.json`。
+新安装的服务商列表为空，不会附带任何其他人的接口地址、模型或 API 密钥。先新增并保存你自己的 provider，再运行“服务商可用性测试”：它会用当前模型发送一次短时、已认证的 Responses 请求。只有测试通过，应用才会允许切换并创建恢复点；不要为了测试而手工覆盖 Codex 的 `config.toml` 或 `auth.json`。
 
 最终 provider 切换应在新的 Codex 会话中完成。不要在正在使用的同一会话里切换当前 provider。
 
@@ -27,7 +27,7 @@
 
 ## 卸载与数据保留
 
-卸载会移除程序文件，但不会自动删除 `%LOCALAPPDATA%\CodeX Provider Switcher` 中的 provider 目录、备份和本地状态。这是为了让重新安装或升级后仍能恢复。
+升级和卸载只会替换或移除程序文件，不会自动删除 `%LOCALAPPDATA%\CodeX Provider Switcher` 中的 provider 目录、备份和本地状态。这是为了让受控升级、重新安装后仍能恢复。保存的 API 密钥使用当前 Windows 用户的凭据保护，不会以明文保存在该目录。
 
 如果你确实要清空数据，请先在应用中确认恢复点或自行备份，再手动删除该目录。不要把其中的文件发送到公开 Issue。
 
@@ -39,4 +39,4 @@
 npm run qa:dev-desktop
 ```
 
-它不会安装、卸载或升级稳定版。只有安装器、版本、启动入口、更新或 Release 资产变更时，才需要进行安装发布验收。开发方式见仓库中的 [开发与 PR 指南](https://github.com/ga626/codex-provider-switcher/blob/main/docs/contributing/development-and-prs.zh.md)。
+它会构建并直接打开当前源码的桌面候选，但不会安装、卸载或升级稳定版。只有安装器、版本、启动入口、更新或 Release 资产变更时，才需要进行安装发布验收。开发方式见仓库中的 [开发与 PR 指南](https://github.com/ga626/codex-provider-switcher/blob/main/docs/contributing/development-and-prs.zh.md)。

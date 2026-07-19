@@ -224,6 +224,7 @@ function App() {
   const [restoreConfirm, setRestoreConfirm] = useState<BackupItem | null>(null)
   const [manualModelConfirm, setManualModelConfirm] = useState<string | null>(null)
   const [syncConfirm, setSyncConfirm] = useState(false)
+  const [restartNotice, setRestartNotice] = useState(false)
 
   useEffect(() => {
     async function loadInitialState() {
@@ -292,7 +293,6 @@ function App() {
       requiredFailures === 0 &&
       busy === null
   )
-
   function updateDraft<K extends keyof EditableProfile>(key: K, value: EditableProfile[K]) {
     setDraft((current) => ({ ...current, [key]: value }))
   }
@@ -306,6 +306,9 @@ function App() {
       if (selected) {
         setSelectedId(selected.id)
         setDraft(toEditable(selected))
+      }
+      if (label === 'switch') {
+        setRestartNotice(true)
       }
       setError(null)
     } catch (err) {
@@ -450,11 +453,11 @@ function App() {
   const navItems: Array<{ id: ViewId; label: string; note: string; icon: React.ReactNode }> = [
     { id: 'providers', label: '服务商', note: `${state.profiles.length} 个配置`, icon: <LayoutDashboard size={17} /> },
     { id: 'models', label: '模型目录', note: selectedModelCatalog?.status === 'ok' ? '已同步' : '待刷新', icon: <Boxes size={17} /> },
-    { id: 'safety', label: '安全检查', note: hasUnsavedChanges ? '请先保存' : requiredFailures === 0 ? '可以切换' : `${requiredFailures} 个待处理`, icon: <ShieldCheck size={17} /> },
+    { id: 'safety', label: '安全检查', note: !selectedProfile ? '先新增服务商' : hasUnsavedChanges ? '请先保存' : requiredFailures === 0 ? '可以切换' : `${requiredFailures} 个待处理`, icon: <ShieldCheck size={17} /> },
     { id: 'timeline', label: '活动记录', note: latestActivity?.time ?? '暂无记录', icon: <Activity size={17} /> },
   ]
   const selectedIsCurrent = Boolean(selectedProfile?.active)
-  const switchCardState = selectedIsCurrent ? 'current' : hasUnsavedChanges || requiredFailures > 0 ? 'blocked' : 'ready'
+  const switchCardState = selectedIsCurrent ? 'current' : !selectedProfile || hasUnsavedChanges || requiredFailures > 0 ? 'blocked' : 'ready'
   const updateLabel = updateBusy
     ? '正在检查'
     : isStoreManagedBuild
@@ -664,7 +667,9 @@ function App() {
                 <span>
                   {selectedIsCurrent
                     ? '当前连接'
-                    : hasUnsavedChanges
+                    : !selectedProfile
+                      ? '请先新增服务商'
+                      : hasUnsavedChanges
                       ? '请先保存更改'
                     : requiredFailures === 0
                       ? '安全检查已通过'
@@ -674,7 +679,9 @@ function App() {
               <strong>
                 {selectedIsCurrent
                   ? '当前已启用'
-                  : hasUnsavedChanges
+                  : !selectedProfile
+                    ? '尚未创建服务商'
+                    : hasUnsavedChanges
                     ? '尚未保存'
                   : requiredFailures === 0
                     ? '可以切换'
@@ -683,7 +690,9 @@ function App() {
               <p>
                 {selectedIsCurrent
                   ? '选择其他连接后可执行切换。'
-                  : hasUnsavedChanges
+                  : !selectedProfile
+                    ? '填写并保存自己的服务商配置后，再运行可用性测试。'
+                    : hasUnsavedChanges
                     ? '保存后需要运行真实服务商检查。'
                   : requiredFailures === 0
                     ? '切换前会自动生成恢复点。'
@@ -697,7 +706,7 @@ function App() {
               disabled={!canSwitch}
             >
               <PlugZap size={16} />
-              {selectedIsCurrent ? '当前使用中' : `切换到 ${selectedProfile?.name ?? '此服务商'}`}
+              {selectedIsCurrent ? '当前使用中' : selectedProfile ? `切换到 ${selectedProfile.name}` : '先新增服务商'}
             </button>
           </div>
 
@@ -745,6 +754,7 @@ function App() {
           }}
         />
       )}
+      {restartNotice && <RestartCodexNoticeDialog onClose={() => setRestartNotice(false)} />}
     </main>
   )
 }
@@ -771,7 +781,7 @@ function WorkspaceHeader({
     },
     safety: {
       title: '安全检查',
-      note: requiredFailures === 0 ? '当前配置满足切换前置条件。' : '还有必填检查未通过。',
+      note: !selectedProfile ? '先新增并保存自己的服务商配置。' : requiredFailures === 0 ? '当前配置满足切换前置条件。' : '还有必填检查未通过。',
     },
     timeline: {
       title: '活动记录',
@@ -785,10 +795,28 @@ function WorkspaceHeader({
         <h2>{copy[activeView].title}</h2>
         <p>{copy[activeView].note}</p>
       </div>
-      <span className={`workspace-badge ${requiredFailures === 0 ? 'ok' : 'warning'}`}>
-        {requiredFailures === 0 ? '安全门禁通过' : `${requiredFailures} 个阻断项`}
+      <span className={`workspace-badge ${selectedProfile && requiredFailures === 0 ? 'ok' : 'warning'}`}>
+        {!selectedProfile ? '先新增服务商' : requiredFailures === 0 ? '安全门禁通过' : `${requiredFailures} 个阻断项`}
       </span>
     </header>
+  )
+}
+
+function RestartCodexNoticeDialog({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="confirm-backdrop" role="presentation">
+      <section className="confirm-dialog restart-notice-dialog" role="dialog" aria-modal="true" aria-labelledby="restart-notice-title">
+        <div className="confirm-dialog-icon"><RotateCcw size={20} /></div>
+        <div>
+          <span className="eyebrow">切换已完成</span>
+          <h2 id="restart-notice-title">请重新打开 Codex</h2>
+          <p>新配置已经写入并创建了恢复点，但当前正在运行的 Codex 或 ChatGPT 桌面端中的 Codex 会话不会自动切换。请关闭当前会话后重新打开，再确认实际工作正常。</p>
+        </div>
+        <div className="command-row">
+          <button className="primary-button" type="button" onClick={onClose}>我知道了</button>
+        </div>
+      </section>
+    </div>
   )
 }
 
@@ -1101,7 +1129,7 @@ function SafetyWorkspace({
           disabled={!selectedProfile || hasUnsavedChanges || busy !== null}
         >
           <ShieldCheck size={16} />
-          {hasUnsavedChanges ? '请先保存更改' : '运行可用性测试'}
+          {!selectedProfile ? '先新增服务商' : hasUnsavedChanges ? '请先保存更改' : '运行可用性测试'}
         </button>
       </section>
       <section className="surface-panel">

@@ -43,7 +43,7 @@ git diff --check
 
 涉及 Store 打包文件时，创建 PR 后必须等待 `Microsoft Store package` 检查通过。该检查只构建临时 artifact，既不上传 Partner Center，也不发布给用户。
 
-本机 Tauri 开发版启动会固定使用单任务 Cargo 构建，避免 Windows 上并行全量编译占满内存：
+开发版验收会固定使用单任务 Cargo 构建当前源码的未安装桌面候选，再直接打开它；它不覆盖日常桌面入口，也不依赖页面文件敏感的热重编译。需要热重载时，开发者仍可手动运行 `npm run tauri:dev`：
 
 ```powershell
 npm run qa:dev-desktop
@@ -74,3 +74,12 @@ npm run qa:dev-desktop
 PR 前应确认工作区干净、目标分支最新、文档已同步、无冲突标记、测试通过、用户会经过的路径可运行。创建 PR 后，GitHub 的 `validate` 是该分支的权威云端验证；不要额外等待重复的功能分支 push CI。
 
 发布影响 PR 合并后仍不是交付完成。Store 路线必须在最新主线创建新 tag、生成 MSIX、完成 Partner Center 认证，再从 Store 安装、启动和验证；GitHub 直装备用路线才需要不可变 Release 与 setup 验收。任何一步被签名、版本、权限、认证或安全告警阻断时，只能写“代码已合并，产品未交付”。需要替换旧工具时，继续按 [旧工具替换手册](../maintainers/legacy-cutover.zh.md) 在新的 Codex 会话完成，不得在当前开发会话直接停用旧工具。
+
+## 合并后的本机候选更新
+
+当 Store 认证或正式发布尚未完成，但维护者固定桌面入口需要跟随已经合并、验证通过的修复时，使用本机候选安装。它不是公开发布，也不修改正在审核的 Store 包：
+
+1. 等待 `main` CI 成功，切到干净的最新 `main`。
+2. 运行 `npm run qa:refresh-local-candidate -- -Apply`；该脚本构建当前主线、替换 `D:\Software\CodeX Provider Switcher` 的程序文件，并写入不含凭据的 `candidate-install-state.json`。
+3. 若需要从旧版恢复本机 profile，在同一受控操作中传入旧版文件路径：`npm run qa:refresh-local-candidate -- -Apply -LegacyProfilesPath "<旧工具 profiles.json 的本机路径>"`。恢复只填补空凭据、先保存 DPAPI 保护副本、不写回旧文件，并要求重新运行可用性测试。
+4. 启动候选安装并确认版本、单窗口、无 CMD、用户资料保留和受影响功能。Store 发布后仍须从 Store 实际安装并再次验收，候选安装不能替代这一步。

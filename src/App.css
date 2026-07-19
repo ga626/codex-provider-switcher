@@ -952,6 +952,11 @@ textarea {
   border-radius: 7px;
 }
 
+.restart-notice-dialog .confirm-dialog-icon {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .confirm-dialog h2 {
   margin: 3px 0 0;
   font-size: 18px;

@@ -40,6 +40,24 @@ npm run release:readiness
 8. 填完 Store 必需的商店资料，提交认证。认证通过后，从 [Microsoft Store 产品页](https://apps.microsoft.com/detail/9P7PGV62WKK6) 按普通用户路径安装、启动，并在应用中打开“在 Store 检查更新”。
 9. 确认新版本和数据保留后，才标记“产品已交付”。若这次要替换旧工具，继续在新的 Codex 会话按 [旧工具替换手册](legacy-cutover.zh.md) 完成受控交接。
 
+## Store 等待期的本机候选更新
+
+Store 审核可能需要数小时到数个工作日，但这不应让维护者固定桌面入口停留在已知有缺陷的旧版本。对于已经合并、主线 CI 成功且尚未发布到 Store 的发布影响修复，可以刷新本机候选安装：
+
+```powershell
+npm run qa:refresh-local-candidate -- -Apply
+```
+
+首个迁移如需从旧工具带回已有 profile，可在同一命令中加：
+
+```powershell
+npm run qa:refresh-local-candidate -- -Apply -LegacyProfilesPath "<旧工具 profiles.json 的本机路径>"
+```
+
+该命令只允许在干净 `main` 运行，写入 `D:\Software\CodeX Provider Switcher\candidate-install-state.json` 记录版本和 commit，且不会创建 tag、GitHub Release、Store 包或 Partner Center 提交。它只更新程序文件，保留 `%LOCALAPPDATA%\CodeX Provider Switcher` 中的用户资料。若本机存在旧工具 profile，恢复操作必须先备份并使用 DPAPI 保护导入结果；不得要求用户逐条重填密钥，也不得覆盖已保存的凭据。
+
+本机候选安装只用于维护者本人继续使用与验收，不能作为对外下载入口或“产品已交付”的证据。Store 发布后必须从 Store 安装并验收，再退役候选安装。
+
 ## GitHub 直装备用渠道
 
 GitHub setup 不是正式安装版的默认入口。只有确有受控排错或企业直装需要时，才从 Actions 页面手动运行 `GitHub direct-install fallback` workflow。该渠道同时需要四个 GitHub Actions Secrets：

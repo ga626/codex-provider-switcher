@@ -15,6 +15,13 @@ const exePath = join(
   'debug',
   process.platform === 'win32' ? 'local_backend.exe' : 'local_backend'
 )
+const recoveryExePath = join(
+  process.cwd(),
+  'src-tauri',
+  'target',
+  'debug',
+  process.platform === 'win32' ? 'profile_recovery.exe' : 'profile_recovery'
+)
 const packageMetadata = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8'))
 const versionMatch = /^(\d+)\.(\d+)\.(\d+)(-.+)?$/.exec(packageMetadata.version)
 if (!versionMatch) throw new Error(`Unsupported package version for update fixture: ${packageMetadata.version}`)
@@ -69,6 +76,26 @@ async function expectApiFailure(path, body) {
   throw new Error(`${path} unexpectedly succeeded`)
 }
 
+async function runProfileRecovery(source, environment) {
+  const child = spawn(recoveryExePath, [source], {
+    cwd: process.cwd(),
+    env: environment,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  })
+  let stdout = ''
+  let stderr = ''
+  child.stdout.on('data', (chunk) => { stdout += chunk.toString() })
+  child.stderr.on('data', (chunk) => { stderr += chunk.toString() })
+  const code = await new Promise((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', resolve)
+  })
+  if (code !== 0) {
+    throw new Error(`profile recovery failed: ${stderr || stdout}`)
+  }
+}
+
 await mkdir(codexDir, { recursive: true })
 await mkdir(localAppData, { recursive: true })
 
@@ -90,6 +117,27 @@ const originalConfig = [
 const originalAuth = JSON.stringify({ OPENAI_API_KEY: 'baseline-key', preserved: 'yes' }, null, 2)
 await writeFile(configPath, originalConfig, 'utf8')
 await writeFile(authPath, originalAuth, 'utf8')
+const legacyProfilesPath = join(fixtureRoot, 'legacy-profiles.json')
+await writeFile(legacyProfilesPath, JSON.stringify({
+  profiles: {
+    owl: {
+      name: 'OWL',
+      base_url: 'https://api.owlai.tech/v1',
+      api_key: 'legacy-fixture-key',
+      model: 'reasoning-current',
+      default: true,
+    },
+  },
+}, null, 2), 'utf8')
+const runtimeEnv = {
+  ...process.env,
+  HOME: userHome,
+  USERPROFILE: userHome,
+  LOCALAPPDATA: localAppData,
+  CODEX_PROVIDER_SWITCHER_CODEX_HOME: codexDir,
+  CODEX_PROVIDER_SWITCHER_APP_DATA_DIR: join(localAppData, 'CodeX Provider Switcher'),
+  CODEX_PROVIDER_SWITCHER_RELEASES_API: `http://127.0.0.1:${providerPort}/releases`,
+}
 
 const providerServer = createServer((request, response) => {
   if (request.url === '/releases') {
@@ -198,15 +246,7 @@ await new Promise((resolve, reject) => {
 
 const backend = spawn(exePath, ['--port', String(backendPort)], {
   cwd: process.cwd(),
-  env: {
-    ...process.env,
-    HOME: userHome,
-    USERPROFILE: userHome,
-    LOCALAPPDATA: localAppData,
-    CODEX_PROVIDER_SWITCHER_CODEX_HOME: codexDir,
-    CODEX_PROVIDER_SWITCHER_APP_DATA_DIR: join(localAppData, 'CodeX Provider Switcher'),
-    CODEX_PROVIDER_SWITCHER_RELEASES_API: `http://127.0.0.1:${providerPort}/releases`,
-  },
+  env: runtimeEnv,
   stdio: ['ignore', 'pipe', 'pipe'],
   windowsHide: true,
 })
@@ -215,6 +255,32 @@ try {
   await waitForBackend()
   const initial = await api('/api/state')
   const initialActivityCount = initial.activity.length
+  assert(initial.profiles.length === 0, 'a new product install must not include a preconfigured provider')
+
+  await runProfileRecovery(legacyProfilesPath, runtimeEnv)
+  const recovered = await api('/api/state')
+  assert(recovered.profiles.find((item) => item.id === 'owl')?.hasApiKey, 'legacy credential recovery did not expose an available credential')
+  const recoveredProfiles = JSON.parse(await readFile(profilesPath, 'utf8'))
+  assert(recoveredProfiles.profiles.owl.api_key === '', 'legacy recovery persisted a plaintext API key field')
+  assert(
+    typeof recoveredProfiles.profiles.owl.api_key_protected === 'string' && recoveredProfiles.profiles.owl.api_key_protected.length > 20,
+    'legacy recovery did not protect the imported credential at rest'
+  )
+  const recoveryBackups = await readdir(join(localAppData, 'CodeX Provider Switcher', 'legacy-profile-imports'))
+  assert(recoveryBackups.some((name) => name.endsWith('.json.dpapi')), 'legacy recovery did not create a protected pre-import backup')
+  const protectedCredential = recoveredProfiles.profiles.owl.api_key_protected
+  await writeFile(legacyProfilesPath, JSON.stringify({
+    profiles: {
+      owl: {
+        name: 'OWL',
+        base_url: 'https://api.owlai.tech/v1',
+        api_key: 'replacement-fixture-key',
+      },
+    },
+  }, null, 2), 'utf8')
+  await runProfileRecovery(legacyProfilesPath, runtimeEnv)
+  const repeatedProfiles = JSON.parse(await readFile(profilesPath, 'utf8'))
+  assert(repeatedProfiles.profiles.owl.api_key_protected === protectedCredential, 'legacy recovery overwrote an existing protected credential')
 
   const update = await api('/api/update/check')
   assert(update.available, 'update check did not detect a newer semantic version')
@@ -390,6 +456,7 @@ try {
     isolationRoot: fixtureRoot,
     assertions: [
       'save persisted provider and activity',
+      'new product state starts with no provider, while the maintainer-only recovery binary fills only empty profiles, creates a protected pre-import backup, and never overwrites a protected credential',
       'profile keys and backup credential copies are DPAPI-protected at rest',
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models and deduplicated results',
