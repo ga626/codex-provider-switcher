@@ -226,6 +226,24 @@ struct StoredProfile {
     last_verification_provider_code: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct LegacyProfile {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    base_url: String,
+    #[serde(default)]
+    api_key: String,
+    #[serde(default)]
+    model: String,
+    #[serde(default = "default_reasoning")]
+    model_reasoning_effort: String,
+    #[serde(default)]
+    default: bool,
+    #[serde(default)]
+    note: String,
+}
+
 #[derive(Debug, Clone)]
 struct ProviderVerificationOutcome {
     verified: bool,
@@ -458,23 +476,9 @@ fn normalize_id(name: &str) -> String {
 }
 
 fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
-    let mut profiles = Map::new();
-    profiles.insert(
-        "owl".to_string(),
-        json!({
-            "name": "OWL",
-            "base_url": "https://api.owlai.tech/v1",
-            "api_key": "",
-            "model": "",
-            "model_reasoning_effort": "high",
-            "verified": false,
-            "default": true,
-            "note": "Default baseline."
-        }),
-    );
     Ok(StoredCatalog {
         version: default_version(),
-        profiles,
+        profiles: Map::new(),
         model_catalogs: Map::new(),
         auto_start: false,
         invariants: default_invariants(),
@@ -562,6 +566,178 @@ fn save_catalog(catalog: &StoredCatalog) -> Result<(), SwitcherError> {
     let text = serde_json::to_string_pretty(&persisted)?;
     fs::write(profiles_path()?, text)?;
     Ok(())
+}
+
+fn legacy_profile_entries(document: &str) -> Result<Vec<(String, LegacyProfile)>, SwitcherError> {
+    let root: Value = serde_json::from_str(document)?;
+    let profiles = root.get("profiles").unwrap_or(&root);
+    let entries = match profiles {
+        Value::Object(items) => items
+            .iter()
+            .map(|(id, value)| {
+                serde_json::from_value::<LegacyProfile>(value.clone())
+                    .map(|profile| (id.clone(), profile))
+                    .map_err(SwitcherError::from)
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        Value::Array(items) => items
+            .iter()
+            .map(|value| {
+                let profile = serde_json::from_value::<LegacyProfile>(value.clone())?;
+                Ok((normalize_id(&profile.name), profile))
+            })
+            .collect::<Result<Vec<_>, SwitcherError>>()?,
+        _ => {
+            return Err(SwitcherError::Message(
+                "旧版 profiles.json 的结构无法识别。".to_string(),
+            ));
+        }
+    };
+
+    if entries.is_empty() {
+        return Err(SwitcherError::Message(
+            "旧版 profiles.json 中没有可导入的服务商。".to_string(),
+        ));
+    }
+
+    Ok(entries)
+}
+
+fn legacy_profile_matches(
+    profile_id: &str,
+    profile: &StoredProfile,
+    legacy_id: &str,
+    legacy: &LegacyProfile,
+) -> bool {
+    profile_id == legacy_id
+        || normalize_id(&profile.name) == normalize_id(&legacy.name)
+        || (!profile.base_url.trim().is_empty()
+            && profile
+                .base_url
+                .trim()
+                .eq_ignore_ascii_case(legacy.base_url.trim()))
+}
+
+fn unique_profile_id(catalog: &StoredCatalog, preferred: &str) -> String {
+    let base = if preferred.trim().is_empty() {
+        "legacy-provider".to_string()
+    } else {
+        normalize_id(preferred)
+    };
+    if !catalog.profiles.contains_key(&base) {
+        return base;
+    }
+
+    for index in 2.. {
+        let candidate = format!("{base}-{index}");
+        if !catalog.profiles.contains_key(&candidate) {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded profile identifier search")
+}
+
+fn merge_legacy_profile_document(
+    catalog: &mut StoredCatalog,
+    document: &str,
+) -> Result<usize, SwitcherError> {
+    let mut imported = 0;
+    let has_default = catalog.profiles.values().any(|value| {
+        serde_json::from_value::<StoredProfile>(value.clone())
+            .map(|profile| profile.default)
+            .unwrap_or(false)
+    });
+
+    for (legacy_id, legacy) in legacy_profile_entries(document)? {
+        if legacy.api_key.trim().is_empty() {
+            continue;
+        }
+
+        let matching_id = catalog.profiles.iter().find_map(|(id, value)| {
+            let profile = serde_json::from_value::<StoredProfile>(value.clone()).ok()?;
+            legacy_profile_matches(id, &profile, &legacy_id, &legacy).then(|| id.clone())
+        });
+
+        if let Some(profile_id) = matching_id {
+            let value = catalog
+                .profiles
+                .get(&profile_id)
+                .cloned()
+                .ok_or_else(|| SwitcherError::Message("服务商目录读取失败。".to_string()))?;
+            let mut profile: StoredProfile = serde_json::from_value(value)?;
+            if profile.api_key.trim().is_empty() && profile.api_key_protected.trim().is_empty() {
+                profile.api_key = legacy.api_key.trim().to_string();
+                catalog
+                    .profiles
+                    .insert(profile_id, serde_json::to_value(profile)?);
+                imported += 1;
+            }
+            continue;
+        }
+
+        let profile_id = unique_profile_id(catalog, &legacy_id);
+        let profile = StoredProfile {
+            name: legacy.name.trim().to_string(),
+            base_url: legacy.base_url.trim().to_string(),
+            api_key: legacy.api_key.trim().to_string(),
+            api_key_protected: String::new(),
+            model: legacy.model.trim().to_string(),
+            model_reasoning_effort: legacy.model_reasoning_effort,
+            verified: false,
+            verification_status: default_verification_status(),
+            verification_response_shape: None,
+            default: legacy.default && !has_default,
+            note: legacy.note.trim().to_string(),
+            last_switched_at: None,
+            last_verified_at: None,
+            last_verification_detail: Some(
+                "已从旧版目录恢复凭据；请重新运行服务商可用性测试。".to_string(),
+            ),
+            last_verification_stage: Some("profile".to_string()),
+            last_verification_http_status: None,
+            last_verification_provider_code: None,
+        };
+        catalog
+            .profiles
+            .insert(profile_id, serde_json::to_value(profile)?);
+        imported += 1;
+    }
+
+    Ok(imported)
+}
+
+fn backup_catalog_before_legacy_import() -> Result<(), SwitcherError> {
+    let source = profiles_path()?;
+    if !source.exists() {
+        return Ok(());
+    }
+    let directory = app_data_dir()?.join("legacy-profile-imports");
+    fs::create_dir_all(&directory)?;
+    let stamp = Local::now().format("%Y%m%d-%H%M%S");
+    let destination = directory.join(format!(
+        "profiles-before-import-{stamp}.json{PROTECTED_FILE_SUFFIX}"
+    ));
+    protect_file(&source, &destination)
+}
+
+pub fn import_legacy_profile_document_core(document: String) -> Result<AppState, SwitcherError> {
+    let mut catalog = load_catalog()?;
+    let imported = merge_legacy_profile_document(&mut catalog, &document)?;
+    if imported == 0 {
+        return app_state_with_activity(
+            "未发现可恢复凭据",
+            "旧版目录没有可填补的 API 密钥；现有已保护凭据保持不变。",
+            "info",
+        );
+    }
+
+    backup_catalog_before_legacy_import()?;
+    save_catalog(&catalog)?;
+    app_state_with_activity(
+        "已恢复旧版服务商凭据",
+        &format!("已安全导入 {imported} 条本机凭据并使用 Windows 凭据保护保存；旧版文件未被修改。请重新运行可用性测试。"),
+        "success",
+    )
 }
 
 fn read_config() -> Result<String, SwitcherError> {
@@ -2183,4 +2359,146 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running CodeX Provider Switcher");
+}
+
+#[cfg(test)]
+mod legacy_profile_import_tests {
+    use super::*;
+
+    fn profile(name: &str, base_url: &str, api_key: &str, api_key_protected: &str) -> Value {
+        json!({
+            "name": name,
+            "base_url": base_url,
+            "api_key": api_key,
+            "api_key_protected": api_key_protected,
+            "model": "gpt-test",
+            "default": false,
+            "note": "test fixture"
+        })
+    }
+
+    fn catalog_with(profile_id: &str, profile_value: Value) -> StoredCatalog {
+        let mut profiles = Map::new();
+        profiles.insert(profile_id.to_string(), profile_value);
+        StoredCatalog {
+            version: default_version(),
+            profiles,
+            model_catalogs: Map::new(),
+            auto_start: false,
+            invariants: default_invariants(),
+        }
+    }
+
+    fn legacy_document(entries: Value) -> String {
+        json!({ "profiles": entries }).to_string()
+    }
+
+    #[test]
+    fn legacy_import_fills_an_empty_matching_profile() {
+        let mut catalog =
+            catalog_with("owl", profile("OWL", "https://api.example.test/v1", "", ""));
+        let document = legacy_document(json!({
+            "owl": {
+                "name": "OWL",
+                "base_url": "https://api.example.test/v1",
+                "api_key": "legacy-test-key",
+                "model": "gpt-test"
+            }
+        }));
+
+        assert_eq!(
+            merge_legacy_profile_document(&mut catalog, &document).unwrap(),
+            1
+        );
+        let restored: StoredProfile =
+            serde_json::from_value(catalog.profiles["owl"].clone()).unwrap();
+        assert_eq!(restored.api_key, "legacy-test-key");
+        assert!(restored.api_key_protected.is_empty());
+    }
+
+    #[test]
+    fn new_install_catalog_has_no_preconfigured_provider() {
+        let catalog = seed_catalog_from_existing().unwrap();
+        assert!(catalog.profiles.is_empty());
+    }
+
+    #[test]
+    fn legacy_import_never_overwrites_an_existing_protected_credential() {
+        let mut catalog = catalog_with(
+            "owl",
+            profile(
+                "OWL",
+                "https://api.example.test/v1",
+                "",
+                "protected-existing-key",
+            ),
+        );
+        let document = legacy_document(json!({
+            "owl": {
+                "name": "OWL",
+                "base_url": "https://api.example.test/v1",
+                "api_key": "legacy-test-key"
+            }
+        }));
+
+        assert_eq!(
+            merge_legacy_profile_document(&mut catalog, &document).unwrap(),
+            0
+        );
+        let preserved: StoredProfile =
+            serde_json::from_value(catalog.profiles["owl"].clone()).unwrap();
+        assert!(preserved.api_key.is_empty());
+        assert_eq!(preserved.api_key_protected, "protected-existing-key");
+    }
+
+    #[test]
+    fn legacy_import_adds_an_unmatched_profile() {
+        let mut existing = profile("OWL", "https://api.example.test/v1", "", "");
+        existing["default"] = Value::Bool(true);
+        let mut catalog = catalog_with("owl", existing);
+        let document = legacy_document(json!({
+            "a6api": {
+                "name": "a6api",
+                "base_url": "https://a6.example.test/v1",
+                "api_key": "legacy-test-key",
+                "model": "gpt-test",
+                "default": true,
+                "note": "restored profile"
+            }
+        }));
+
+        assert_eq!(
+            merge_legacy_profile_document(&mut catalog, &document).unwrap(),
+            1
+        );
+        let restored: StoredProfile =
+            serde_json::from_value(catalog.profiles["a6api"].clone()).unwrap();
+        assert_eq!(restored.name, "a6api");
+        assert_eq!(restored.base_url, "https://a6.example.test/v1");
+        assert_eq!(restored.api_key, "legacy-test-key");
+        assert!(!restored.default);
+    }
+
+    #[test]
+    fn repeated_legacy_import_is_idempotent() {
+        let mut catalog =
+            catalog_with("owl", profile("OWL", "https://api.example.test/v1", "", ""));
+        let document = legacy_document(json!({
+            "owl": {
+                "name": "OWL",
+                "base_url": "https://api.example.test/v1",
+                "api_key": "legacy-test-key"
+            }
+        }));
+
+        assert_eq!(
+            merge_legacy_profile_document(&mut catalog, &document).unwrap(),
+            1
+        );
+        assert_eq!(
+            merge_legacy_profile_document(&mut catalog, &document).unwrap(),
+            0
+        );
+        assert_eq!(catalog.profiles.len(), 1);
+    }
 }
