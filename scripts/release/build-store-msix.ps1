@@ -20,28 +20,31 @@ function ConvertTo-MsixVersion {
     $major = [int]$Matches.major
     $minor = [int]$Matches.minor
     $patch = [int]$Matches.patch
-    $stage = [string]$Matches.stage
-    $ordinal = if ($Matches.ordinal) { [int]$Matches.ordinal } else { 0 }
-    if ($ordinal -gt 99) { throw "MSIX prerelease ordinal must be between 0 and 99: $SemVer" }
-    $base = switch ($stage) {
-        "alpha" { 100 }
-        "beta" { 200 }
-        "rc" { 300 }
-        "" { 500 }
-        default { throw "Unsupported MSIX prerelease stage: $stage" }
-    }
-    foreach ($part in @($major, $minor, $patch, ($base + $ordinal))) {
+    # Microsoft Store requires the MSIX revision field to be zero. A prerelease
+    # label remains in the product/tag version, while Store uniqueness comes from
+    # incrementing major, minor, or patch before each new Store upload.
+    foreach ($part in @($major, $minor, $patch, 0)) {
         if ($part -lt 0 -or $part -gt 65535) { throw "MSIX version part is outside 0..65535: $SemVer" }
     }
-    return "$major.$minor.$patch.$($base + $ordinal)"
+    return "$major.$minor.$patch.0"
 }
 
-function Get-WinAppCommand {
+function Get-PackageTool {
     $command = Get-Command winapp -ErrorAction SilentlyContinue
-    if ($command) { return $command.Source }
+    if ($command) { return [pscustomobject]@{ Kind = 'winapp'; Path = $command.Source } }
     $managedTool = 'D:\Software\DeveloperTools\WinAppCLI\winapp.exe'
-    if (Test-Path -LiteralPath $managedTool -PathType Leaf) { return $managedTool }
-    throw "WinApp CLI is required. Install it with 'winget install Microsoft.WinAppCLI --source winget' or place winapp.exe at $managedTool."
+    if (Test-Path -LiteralPath $managedTool -PathType Leaf) { return [pscustomobject]@{ Kind = 'winapp'; Path = $managedTool } }
+
+    $sdkRoot = 'C:\Program Files (x86)\Windows Kits\10\bin'
+    if (Test-Path -LiteralPath $sdkRoot -PathType Container) {
+        $makeAppx = Get-ChildItem -LiteralPath $sdkRoot -Recurse -File -Filter 'makeappx.exe' |
+            Where-Object { $_.FullName -match '\\x64\\makeappx\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($makeAppx) { return [pscustomobject]@{ Kind = 'makeappx'; Path = $makeAppx.FullName } }
+    }
+
+    throw "A Store packager is required. Install WinApp CLI at $managedTool or install the Windows SDK MakeAppx tool."
 }
 
 function Assert-VersionSources {
@@ -103,19 +106,26 @@ if (-not $Apply) {
     exit 0
 }
 
-$winapp = Get-WinAppCommand
+$packager = Get-PackageTool
 New-Item -ItemType Directory -Path $outputRootPath -Force | Out-Null
 if (Test-Path -LiteralPath $stagePath) { Remove-Item -LiteralPath $stagePath -Recurse -Force }
 if (Test-Path -LiteralPath $msixPath) { Remove-Item -LiteralPath $msixPath -Force }
 New-Item -ItemType Directory -Path $stagePath -Force | Out-Null
 
 $previousChannel = $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL
+$previousCargoBuildJobs = $env:CARGO_BUILD_JOBS
 try {
     $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = "store"
+    if ([string]::IsNullOrWhiteSpace($env:CARGO_BUILD_JOBS)) {
+        # Tauri release linking can exceed the memory available on a local Windows host.
+        # Keep the default deterministic; callers can explicitly override this value.
+        $env:CARGO_BUILD_JOBS = "1"
+    }
     & npx tauri build --no-bundle
     if ($LASTEXITCODE -ne 0) { throw "Tauri Store-channel build failed with exit code $LASTEXITCODE." }
 } finally {
     $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = $previousChannel
+    $env:CARGO_BUILD_JOBS = $previousCargoBuildJobs
 }
 
 $desktopExe = Join-Path $projectRoot "src-tauri\target\release\codex-provider-switcher.exe"
@@ -124,7 +134,8 @@ Copy-Item -LiteralPath $desktopExe -Destination (Join-Path $stagePath "codex-pro
 
 $manifestText = Get-Content -LiteralPath $manifestTemplate -Raw -Encoding UTF8
 if ($manifestText -notmatch '__MSIX_VERSION__') { throw "Store manifest does not contain the MSIX version placeholder." }
-$manifestText.Replace('__MSIX_VERSION__', $msixVersion) | Set-Content -LiteralPath (Join-Path $stagePath "Package.appxmanifest") -Encoding UTF8
+$manifestFileName = if ($packager.Kind -eq 'makeappx') { 'AppxManifest.xml' } else { 'Package.appxmanifest' }
+$manifestText.Replace('__MSIX_VERSION__', $msixVersion) | Set-Content -LiteralPath (Join-Path $stagePath $manifestFileName) -Encoding UTF8
 
 $assetsPath = Join-Path $stagePath "Assets"
 New-Item -ItemType Directory -Path $assetsPath -Force | Out-Null
@@ -133,12 +144,26 @@ Write-StoreAsset -Source $iconSource -Destination (Join-Path $assetsPath "Square
 Write-StoreAsset -Source $iconSource -Destination (Join-Path $assetsPath "Square150x150Logo.png") -Width 150 -Height 150
 Write-StoreAsset -Source $iconSource -Destination (Join-Path $assetsPath "Wide310x150Logo.png") -Width 310 -Height 150
 
-Push-Location $stagePath
-try {
-    & $winapp pack .
-    if ($LASTEXITCODE -ne 0) { throw "WinApp CLI packaging failed with exit code $LASTEXITCODE." }
-} finally {
-    Pop-Location
+if ($packager.Kind -eq 'winapp') {
+    Push-Location $stagePath
+    try {
+        & $packager.Path pack .
+        if ($LASTEXITCODE -ne 0) { throw "WinApp CLI packaging failed with exit code $LASTEXITCODE." }
+    } finally {
+        Pop-Location
+    }
+} elseif ($packager.Kind -eq 'makeappx') {
+    $temporaryPackage = Join-Path $outputRootPath ".CodeXProviderSwitcher-windows-x64-$Version.packaging.msix"
+    if (Test-Path -LiteralPath $temporaryPackage) { Remove-Item -LiteralPath $temporaryPackage -Force }
+    & $packager.Path pack /d $stagePath /p $temporaryPackage /o
+    if ($LASTEXITCODE -ne 0) { throw "Windows SDK MakeAppx packaging failed with exit code $LASTEXITCODE." }
+    Copy-Item -LiteralPath $temporaryPackage -Destination $msixPath -Force
+    Remove-Item -LiteralPath $temporaryPackage -Force
+    Write-Host "[PASS] Used Windows SDK MakeAppx fallback: $($packager.Path)"
+    Write-Host "[PASS] Unsigned MSIX is ready for Partner Center upload: $msixPath"
+    exit 0
+} else {
+    throw "Unsupported Store packager: $($packager.Kind)"
 }
 
 $packages = @(Get-ChildItem -LiteralPath $stagePath -Recurse -File -Filter "*.msix")

@@ -14,7 +14,7 @@ GitHub 和 Partner Center 是两条不同的交付链路。截图里的“未启
 | Partner Center 草稿、价格、年龄分级、认证状态 | Microsoft 账号后台 | 否 |
 | 最终提交认证和 Store 发布结果 | Microsoft Store | 否 |
 
-当前分支 `codex/store-listing-and-delivery` 已推送，但还没有创建 GitHub PR，所以这轮没有新的 `pull_request` CI 结果。应先创建并合并这个 PR；这一步会触发普通 CI，且因为修改了 `package.json`，也会触发 Store MSIX 构建校验。Partner Center 的草稿可以继续保留，不需要删除。
+当前分支 `codex/store-listing-and-delivery` 已创建 PR #26，并已通过普通 CI 与 Store MSIX 构建检查。此次版本映射修复推送后，GitHub 会重新构建临时 artifact；Partner Center 的草稿可以继续保留，但此前两个校验失败的包应删除后再上传新包。
 
 ## 已确定的产品信息
 
@@ -24,7 +24,7 @@ GitHub 和 Partner Center 是两条不同的交付链路。截图里的“未启
 | 产品类型 | Windows 桌面应用 |
 | Store ID | `9P7PGV62WKK6` |
 | 包身份 | `ga626.CodexProviderSwitcher` |
-| 当前候选版本 | `0.7.0.100`（产品版本 `0.7.0-alpha`） |
+| 当前候选版本 | `0.7.0.0`（产品版本 `0.7.0-alpha`） |
 | 支持入口 | <https://github.com/ga626/codex-provider-switcher/issues> |
 | 隐私政策 | <https://github.com/ga626/codex-provider-switcher/blob/main/docs/user/privacy-policy.zh.md> |
 | 发布物 | GitHub Actions 的 `microsoft-store-msix-v0.7.0-alpha` artifact 中的 `.msix` |
@@ -83,6 +83,14 @@ Codex、provider、API、模型、配置切换、备份恢复、Windows、Respon
 | Store 一览 | 中文（简体）：使用本页文案、至少 4 张桌面截图 | 可由 Codex 准备，提交前由你预览 |
 | 提交选项 | 认证通过后按你的选择发布；首次提交不要在未检查页面时直接提交 | 必须由你最终确认 |
 
+### 受限能力说明
+
+这个 MSIX 是完整桌面程序，因此保留 `runFullTrust`。它不是包验证失败的原因，而是 Partner Center 可能要求补充说明的审核项。若“提交选项”出现该字段，填入以下内容：
+
+> CodeX Provider Switcher is a packaged desktop application. It needs full-trust desktop access only to read and update the current Windows user's Codex configuration and credential files, protect provider credentials with Windows DPAPI, and create or restore user-requested local backups. These actions occur only after the user invokes them in the app. The app does not install drivers or services, request elevation, or access files outside the user's selected local Codex data.
+
+不要为了消除警告删除此能力。删除后，应用无法按产品承诺读写本地 Codex 配置、保护凭据和执行备份恢复。
+
 截图中显示的状态可以这样理解：
 
 - “属性：未启动”：尚未填写类别、支持 URL、隐私 URL 等属性；不是 GitHub PR 状态。
@@ -114,7 +122,7 @@ npm run store:listing-assets
 
 ## 发布前不可跳过的验证
 
-1. 先在 GitHub Actions 下载与 tag 对应的 MSIX，并运行 `npm run store:verify-package` 校验身份、架构、版本和入口文件。
+1. 先在 GitHub Actions 下载与 tag 对应的 MSIX，并运行 `npm run store:verify-package` 校验身份、架构、版本、入口文件和包内的 `runFullTrust` 声明。包内 `Identity Version` 的最后一段必须为 `0`；此前 `0.7.0.100` 的两个失败包不能重试，应删除。
 2. 在 Partner Center 预览产品名称、说明、截图、隐私和支持链接，确认没有把开发命令展示给普通用户。
 3. 提交认证后等待 Microsoft Store 完成认证；MSIX 的正式签名由 Store 完成，不需要购买证书或配置 PFX。
 4. 认证通过后，从 Microsoft Store 产品页安装，而不是从源码目录或 Actions 临时 artifact 安装。
