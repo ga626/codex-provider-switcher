@@ -1,6 +1,6 @@
 # 安装、更新与卸载
 
-`CodeX Provider Switcher` 是 Windows alpha 软件。日常使用请以 GitHub Release 中标为 Latest 的版本为准，不要把源码目录或临时构建当成稳定安装版。
+`CodeX Provider Switcher` 是 Windows alpha 软件。Microsoft Store 是下一次正式发布的优先渠道，但首个 Store 版本尚未通过认证；当前日常使用仍以 GitHub Release 中标为 Latest 的版本为准，不要把源码目录或临时构建当成稳定安装版。
 
 ## 安装
 
@@ -19,11 +19,11 @@
 
 ## 检查更新
 
-已发布安装版中的“检查更新”会从 GitHub Release 获取签名更新包。你不需要输入私钥、口令或发布配置。
+当前 GitHub 安装版中的“检查更新”会从 GitHub Release 获取签名更新包。首个 Microsoft Store 版本认证后，Store 安装版会由 Store 自动检查和交付更新，应用内按钮会打开对应的 Store 页面。你不需要输入私钥、口令或发布配置。
 
 - 只信任应用内更新或 GitHub Release 中同一版本的安装包。不要从聊天记录、网盘或未知镜像下载 setup。
 - 更新失败时不要手动替换程序目录；记录提示，按排错指南处理，或保留当前稳定版等待受控升级。
-- 若版本说明写明需要一次性手动升级，请先下载新 setup 安装包。旧版不能保证自行修复旧版的更新缺陷。
+- Store 认证完成后，安装指南会在对应发布版本中同步切换到 Store 入口；在那之前不要尝试从空的 Store 产品页安装。
 
 ## 卸载与数据保留
 

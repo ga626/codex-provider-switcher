@@ -22,6 +22,13 @@ const RELEASES_API_URL: &str =
     "https://api.github.com/repos/ga626/codex-provider-switcher/releases?per_page=20";
 const PROTECTED_FILE_SUFFIX: &str = ".dpapi";
 
+fn is_store_release_channel() -> bool {
+    matches!(
+        option_env!("CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL"),
+        Some("store")
+    )
+}
+
 #[derive(Debug, Error)]
 pub enum SwitcherError {
     #[error("无法定位用户目录。")]
@@ -2152,10 +2159,15 @@ pub fn restore_latest_backup_core() -> Result<AppState, SwitcherError> {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+    let builder = if is_store_release_channel() {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_updater::Builder::new().build())
+    };
+    builder
         .invoke_handler(tauri::generate_handler![
             load_state,
             check_for_update,

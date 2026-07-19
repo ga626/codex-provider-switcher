@@ -1,6 +1,8 @@
 param(
     [string]$Repository = "ga626/codex-provider-switcher",
     [string]$Tag = "",
+    [ValidateSet("store", "github-direct", "all")]
+    [string]$Channel = "store",
     [switch]$ReportOnly,
     [switch]$SkipRepositorySettings
 )
@@ -93,32 +95,34 @@ try {
         Add-Blocker "GitHub repository is archived."
     }
 
-    $previousErrorActionPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $secretLines = & gh secret list --repo $Repository 2>&1
-        $secretExitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previousErrorActionPreference
-    }
-    if ($secretExitCode -ne 0) {
-        Add-Blocker "Unable to list GitHub Secret names. $(($secretLines | Out-String).Trim())"
-    } else {
-        $secretNames = @()
-        foreach ($line in $secretLines) {
-            $parts = ([string]$line -split "\s+")
-            if ($parts.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($parts[0])) {
-                $secretNames += $parts[0]
-            }
+    if ($Channel -in @("github-direct", "all")) {
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $secretLines = & gh secret list --repo $Repository 2>&1
+            $secretExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
         }
-        foreach ($requiredName in @(
-            "TAURI_SIGNING_PRIVATE_KEY",
-            "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
-            "WINDOWS_CERTIFICATE",
-            "WINDOWS_CERTIFICATE_PASSWORD"
-        )) {
-            if ($requiredName -notin $secretNames) {
-                Add-Blocker "Required GitHub Secret name is missing: $requiredName"
+        if ($secretExitCode -ne 0) {
+            Add-Blocker "Unable to list GitHub Secret names. $(($secretLines | Out-String).Trim())"
+        } else {
+            $secretNames = @()
+            foreach ($line in $secretLines) {
+                $parts = ([string]$line -split "\s+")
+                if ($parts.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($parts[0])) {
+                    $secretNames += $parts[0]
+                }
+            }
+            foreach ($requiredName in @(
+                "TAURI_SIGNING_PRIVATE_KEY",
+                "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
+                "WINDOWS_CERTIFICATE",
+                "WINDOWS_CERTIFICATE_PASSWORD"
+            )) {
+                if ($requiredName -notin $secretNames) {
+                    Add-Blocker "Required GitHub Secret name is missing for the GitHub direct-install fallback: $requiredName"
+                }
             }
         }
     }
@@ -158,15 +162,17 @@ try {
         }
     }
 
-    $existingRelease = Invoke-GhJson -Arguments @("api", "repos/$Repository/releases/tags/$Tag") -FailureMessage "Unable to inspect the requested release tag." -AllowNotFound
-    if ($existingRelease) {
-        Add-Blocker "Release $Tag already exists. Immutable releases must not be overwritten."
-    }
+    if ($Channel -in @("github-direct", "all")) {
+        $existingRelease = Invoke-GhJson -Arguments @("api", "repos/$Repository/releases/tags/$Tag") -FailureMessage "Unable to inspect the requested release tag." -AllowNotFound
+        if ($existingRelease) {
+            Add-Blocker "Release $Tag already exists. Immutable releases must not be overwritten."
+        }
 
-    if (-not $SkipRepositorySettings) {
-        $immutableSettings = Invoke-GhJson -Arguments @("api", "repos/$Repository/immutable-releases") -FailureMessage "Unable to inspect immutable Release settings."
-        if ($immutableSettings -and -not $immutableSettings.enabled) {
-            Add-Blocker "GitHub immutable Releases are disabled."
+        if (-not $SkipRepositorySettings) {
+            $immutableSettings = Invoke-GhJson -Arguments @("api", "repos/$Repository/immutable-releases") -FailureMessage "Unable to inspect immutable Release settings."
+            if ($immutableSettings -and -not $immutableSettings.enabled) {
+                Add-Blocker "GitHub immutable Releases are disabled."
+            }
         }
     }
 
@@ -174,6 +180,7 @@ try {
     Write-Host "Repository: $Repository"
     Write-Host "Version:    $version"
     Write-Host "Tag:        $Tag"
+    Write-Host "Channel:    $Channel"
     Write-Host "Mode:       $(if ($ReportOnly) { 'report-only' } else { 'enforced' })"
     if ($warnings.Count -gt 0) {
         Write-Host "Warnings:"

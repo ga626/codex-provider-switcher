@@ -32,6 +32,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Verify Microsoft Store manifest and version mapping
+        run: npm run store:verify-package
+
       - name: Smoke runtime boundary
         run: npm run runtime-boundary:smoke
 

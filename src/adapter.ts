@@ -4,6 +4,11 @@ import type { AppState, EditableProfile, ModelCatalog, ProviderProfile, UpdateIn
 
 const isTauri = '__TAURI_INTERNALS__' in window
 const allowBrowserMock = import.meta.env.VITE_CODEX_PROVIDER_SWITCHER_ALLOW_MOCK === 'true'
+const storeProductId = '9P7PGV62WKK6'
+const storeProductUrl = `https://apps.microsoft.com/detail/${storeProductId}`
+const storeLaunchUrl = `ms-windows-store://pdp/?productid=${storeProductId}`
+
+export const isStoreManagedBuild = __CODEX_RELEASE_CHANNEL__ === 'store'
 
 let mockState: AppState = structuredClone(initialState)
 let webBackendAvailable: boolean | null = null
@@ -18,6 +23,18 @@ function isTrustedProjectReleaseUrl(value: string) {
       (parsed.pathname === '/ga626/codex-provider-switcher/releases' ||
         parsed.pathname.startsWith('/ga626/codex-provider-switcher/releases/'))
     )
+  } catch {
+    return false
+  }
+}
+
+function isTrustedStoreUrl(value: string) {
+  try {
+    const parsed = new URL(value)
+    if (parsed.protocol === 'https:') {
+      return parsed.hostname === 'apps.microsoft.com' && parsed.pathname === `/detail/${storeProductId}`
+    }
+    return parsed.protocol === 'ms-windows-store:' && parsed.hostname === 'pdp' && parsed.searchParams.get('productid') === storeProductId
   } catch {
     return false
   }
@@ -106,6 +123,15 @@ export async function loadState(): Promise<AppState> {
 
 export async function checkForUpdate(): Promise<UpdateInfo> {
   if (isTauri) {
+    if (isStoreManagedBuild) {
+      pendingTauriUpdate = null
+      return {
+        currentVersion: __APP_VERSION__,
+        latestVersion: __APP_VERSION__,
+        available: false,
+        releaseUrl: storeProductUrl,
+      }
+    }
     if (__CODEX_RELEASE_CHANNEL__ !== 'stable') {
       pendingTauriUpdate = null
       return {
@@ -155,13 +181,17 @@ export async function openUpdate(url: string): Promise<void> {
     await relaunch()
     return
   }
-  if (!isTrustedProjectReleaseUrl(url)) {
-    throw new Error('更新地址不是受信任的项目 Release 地址。')
+  const trustedStoreUrl = isTrustedStoreUrl(url)
+  if (!isTrustedProjectReleaseUrl(url) && !trustedStoreUrl) {
+    throw new Error('更新地址不是受信任的项目发布地址。')
   }
   if (isTauri) {
     const { openUrl } = await import('@tauri-apps/plugin-opener')
-    await openUrl(url)
+    await openUrl(trustedStoreUrl ? storeLaunchUrl : url)
     return
+  }
+  if (trustedStoreUrl) {
+    throw new Error('Microsoft Store 更新入口只能在已安装的桌面应用中打开。')
   }
   const opened = window.open(url, '_blank', 'noopener,noreferrer')
   if (!opened) {

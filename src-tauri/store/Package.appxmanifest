@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  IgnorableNamespaces="uap rescap uap10">
+  <Identity
+    Name="ga626.CodexProviderSwitcher"
+    Publisher="CN=BEB8480D-C799-44F0-9DC1-533C67423D9E"
+    Version="__MSIX_VERSION__"
+    ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>CodeX Provider Switcher</DisplayName>
+    <PublisherDisplayName>ga626</PublisherDisplayName>
+    <Description>Windows desktop tool for managing Codex provider profiles.</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <uap10:PackageIntegrity>
+      <uap10:Content Enforcement="on" />
+    </uap10:PackageIntegrity>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.18362.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="zh-cn" />
+  </Resources>
+  <Applications>
+    <Application
+      Id="CodeXProviderSwitcher"
+      Executable="codex-provider-switcher.exe"
+      EntryPoint="Windows.FullTrustApplication"
+      uap10:TrustLevel="mediumIL"
+      uap10:RuntimeBehavior="packagedClassicApp">
+      <uap:VisualElements
+        DisplayName="CodeX Provider Switcher"
+        Description="Windows desktop tool for managing Codex provider profiles."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

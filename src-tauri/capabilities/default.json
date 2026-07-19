@@ -10,6 +10,9 @@
       "allow": [
         {
           "url": "https://github.com/ga626/codex-provider-switcher/releases*"
+        },
+        {
+          "url": "ms-windows-store://pdp/*"
         }
       ]
     },

@@ -34,11 +34,12 @@ npm run backend:ui-smoke
 npm run runtime-boundary:smoke
 npm run tauri:desktop-boundary:smoke
 npm run qa:preview-smoke
+npm run store:verify-package
 npm run release:readiness -- -ReportOnly
 git diff --check
 ```
 
-`release:readiness` 不读取 Secret 值，也不会创建 Release。发布影响 PR 必须在 PR 描述的“发布计划/后续动作”中记录它的结论：没有可信 Windows 代码签名凭据时，可以讨论是否合并代码，但状态必须明确写成“代码已合并，产品未交付”。
+`release:readiness` 默认按 Microsoft Store 渠道检查，不读取 Secret 值，也不会创建 Release 或 Store 提交。发布影响 PR 必须在 PR 描述的“发布计划/后续动作”中记录它的结论：Store 包构建完成不等于已交付，必须等 Partner Center 认证和 Store 安装验收。只有 GitHub 直装备用渠道才需要可信 Windows 代码签名凭据；用 `-Channel github-direct` 检查。
 
 本机 Tauri 开发版启动会固定使用单任务 Cargo 构建，避免 Windows 上并行全量编译占满内存：
 
@@ -53,7 +54,7 @@ npm run qa:dev-desktop
 | 状态 | 何时使用 | 命令 |
 | --- | --- | --- |
 | 开发版验收 | UI、普通功能、文案、配置流程 | `npm run qa:dev-desktop` |
-| 安装发布验收 | 安装器、版本、启动入口、更新、卸载、Release 资产 | 发布后按普通用户下载并运行 setup |
+| 安装发布验收 | 安装器、版本、启动入口、更新、卸载、Release 资产 | Store 发布后按普通用户安装；GitHub 备用渠道才运行 setup |
 
 预览和 smoke 是自动证据，不能代替用户看开发版窗口。安装发布验收只在真实 Release 生成后进行。
 
@@ -70,4 +71,4 @@ npm run qa:dev-desktop
 
 PR 前应确认工作区干净、目标分支最新、文档已同步、无冲突标记、测试通过、用户会经过的路径可运行。创建 PR 后，GitHub 的 `validate` 是该分支的权威云端验证；不要额外等待重复的功能分支 push CI。
 
-发布影响 PR 合并后仍不是交付完成。必须在最新主线创建新 tag 和不可变 Release，再以普通用户路径下载、安装、启动和验证；任何一步被签名、版本、权限或安全告警阻断时，只能写“代码已合并，产品未交付”。需要替换旧工具时，继续按 [旧工具替换手册](../maintainers/legacy-cutover.zh.md) 在新的 Codex 会话完成，不得在当前开发会话直接停用旧工具。
+发布影响 PR 合并后仍不是交付完成。Store 路线必须在最新主线创建新 tag、生成 MSIX、完成 Partner Center 认证，再从 Store 安装、启动和验证；GitHub 直装备用路线才需要不可变 Release 与 setup 验收。任何一步被签名、版本、权限、认证或安全告警阻断时，只能写“代码已合并，产品未交付”。需要替换旧工具时，继续按 [旧工具替换手册](../maintainers/legacy-cutover.zh.md) 在新的 Codex 会话完成，不得在当前开发会话直接停用旧工具。
