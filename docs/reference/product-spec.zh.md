@@ -2,7 +2,7 @@
 
 ## 产品定位
 
-`CodeX Provider Switcher` 是一个本地优先的 Windows Codex provider 管理工具。最终用户入口是轻量 Tauri 桌面 GUI；本地 Web 控制台只保留为开发、诊断和 fallback。
+`Signalman AI` 是一个本地优先的 Windows 本地 provider 管理工具。最终用户入口是轻量 Tauri 桌面 GUI；本地 Web 控制台只保留为开发、诊断和 fallback。
 
 ## 用户可预期的行为
 

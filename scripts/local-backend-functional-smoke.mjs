@@ -150,8 +150,8 @@ const providerServer = createServer((request, response) => {
         published_at: '2026-07-16T00:00:00Z',
         assets: [
           {
-            name: `CodeXProviderSwitcher-windows-x64-${fixtureLatestVersion}-setup.exe`,
-            browser_download_url: `https://github.com/ga626/codex-provider-switcher/releases/download/v${fixtureLatestVersion}/CodeXProviderSwitcher-windows-x64-${fixtureLatestVersion}-setup.exe`,
+            name: `SignalmanAI-windows-x64-${fixtureLatestVersion}-setup.exe`,
+            browser_download_url: `https://github.com/ga626/codex-provider-switcher/releases/download/v${fixtureLatestVersion}/SignalmanAI-windows-x64-${fixtureLatestVersion}-setup.exe`,
           },
         ],
       },

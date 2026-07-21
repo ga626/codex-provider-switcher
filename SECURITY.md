@@ -1,6 +1,6 @@
 # 安全说明
 
-`CodeX Provider Switcher` 会处理本地 Codex provider 配置。请把配置写入、凭据和恢复副本视为敏感资料。
+`Signalman AI` 会处理本地 Codex provider 配置。请把配置写入、凭据和恢复副本视为敏感资料。
 
 ## 请不要公开这些内容
 

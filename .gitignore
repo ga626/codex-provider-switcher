@@ -21,6 +21,7 @@ src-tauri/target
 /release/
 /release-assets/*
 !/release-assets/.gitkeep
+/store-assets/
 /archive/
 /project_status/
 /.codex-provider-switcher/

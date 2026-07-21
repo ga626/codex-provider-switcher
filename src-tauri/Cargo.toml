@@ -1,8 +1,8 @@
 [package]
 name = "codex-provider-switcher"
-version = "0.7.0-alpha"
-description = "CodeX Provider Switcher for Codex Desktop"
-authors = ["OpenAI Codex"]
+version = "0.8.0-alpha"
+description = "Signalman AI local provider profile manager"
+authors = ["ga626"]
 edition = "2021"
 default-run = "codex-provider-switcher"
 

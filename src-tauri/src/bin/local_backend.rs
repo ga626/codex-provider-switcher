@@ -18,7 +18,7 @@ const DEFAULT_PORT: u16 = 47832;
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("CodeX Provider Switcher local backend failed: {err}");
+        eprintln!("Signalman AI local backend failed: {err}");
         std::process::exit(1);
     }
 }
@@ -34,7 +34,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let listener = TcpListener::bind((host.as_str(), port))?;
     let dist_dir = resolve_dist_dir()?;
-    println!("CodeX Provider Switcher local backend: http://{host}:{port}/");
+    println!("Signalman AI local backend: http://{host}:{port}/");
     println!("Serving frontend from {}", dist_dir.display());
 
     for stream in listener.incoming() {

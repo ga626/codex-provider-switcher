@@ -23,10 +23,11 @@ function assertBmp(buffer, width, height, label) {
   assert(Math.abs(buffer.readInt32LE(22)) === height, `${label} must be ${height}px high`)
 }
 
-const [packageJsonText, tauriConfigText, cargoToml, libRs, adapterTs, mockDataTs, preflightScript, headerBmp, sidebarBmp] = await Promise.all([
+const [packageJsonText, tauriConfigText, cargoToml, manifestText, libRs, adapterTs, mockDataTs, preflightScript, headerBmp, sidebarBmp] = await Promise.all([
   readText('package.json'),
   readText('src-tauri/tauri.conf.json'),
   readText('src-tauri/Cargo.toml'),
+  readText('src-tauri/store/Package.appxmanifest'),
   readText('src-tauri/src/lib.rs'),
   readText('src/adapter.ts'),
   readText('src/mockData.ts'),
@@ -43,7 +44,7 @@ const switchProfileCore = libRs.slice(
   libRs.indexOf('#[tauri::command]\nfn verify_profile')
 )
 
-assert(tauriConfig.productName === 'CodeX Provider Switcher', 'Tauri productName must stay stable')
+assert(tauriConfig.productName === 'Signalman AI', 'Tauri productName must use the approved brand')
 assert(tauriConfig.mainBinaryName === 'codex-provider-switcher', 'Tauri must bundle the desktop binary, not local_backend')
 assert(packageJson.scripts['tauri:dev'].includes('tauri dev'), 'tauri:dev must invoke the Tauri desktop runner')
 assert(packageJson.scripts['tauri:build'].includes('release:assets'), 'tauri:build must refresh branded installer assets')
@@ -60,7 +61,10 @@ assert(tauriConfig.bundle?.windows?.nsis?.sidebarImage === 'installer/sidebar.bm
 assertBmp(headerBmp, 150, 57, 'NSIS installer header image')
 assertBmp(sidebarBmp, 164, 314, 'NSIS installer sidebar image')
 assert(Array.isArray(tauriConfig.app?.windows) && tauriConfig.app.windows.length === 1, 'Tauri must expose one main window')
-assert(tauriConfig.app.windows[0].title === 'CodeX Provider Switcher', 'Tauri window title must stay stable')
+assert(tauriConfig.app.windows[0].title === 'Signalman AI', 'Tauri window title must use the approved brand')
+assert(manifestText.includes('<DisplayName>Signalman AI</DisplayName>'), 'MSIX display name must use the approved brand')
+assert(manifestText.includes('Name="ga626.CodexProviderSwitcher"'), 'MSIX identity must retain the Partner Center assignment')
+assert(libRs.includes('const APP_DIR_NAME: &str = "CodeX Provider Switcher"'), 'Existing app data directory must remain readable after rebranding')
 assert(tauriConfig.app.windows[0].minWidth >= 980, 'Tauri minimum width must preserve the desktop layout floor')
 assert(tauriConfig.app.windows[0].minHeight >= 700, 'Tauri minimum height must preserve the desktop layout floor')
 assert(!('trayIcon' in tauriConfig.app), 'Tauri config must not define a default tray icon')

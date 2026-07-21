@@ -42,7 +42,7 @@ if ($Stop) {
     Get-BackendProcess | ForEach-Object {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     }
-    Write-Host "CodeX Provider Switcher backend stopped."
+    Write-Host "Signalman AI backend stopped."
     exit 0
 }
 
@@ -79,4 +79,4 @@ if (-not $NoOpen) {
     Start-Process $appUrl
 }
 
-Write-Host "CodeX Provider Switcher is running: $appUrl"
+Write-Host "Signalman AI is running: $appUrl"

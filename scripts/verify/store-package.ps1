@@ -58,7 +58,7 @@ if ($expectedMsixVersion -notmatch '\.0$') { throw "Microsoft Store requires an 
 if (-not [string]::IsNullOrWhiteSpace($PackagePath)) {
     $fullPackagePath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $PackagePath))
     if (-not (Test-Path -LiteralPath $fullPackagePath -PathType Leaf)) { throw "MSIX package is missing: $fullPackagePath" }
-    $expectedName = "CodeXProviderSwitcher-windows-x64-$Version.msix"
+    $expectedName = "SignalmanAI-windows-x64-$Version.msix"
     if ((Split-Path -Leaf $fullPackagePath) -ne $expectedName) { throw "Unexpected MSIX package name: $(Split-Path -Leaf $fullPackagePath)" }
 
     [xml]$packageManifest = Get-PackageManifest -PackagePath $fullPackagePath

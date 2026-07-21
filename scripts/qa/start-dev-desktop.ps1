@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $packageJson -PathType Leaf)) {
 
 Write-Host "Validation mode: dev desktop"
 Write-Host "Meaning: build and launch the current source-tree desktop candidate. No installer, upgrade, uninstall, or published release package is used."
-Write-Host "Expected user-visible result: one CodeX Provider Switcher desktop window, no persistent CMD window, no external browser."
+Write-Host "Expected user-visible result: one Signalman AI desktop window, no persistent CMD window, no external browser."
 Write-Host "Build: npx tauri build --no-bundle"
 
 if ($ExplainOnly) {

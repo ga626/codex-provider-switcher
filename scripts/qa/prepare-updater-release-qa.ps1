@@ -42,7 +42,7 @@ $releaseRaw = & gh release view $tag --repo ga626/codex-provider-switcher --json
 if ($LASTEXITCODE -ne 0) { throw "Target GitHub Release is unavailable: $tag. Output: $releaseRaw" }
 $release = $releaseRaw | ConvertFrom-Json
 if ($release.isDraft -or $release.isPrerelease) { throw "Target Release must be Latest-compatible." }
-$setup = "CodeXProviderSwitcher-windows-x64-$TargetVersion-setup.exe"
+$setup = "SignalmanAI-windows-x64-$TargetVersion-setup.exe"
 $requiredAssets = @($setup, "$setup.sig", "latest.json")
 $assetNames = @($release.assets | ForEach-Object { $_.name })
 $missing = @($requiredAssets | Where-Object { $_ -notin $assetNames })

@@ -17,10 +17,10 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $OutputEncoding = $utf8NoBom
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$launcher = Join-Path $scriptRoot "CodeXProviderSwitcher.ps1"
+$launcher = Join-Path $scriptRoot "SignalmanAI.ps1"
 
 Write-Host ""
-Write-Host "CodeX Provider Switcher alpha launcher" -ForegroundColor Cyan
+Write-Host "Signalman AI alpha launcher" -ForegroundColor Cyan
 Write-Host "This entry builds and starts the real local Web backend on 127.0.0.1:$Port." -ForegroundColor Gray
 Write-Host ""
 

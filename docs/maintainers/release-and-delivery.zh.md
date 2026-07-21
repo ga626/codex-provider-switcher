@@ -54,7 +54,7 @@ npm run qa:refresh-local-candidate -- -Apply
 npm run qa:refresh-local-candidate -- -Apply -LegacyProfilesPath "<旧工具 profiles.json 的本机路径>"
 ```
 
-该命令只允许在干净 `main` 运行，写入 `D:\Software\CodeX Provider Switcher\candidate-install-state.json` 记录版本和 commit，且不会创建 tag、GitHub Release、Store 包或 Partner Center 提交。它只更新程序文件，保留 `%LOCALAPPDATA%\CodeX Provider Switcher` 中的用户资料。若本机存在旧工具 profile，恢复操作必须先备份并使用 DPAPI 保护导入结果；不得要求用户逐条重填密钥，也不得覆盖已保存的凭据。
+该命令只允许在干净 `main` 运行，写入候选安装目录的 `candidate-install-state.json` 记录版本和 commit，且不会创建 tag、GitHub Release、Store 包或 Partner Center 提交。它只更新程序文件，保留已有本机用户资料。若本机存在旧工具 profile，恢复操作必须先备份并使用 DPAPI 保护导入结果；不得要求用户逐条重填密钥，也不得覆盖已保存的凭据。
 
 本机候选安装只用于维护者本人继续使用与验收，不能作为对外下载入口或“产品已交付”的证据。Store 发布后必须从 Store 安装并验收，再退役候选安装。
 

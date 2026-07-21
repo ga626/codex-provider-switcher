@@ -18,11 +18,11 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = [string]$package.version
 }
 $outputRootPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputRoot))
-$releaseName = "CodeXProviderSwitcher-windows-x64-$Version"
+$releaseName = "SignalmanAI-windows-x64-$Version"
 $stagePath = Join-Path $outputRootPath $releaseName
 $zipPath = Join-Path $outputRootPath "$releaseName.zip"
 $sha256Path = Join-Path $outputRootPath "$releaseName.zip.sha256"
-$desktopSetupName = "CodeXProviderSwitcher-windows-x64-$Version-setup.exe"
+$desktopSetupName = "SignalmanAI-windows-x64-$Version-setup.exe"
 $desktopSetupPath = Join-Path $outputRootPath $desktopSetupName
 $backendExe = Join-Path $projectRoot "src-tauri\target\release\local_backend.exe"
 $distRoot = Join-Path $projectRoot "dist"
@@ -231,8 +231,8 @@ function Assert-PublicReleaseTree {
     }
 
     foreach ($required in @(
-        "CodeXProviderSwitcher.cmd",
-        "CodeXProviderSwitcher.ps1",
+        "SignalmanAI.cmd",
+        "SignalmanAI.ps1",
         "bin\local_backend.exe",
         "dist\index.html",
         "README.md",
@@ -255,7 +255,7 @@ function Assert-PublicReleaseTree {
     }
 }
 
-Write-Host "CodeX Provider Switcher release package plan"
+Write-Host "Signalman AI release package plan"
 Write-Host "Version: $Version"
 Write-Host "Stage:   $stagePath"
 Write-Host "Zip:     $zipPath"
@@ -266,8 +266,8 @@ Write-Host "Mode:    $(if ($Apply) { 'apply' } else { 'dry-run' })"
 Write-Host "Package: desktop setup + launcher/local_backend fallback zip + public docs"
 
 foreach ($item in @(
-    "CodeXProviderSwitcher.cmd",
-    "CodeXProviderSwitcher.ps1",
+    "SignalmanAI.cmd",
+    "SignalmanAI.ps1",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
@@ -371,8 +371,8 @@ Get-ChildItem -LiteralPath $outputRootPath -File -Force -ErrorAction SilentlyCon
     Remove-Item -Force
 
 New-Item -ItemType Directory -Path $stagePath -Force | Out-Null
-Copy-FileToPackage -Source (Join-Path $projectRoot "CodeXProviderSwitcher.cmd") -DestinationRelativePath "CodeXProviderSwitcher.cmd"
-Copy-FileToPackage -Source (Join-Path $projectRoot "CodeXProviderSwitcher.ps1") -DestinationRelativePath "CodeXProviderSwitcher.ps1"
+Copy-FileToPackage -Source (Join-Path $projectRoot "SignalmanAI.cmd") -DestinationRelativePath "SignalmanAI.cmd"
+Copy-FileToPackage -Source (Join-Path $projectRoot "SignalmanAI.ps1") -DestinationRelativePath "SignalmanAI.ps1"
 Copy-FileToPackage -Source $backendExe -DestinationRelativePath "bin\local_backend.exe"
 Copy-DirectoryToPackage -SourceRoot $distRoot -DestinationRelativeRoot "dist"
 
@@ -387,7 +387,7 @@ foreach ($item in @(
     Copy-FileToPackage -Source (Join-Path $projectRoot $item) -DestinationRelativePath $item
 }
 
-Assert-CmdFileUsesCrlf -Path (Join-Path $stagePath "CodeXProviderSwitcher.cmd") -Label "CodeXProviderSwitcher.cmd"
+Assert-CmdFileUsesCrlf -Path (Join-Path $stagePath "SignalmanAI.cmd") -Label "SignalmanAI.cmd"
 Assert-PublicReleaseTree -Root $stagePath
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem

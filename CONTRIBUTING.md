@@ -1,6 +1,6 @@
 # 贡献说明
 
-感谢参与 `CodeX Provider Switcher`。这是会读写本地 Codex 配置的 Windows 桌面工具，任何改动都应优先保证配置安全、可恢复和可交付。
+感谢参与 `Signalman AI`。这是会读写本地 Codex 配置的 Windows 桌面工具，任何改动都应优先保证配置安全、可恢复和可交付。
 
 ## 开始前
 

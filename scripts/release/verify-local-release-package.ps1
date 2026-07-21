@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 if ([string]::IsNullOrWhiteSpace($ZipPath)) {
     $package = Get-Content -LiteralPath (Join-Path $projectRoot "package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-    $ZipPath = "release-assets\CodeXProviderSwitcher-windows-x64-$($package.version).zip"
+    $ZipPath = "release-assets\SignalmanAI-windows-x64-$($package.version).zip"
 }
 $zipFull = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $ZipPath))
 $workFull = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $WorkRoot))
@@ -62,8 +62,8 @@ if (Test-ListeningPort -CandidatePort $Port) {
     Write-Host "Release verification port $requestedPort is in use; using temporary port $Port."
 }
 
-$launcher = Join-Path $packageRoot.FullName "CodeXProviderSwitcher.ps1"
-$cmd = Join-Path $packageRoot.FullName "CodeXProviderSwitcher.cmd"
+$launcher = Join-Path $packageRoot.FullName "SignalmanAI.ps1"
+$cmd = Join-Path $packageRoot.FullName "SignalmanAI.cmd"
 $backend = Join-Path $packageRoot.FullName "bin\local_backend.exe"
 $distIndex = Join-Path $packageRoot.FullName "dist\index.html"
 

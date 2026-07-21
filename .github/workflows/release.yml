@@ -73,7 +73,7 @@ jobs:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
           $version = $env:RELEASE_TAG -replace '^v', ''
-          $releaseName = "CodeXProviderSwitcher-windows-x64-$version"
+          $releaseName = "SignalmanAI-windows-x64-$version"
           $expectedNames = @(
             "$releaseName.zip",
             "$releaseName.zip.sha256",
