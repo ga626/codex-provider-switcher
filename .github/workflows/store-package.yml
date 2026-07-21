@@ -106,7 +106,7 @@ jobs:
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: npm run store:verify-package -- -Version $env:RELEASE_VERSION -PackagePath "store-assets/CodeXProviderSwitcher-windows-x64-$env:RELEASE_VERSION.msix"
+        run: npm run store:verify-package -- -Version $env:RELEASE_VERSION -PackagePath "store-assets/SignalmanAI-windows-x64-$env:RELEASE_VERSION.msix"
 
       - name: Upload Partner Center package
         uses: actions/upload-artifact@v4

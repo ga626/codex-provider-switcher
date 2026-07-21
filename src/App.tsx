@@ -474,7 +474,7 @@ function App() {
         <div className="brand-lockup">
           <span className="brand-mark"><GitCompareArrows size={20} /></span>
           <div>
-            <h1>CodeX Provider Switcher</h1>
+            <h1>Signalman AI</h1>
             <p>服务商连接管理</p>
           </div>
         </div>

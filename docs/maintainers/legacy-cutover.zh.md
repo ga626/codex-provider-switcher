@@ -23,7 +23,7 @@
 
    记录新安装版版本和签名状态、旧程序 PID/监听端口、Run/RunOnce、Startup、计划任务、服务，以及 Codex 配置不变量。脚本不打开 `auth.json`，不打印任何凭据，也不会停止任何进程。
 
-3. 从新安装版启动 `CodeX Provider Switcher`，确认没有 CMD、浏览器或后台托盘。确认已经由 Store 版接管后，才卸载维护者本机候选安装；保留 `%LOCALAPPDATA%\CodeX Provider Switcher` 中的用户资料。
+3. 从新安装版启动 `Signalman AI`，确认没有 CMD、浏览器或后台托盘。确认已经由 Store 版接管后，才卸载维护者本机候选安装；保留已有的本机用户资料。
 4. 确认目标 provider 的测试通过后执行切换。应用必须先创建恢复点。
 5. 在新的 Codex 会话中完成一次真实工作确认。
 6. 只有上一步成功，才停止旧 `CodeX-Switcher.exe`。不要删除旧目录或旧 `profiles.json`。

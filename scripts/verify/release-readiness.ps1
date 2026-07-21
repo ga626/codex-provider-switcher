@@ -176,7 +176,7 @@ try {
         }
     }
 
-    Write-Host "CodeX Provider Switcher release readiness"
+    Write-Host "Signalman AI release readiness"
     Write-Host "Repository: $Repository"
     Write-Host "Version:    $version"
     Write-Host "Tag:        $Tag"

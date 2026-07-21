@@ -36,7 +36,7 @@ Write-Host "Local candidate refresh"
 Write-Host "Current source: $currentBranch @ $head"
 Write-Host "Version: $($package.version)"
 Write-Host "Install root: $InstallRoot"
-Write-Host "User data remains: $env:LOCALAPPDATA\CodeX Provider Switcher"
+Write-Host "User data remains in the existing compatibility directory."
 Write-Host "This is a private acceptance channel, not a GitHub Release or Microsoft Store publication."
 
 if ($ExplainOnly) {

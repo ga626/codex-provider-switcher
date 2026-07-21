@@ -22,11 +22,11 @@ if ([string]::IsNullOrWhiteSpace($Tag)) {
     $Tag = "v$Version"
 }
 
-$releaseName = "CodeXProviderSwitcher-windows-x64-$Version"
+$releaseName = "SignalmanAI-windows-x64-$Version"
 $outputRootPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputRoot))
 $localZip = Join-Path $outputRootPath "$releaseName.zip"
 $localSha = Join-Path $outputRootPath "$releaseName.zip.sha256"
-$localSetup = Join-Path $outputRootPath "CodeXProviderSwitcher-windows-x64-$Version-setup.exe"
+$localSetup = Join-Path $outputRootPath "SignalmanAI-windows-x64-$Version-setup.exe"
 $localSetupSha = "$localSetup.sha256"
 $localNotes = Join-Path $projectRoot "docs\release\release-notes-$Version.md"
 
@@ -114,8 +114,8 @@ if ($assetNames -notcontains "$releaseName.zip.sha256") {
 }
 
 $desktopAssetNames = @(
-    "CodeXProviderSwitcher-windows-x64-$Version-setup.exe",
-    "CodeXProviderSwitcher-windows-x64-$Version-setup.exe.sha256"
+    "SignalmanAI-windows-x64-$Version-setup.exe",
+    "SignalmanAI-windows-x64-$Version-setup.exe.sha256"
 )
 foreach ($assetName in $desktopAssetNames) {
     if ($assetNames -notcontains $assetName) {
@@ -203,7 +203,7 @@ try {
         throw "Remote release zip did not contain expected package directory: $releaseName"
     }
 
-    foreach ($required in @("CodeXProviderSwitcher.cmd", "CodeXProviderSwitcher.ps1", "bin\local_backend.exe", "dist\index.html", "README.md", "docs\user\installation.zh.md")) {
+    foreach ($required in @("SignalmanAI.cmd", "SignalmanAI.ps1", "bin\local_backend.exe", "dist\index.html", "README.md", "docs\user\installation.zh.md")) {
         if (-not (Test-Path -LiteralPath (Join-Path $packageRoot.FullName $required) -PathType Leaf)) {
             throw "Remote release zip is missing: $required"
         }

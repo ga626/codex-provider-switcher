@@ -23,13 +23,13 @@ if (-not $Version) {
     $Version = [string]$packageJson.version
 }
 
-$setupPath = Join-Path $ReleaseRoot "CodeXProviderSwitcher-windows-x64-$Version-setup.exe"
+$setupPath = Join-Path $ReleaseRoot "SignalmanAI-windows-x64-$Version-setup.exe"
 $uninstaller = Join-Path $InstallRoot "uninstall.exe"
 
 Write-Host "Validation mode: stable installation"
 Write-Host "Install root: $InstallRoot"
 Write-Host "Release setup: $setupPath"
-Write-Host "User data: $env:LOCALAPPDATA\CodeX Provider Switcher"
+Write-Host "User data remains in the existing compatibility directory."
 Write-Host "Behavior: install and upgrade replace program files only; uninstall preserves user data."
 
 if ($ExplainOnly) {
@@ -50,7 +50,7 @@ if ($Uninstall) {
         throw "Stable installation directory still exists after uninstall: $InstallRoot"
     }
     Write-Host "[PASS] Stable program directory removed."
-    Write-Host "[PASS] User data was not deleted by this script: $env:LOCALAPPDATA\CodeX Provider Switcher"
+    Write-Host "[PASS] Existing user data was not deleted by this script."
     exit 0
 }
 

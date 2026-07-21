@@ -4,7 +4,7 @@
 
 ## 安装后窗口没有打开
 
-1. 从开始菜单或桌面图标启动 `CodeX Provider Switcher`，不要直接运行源码脚本。
+1. 从开始菜单或桌面图标启动 `Signalman AI`，不要直接运行源码脚本。
 2. 确认下载的是 Release 中带 `setup.exe` 的安装包，而不是源码 zip。
 3. 确认 Windows WebView2 Runtime 可用。多数新版 Windows 已内置；缺失时安装 Microsoft Edge WebView2 Evergreen Runtime。
 4. 若安装器被拦截，记录 Windows 显示的提示和版本号，不要下载来源不明的替代安装包。
@@ -39,7 +39,7 @@
 
 ## fallback 诊断入口
 
-Release 附带的 fallback zip 只用于排错和本地 Web 诊断，不是推荐的日常入口。解压后双击 `CodeXProviderSwitcher.cmd`，再访问：
+Release 附带的 fallback zip 只用于排错和本地 Web 诊断，不是推荐的日常入口。解压后双击 `SignalmanAI.cmd`，再访问：
 
 ```text
 http://127.0.0.1:47832/
@@ -48,7 +48,7 @@ http://127.0.0.1:47832/
 停止 fallback 后端：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\CodeXProviderSwitcher.ps1 -Stop
+powershell -NoProfile -ExecutionPolicy Bypass -File .\SignalmanAI.ps1 -Stop
 ```
 
 ## 报告问题时请提供

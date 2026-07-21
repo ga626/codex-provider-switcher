@@ -17,4 +17,6 @@
 
 以下目录只属于本机，必须保持忽略：`node_modules/`、`dist/`、`src-tauri/target/`、`logs/`、`release/`、`release-assets/`、`archive/`、`project_status/`、`.codex-provider-switcher/`、`.agents/`、`.codex/`、`.codex-praetor/`。
 
-程序文件与可变用户数据分开：安装包由用户选择位置，用户数据默认在 `%LOCALAPPDATA%\CodeX Provider Switcher`。旧版 `D:\AI Studio\CodeX\Codex Switcher` 仅作参考和回滚源，不属于本仓库。
+程序文件与可变用户数据分开：安装包由用户选择位置；为保证升级后仍能读取现有资料，当前用户数据保留在历史兼容目录 `%LOCALAPPDATA%\CodeX Provider Switcher`。旧版 `D:\AI Studio\CodeX\Codex Switcher` 仅作参考和回滚源，不属于本仓库。
+
+产品显示名与技术兼容标识的完整边界见 [品牌与兼容性边界](brand-and-compatibility.zh.md)。

@@ -22,7 +22,7 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
 }
 
 $outputRootPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputRoot))
-$releaseName = "CodeXProviderSwitcher-windows-x64-$Version"
+$releaseName = "SignalmanAI-windows-x64-$Version"
 $setupName = "$releaseName-setup.exe"
 $expectedNames = @(
     "$releaseName.zip",
@@ -73,7 +73,7 @@ if ($releaseRaw -notmatch "404|Not Found") {
     throw "Unable to determine GitHub Release state for $Tag. Output: $releaseRaw"
 }
 
-& gh release create $Tag @assetPaths --repo $Repository --title "CodeX Provider Switcher $Version" --notes-file $notesPath --verify-tag --latest
+& gh release create $Tag @assetPaths --repo $Repository --title "Signalman AI $Version" --notes-file $notesPath --verify-tag --latest
 if ($LASTEXITCODE -ne 0) {
     throw "GitHub Release creation failed."
 }

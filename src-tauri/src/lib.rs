@@ -11,6 +11,8 @@ use std::{
 };
 use thiserror::Error;
 
+// Keep the existing data directory so installed users retain DPAPI-protected
+// credentials, backups, and history when the visible product brand changes.
 const APP_DIR_NAME: &str = "CodeX Provider Switcher";
 const PROFILES_FILE: &str = "profiles.json";
 const ACTIVITY_FILE: &str = "activity.json";
@@ -2358,7 +2360,7 @@ pub fn run() {
             restore_latest_backup
         ])
         .run(tauri::generate_context!())
-        .expect("error while running CodeX Provider Switcher");
+        .expect("error while running Signalman AI");
 }
 
 #[cfg(test)]

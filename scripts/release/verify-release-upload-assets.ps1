@@ -13,7 +13,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 }
 
 $outputRootPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputRoot))
-$releaseName = "CodeXProviderSwitcher-windows-x64-$Version"
+$releaseName = "SignalmanAI-windows-x64-$Version"
 $setupName = "$releaseName-setup.exe"
 $expectedNames = @(
     "$releaseName.zip",

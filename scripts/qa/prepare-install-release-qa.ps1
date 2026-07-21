@@ -25,15 +25,15 @@ if (-not $Version) {
     $Version = [string]$packageJson.version
 }
 
-$setupName = "CodeXProviderSwitcher-windows-x64-$Version-setup.exe"
+$setupName = "SignalmanAI-windows-x64-$Version-setup.exe"
 $setupPath = Join-Path $ReleaseRoot $setupName
 $setupShaPath = "$setupPath.sha256"
-$fallbackZipPath = Join-Path $ReleaseRoot "CodeXProviderSwitcher-windows-x64-$Version.zip"
+$fallbackZipPath = Join-Path $ReleaseRoot "SignalmanAI-windows-x64-$Version.zip"
 $fallbackShaPath = "$fallbackZipPath.sha256"
 
 Write-Host "Validation mode: install release"
 Write-Host "Meaning: verify the installable release asset. Use this only for installer, release, upgrade, version, startup, or uninstall-path changes."
-Write-Host "Expected user-visible result: run setup.exe, start CodeX Provider Switcher from desktop/start menu, see one app window."
+Write-Host "Expected user-visible result: run setup.exe, start Signalman AI from desktop/start menu, see one app window."
 Write-Host "Release root: $ReleaseRoot"
 
 if ($ExplainOnly) {
@@ -72,14 +72,14 @@ if ($Collect) {
     }
 
     $readme = @"
-# CodeX Provider Switcher install release QA
+# Signalman AI install release QA
 
 Version: $Version
 
 Use this folder only for install/release validation.
 
 1. Run $setupName.
-2. Start CodeX Provider Switcher from the desktop icon or Start menu.
+2. Start Signalman AI from the desktop icon or Start menu.
 3. Confirm one desktop app window opens.
 4. Confirm no persistent CMD window opens.
 5. Confirm no external browser opens.

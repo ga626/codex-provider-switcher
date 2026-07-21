@@ -41,7 +41,7 @@ function isTrustedStoreUrl(value: string) {
 }
 
 function backendUnavailableMessage() {
-  return '应用的连接服务未能启动。请重新打开 CodeX Provider Switcher；如果问题持续，请查看故障排查。'
+  return '应用的连接服务未能启动。请重新打开 Signalman AI；如果问题持续，请查看故障排查。'
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {

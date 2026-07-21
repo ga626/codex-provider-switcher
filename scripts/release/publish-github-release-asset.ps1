@@ -21,11 +21,11 @@ if ([string]::IsNullOrWhiteSpace($Tag)) {
     $Tag = "v$Version"
 }
 
-$releaseName = "CodeXProviderSwitcher-windows-x64-$Version"
+$releaseName = "SignalmanAI-windows-x64-$Version"
 $outputRootPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputRoot))
 $zipPath = Join-Path $outputRootPath "$releaseName.zip"
 $shaPath = Join-Path $outputRootPath "$releaseName.zip.sha256"
-$setupPath = Join-Path $outputRootPath "CodeXProviderSwitcher-windows-x64-$Version-setup.exe"
+$setupPath = Join-Path $outputRootPath "SignalmanAI-windows-x64-$Version-setup.exe"
 $setupShaPath = "$setupPath.sha256"
 $notesPath = Join-Path $projectRoot "docs\release\release-notes-$Version.md"
 
@@ -41,7 +41,7 @@ Assert-Command gh
 
 $branch = (& git -C $projectRoot branch --show-current).Trim()
 $status = (& git -C $projectRoot status --short)
-Write-Host "CodeX Provider Switcher GitHub Release publish plan"
+Write-Host "Signalman AI GitHub Release publish plan"
 Write-Host "Repository: $Repository"
 Write-Host "Tag:        $Tag"
 Write-Host "Branch:     $branch"

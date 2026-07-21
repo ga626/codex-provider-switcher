@@ -67,7 +67,7 @@ try {
 
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
   await page.locator('.app-shell').waitFor()
-  await page.getByRole('heading', { name: 'CodeX Provider Switcher' }).waitFor()
+  await page.getByRole('heading', { name: 'Signalman AI' }).waitFor()
   await page.getByText('0 个配置').waitFor()
   await page.getByRole('heading', { name: '新增服务商' }).waitFor()
   await page.screenshot({ path: join(outputDir, 'local-web-backend.png'), fullPage: true })

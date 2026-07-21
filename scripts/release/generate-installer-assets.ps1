@@ -28,8 +28,7 @@ function Save-Header {
         $font = New-Object System.Drawing.Font('Segoe UI', 7.2, [System.Drawing.FontStyle]::Bold)
         $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(14, 23, 38))
         try {
-            $graphics.DrawString('CodeX Provider', $font, $brush, 53, 15)
-            $graphics.DrawString('Switcher', $font, $brush, 53, 29)
+            $graphics.DrawString('Signalman AI', $font, $brush, 53, 21)
         } finally {
             $font.Dispose()
             $brush.Dispose()
@@ -57,8 +56,7 @@ function Save-Sidebar {
         $font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
         $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
         try {
-            $graphics.DrawString('CodeX Provider', $font, $brush, 16, 177)
-            $graphics.DrawString('Switcher', $font, $brush, 16, 198)
+            $graphics.DrawString('Signalman AI', $font, $brush, 16, 187)
         } finally {
             $font.Dispose()
             $brush.Dispose()

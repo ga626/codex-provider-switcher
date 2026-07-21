@@ -1,13 +1,13 @@
 # 安装、更新与卸载
 
-`CodeX Provider Switcher` 是 Windows alpha 软件。Microsoft Store 是下一次正式发布的优先渠道，但首个 Store 版本尚未通过认证；当前日常使用仍以 GitHub Release 中标为 Latest 的版本为准，不要把源码目录或临时构建当成稳定安装版。
+`Signalman AI` 是 Windows alpha 软件。Microsoft Store 是下一次正式发布的优先渠道，但当前 Store 候选包尚未通过认证；当前日常使用仍以 GitHub Release 中标为 Latest 的版本为准，不要把源码目录或临时构建当成稳定安装版。
 
 ## 安装
 
 1. 打开 [最新发布版](https://github.com/ga626/codex-provider-switcher/releases/latest)。
 2. 下载名称带 `setup.exe` 的 Windows 安装包和同名 `.sha256` 文件。
 3. 双击安装包，按安装向导完成安装。
-4. 从开始菜单或桌面图标打开 `CodeX Provider Switcher`。
+4. 从开始菜单或桌面图标打开 `Signalman AI`。
 
 正常情况下会出现一个桌面窗口：不需要浏览器、不需要输入端口、不应保留 CMD 窗口。若安装器被 Windows 拦截或窗口无法打开，先看 [排错指南](troubleshooting.zh.md)。
 
@@ -27,7 +27,7 @@
 
 ## 卸载与数据保留
 
-升级和卸载只会替换或移除程序文件，不会自动删除 `%LOCALAPPDATA%\CodeX Provider Switcher` 中的 provider 目录、备份和本地状态。这是为了让受控升级、重新安装后仍能恢复。保存的 API 密钥使用当前 Windows 用户的凭据保护，不会以明文保存在该目录。
+升级和卸载只会替换或移除程序文件，不会自动删除已有的 provider 目录、备份和本地状态。这是为了让受控升级、重新安装后仍能恢复。保存的 API 密钥使用当前 Windows 用户的凭据保护，不会以明文保存在该目录。
 
 如果你确实要清空数据，请先在应用中确认恢复点或自行备份，再手动删除该目录。不要把其中的文件发送到公开 Issue。
 

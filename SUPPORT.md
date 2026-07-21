@@ -1,6 +1,6 @@
 # 获取帮助
 
-CodeX Provider Switcher 是 Windows 上的本地 provider 管理工具。使用中遇到问题，请优先查看：
+Signalman AI 是 Windows 上的本地 provider 管理工具。使用中遇到问题，请优先查看：
 
 - [安装、更新与卸载](docs/user/installation.zh.md)
 - [排错指南](docs/user/troubleshooting.zh.md)

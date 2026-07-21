@@ -23,5 +23,6 @@
 ## 我需要了解产品或仓库背景
 
 - [产品规格](reference/product-spec.zh.md)
+- [品牌与兼容性边界](reference/brand-and-compatibility.zh.md)
 - [仓库结构与文件责任](reference/repository-structure.zh.md)
 - [历史材料索引](reference/history/README.md)

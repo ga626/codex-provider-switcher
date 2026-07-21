@@ -95,7 +95,7 @@ if (-not (Test-Path -LiteralPath $iconSource -PathType Leaf)) { throw "Store ico
 
 $outputRootPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputRoot))
 $stagePath = Join-Path $projectRoot ".codex-provider-switcher\store-package\$Version"
-$msixPath = Join-Path $outputRootPath "CodeXProviderSwitcher-windows-x64-$Version.msix"
+$msixPath = Join-Path $outputRootPath "SignalmanAI-windows-x64-$Version.msix"
 
 Write-Host "Store package product version: $Version"
 Write-Host "Store package MSIX version: $msixVersion"
@@ -153,7 +153,7 @@ if ($packager.Kind -eq 'winapp') {
         Pop-Location
     }
 } elseif ($packager.Kind -eq 'makeappx') {
-    $temporaryPackage = Join-Path $outputRootPath ".CodeXProviderSwitcher-windows-x64-$Version.packaging.msix"
+    $temporaryPackage = Join-Path $outputRootPath ".SignalmanAI-windows-x64-$Version.packaging.msix"
     if (Test-Path -LiteralPath $temporaryPackage) { Remove-Item -LiteralPath $temporaryPackage -Force }
     & $packager.Path pack /d $stagePath /p $temporaryPackage /o
     if ($LASTEXITCODE -ne 0) { throw "Windows SDK MakeAppx packaging failed with exit code $LASTEXITCODE." }

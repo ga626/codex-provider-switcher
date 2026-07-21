@@ -64,8 +64,8 @@ try {
         "docs\release\README.md",
         "docs\user\installation.zh.md",
         "docs\user\troubleshooting.zh.md",
-        "CodeXProviderSwitcher.cmd",
-        "CodeXProviderSwitcher.ps1",
+        "SignalmanAI.cmd",
+        "SignalmanAI.ps1",
         "scripts\release\build-codex-provider-switcher-release.ps1",
         "scripts\release\verify-local-release-package.ps1",
         "scripts\release\verify-release-upload-assets.ps1",
@@ -92,10 +92,10 @@ try {
     $tauriConfigPath = Join-Path $projectRoot "src-tauri\tauri.conf.json"
     if (Test-Path -LiteralPath $tauriConfigPath -PathType Leaf) {
         $tauriConfig = Get-Content -LiteralPath $tauriConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($tauriConfig.productName -ne "CodeX Provider Switcher") {
+        if ($tauriConfig.productName -ne "Signalman AI") {
             Add-Failure "tauri.conf.json productName mismatch."
         }
-        if ($tauriConfig.bundle.publisher -ne "CodeX Provider Switcher") {
+        if ($tauriConfig.bundle.publisher -ne "ga626") {
             Add-Failure "tauri.conf.json bundle.publisher mismatch."
         }
     }
@@ -122,12 +122,12 @@ try {
     if ($setupText -match "start-preview\.ps1") {
         Add-Failure "setup.ps1 must not start the UI-only preview path."
     }
-    if ($setupText -notmatch "CodeXProviderSwitcher\.ps1") {
+    if ($setupText -notmatch "SignalmanAI\.ps1") {
         Add-Failure "setup.ps1 must call the real local Web backend launcher."
     }
 
     $gitignore = Get-Content -LiteralPath (Join-Path $projectRoot ".gitignore") -Raw -Encoding UTF8
-    foreach ($ignored in @("AGENTS.md", ".agents/", ".codex/", ".codex-praetor/", "node_modules", "dist", "src-tauri/target", "logs/", "release/", "release-assets/", "archive/", "project_status/", ".codex-provider-switcher/", "auth.json", "profiles.json")) {
+    foreach ($ignored in @("AGENTS.md", ".agents/", ".codex/", ".codex-praetor/", "node_modules", "dist", "src-tauri/target", "logs/", "release/", "release-assets/", "store-assets/", "archive/", "project_status/", ".codex-provider-switcher/", "auth.json", "profiles.json")) {
         if ($gitignore -notlike "*$ignored*") {
             Add-Failure ".gitignore missing: $ignored"
         }
@@ -143,6 +143,7 @@ try {
             $_ -like ".codex-praetor/*" -or
             $_ -like "logs/*" -or
             $_ -like "release/*" -or
+            $_ -like "store-assets/*" -or
             $_ -like "archive/*" -or
             $_ -like "src-tauri/target/*" -or
             $_ -like "node_modules/*" -or
@@ -175,11 +176,11 @@ try {
 }
 
 if ($failures.Count -gt 0) {
-    Write-Host "CodeX Provider Switcher doctor failed:" -ForegroundColor Red
+    Write-Host "Signalman AI doctor failed:" -ForegroundColor Red
     foreach ($failure in $failures) {
         Write-Host " - $failure" -ForegroundColor Red
     }
     exit 1
 }
 
-Write-Host "[PASS] CodeX Provider Switcher doctor checks passed." -ForegroundColor Green
+Write-Host "[PASS] Signalman AI doctor checks passed." -ForegroundColor Green
