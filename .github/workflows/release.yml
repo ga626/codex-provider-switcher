@@ -12,9 +12,7 @@ on:
         type: string
 
 permissions:
-  actions: read
   contents: read
-  security-events: read
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -33,17 +31,23 @@ jobs:
       release_state: ${{ steps.release_state.outputs.release_state }}
       version: ${{ steps.identity.outputs.version }}
     steps:
-      - name: Checkout tagged commit
+      - name: Checkout release controller
         uses: actions/checkout@v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.ref }}
+          fetch-depth: 0
 
-      - name: Check release delivery readiness
+      - name: Check runner-safe release identity
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify\release-readiness.ps1 -Channel github -Tag $env:RELEASE_TAG -SkipRepositorySettings
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify\release-readiness.ps1 -Channel github -Tag $env:RELEASE_TAG -Mode RunnerSafe -SourceRef $env:RELEASE_TAG
+
+      - name: Checkout tagged commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Validate tag and version metadata
         id: identity

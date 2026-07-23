@@ -9,7 +9,7 @@
 
 ## 验证
 
-列出实际运行过的高信号命令和结论。小改动写相关验证；发布影响 PR 还要写开发版验收、`npm run release:channel-smoke` 和 `npm run release:readiness -- -Channel github -ReportOnly` 的结论。
+列出实际运行过的高信号命令和结论。小改动写相关验证；发布影响 PR 还要写开发版验收、`npm run release:channel-smoke`、`npm run release:readiness:smoke` 和 `npm run release:readiness -- -Mode Maintainer -Channel github -ReportOnly` 的结论。
 
 ## 风险和边界
 
@@ -21,6 +21,6 @@
 
 ## 发布计划/后续动作
 
-说明是否为发布影响 PR、目标版本和 tag、计划发布的资产，以及合并后需要做的下载/安装验收。GitHub 日常发布和 Store 稳定发布必须分开说明：Store 不跟随每个 GitHub tag。发布影响 PR 必须粘贴 `npm run release:readiness -- -Channel github -ReportOnly` 的简短结论；若缺 updater 签名或其他发布条件，明确写“代码可合并，产品未交付”和下一步负责人。
+说明是否为发布影响 PR、目标版本和 tag、计划发布的资产，以及合并后需要做的下载/安装验收。GitHub 日常发布和 Store 稳定发布必须分开说明：Store 不跟随每个 GitHub tag。发布影响 PR 必须粘贴 `npm run release:readiness -- -Mode Maintainer -Channel github -ReportOnly` 的简短结论；若缺 updater 签名或其他发布条件，明确写“代码可合并，产品未交付”和下一步负责人。
 
 没有完成新 tag、不可变 GitHub Release、远端下载、安装、启动和升级验收时，状态只能写“代码已合并，产品未交付”。不得复用旧 tag 或覆盖旧 Release。

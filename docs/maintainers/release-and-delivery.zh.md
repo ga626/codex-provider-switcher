@@ -11,15 +11,17 @@
 
 不购买 Windows Authenticode/Artifact Signing 是本项目已确认的策略。GitHub `setup.exe` 因此可能出现 SmartScreen 提示；不要把 Store 的微软签名说成 GitHub 安装包的签名，也不要生成自签名 PFX 冒充可信发布。
 
-## 发布前检查
+## 两种发布检查
 
-GitHub 发布前运行：
+维护者在创建 tag 前运行：
 
 ```powershell
-npm run release:readiness -- -Channel github
+npm run release:readiness -- -Mode Maintainer -Channel github
 ```
 
-它只检查版本、GitHub 状态、Dependabot 告警和两个 Tauri updater Secret 名称，不读取 Secret 值，也不创建 tag 或 Release。
+默认是 `Maintainer` 模式。它检查版本、GitHub 状态、Dependabot 告警、immutable Release 设置和两个 Tauri updater Secret 名称；不读取 Secret 值，也不创建 tag 或 Release。这个检查必须在维护者本机、使用具有仓库治理读取权限的登录态运行。
+
+GitHub Actions 使用 `RunnerSafe` 模式。它只检查 tag、源码版本和既有 Release 状态，不枚举 Secret 名称，不读取 Dependabot 告警，也不要求个人 PAT。构建 job 对实际注入的 updater Secret 做非空校验。
 
 Store 大版本准备前运行：
 
@@ -49,6 +51,12 @@ npm run release:readiness -- -Channel store
 5. workflow 必须生成 setup、SHA256、updater `.sig` 与 `latest.json`。Tauri updater 私钥只存在 GitHub Actions Secret 中，普通用户不需要也看不到它。
 6. 从 GitHub Release 按普通用户路径下载、核对 SHA256、安装、启动并检查更新。未购买 Windows 代码签名时，记录 SmartScreen 行为，但不要把“无提示”作为 GitHub 交付门槛。
 7. 完成后才写“GitHub 已交付”。
+
+### 发布事故处理
+
+如果 tag 已创建但 workflow 在资产生成前失败，状态必须写为“代码已合并，产品未交付（release incident）”，并暂停新的发布影响 PR。不能删除或重打同一个 tag，也不能手工补传资产。
+
+只允许创建一个修复发布控制逻辑的 PR。该 PR 合并并通过 main CI 后，从默认分支手动运行 `GitHub Release` workflow，输入原 tag。workflow 会先 checkout 修复后的控制逻辑，用 Git 读取原 tag 的版本元数据；只有身份检查完成后才 checkout 原 tag 构建，因此最终资产仍来自原 SHA。完成远端下载、安装、启动和更新验收前，事故不能关闭。
 
 ## Microsoft Store 大版本步骤
 
