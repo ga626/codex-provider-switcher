@@ -2,7 +2,6 @@ param(
     [string]$Version = "",
     [string]$OutputRoot = "release-assets",
     [switch]$SkipDesktopBundle,
-    [switch]$RequireAuthenticode,
     [switch]$Apply
 )
 
@@ -262,6 +261,7 @@ Write-Host "Zip:     $zipPath"
 Write-Host "SHA256:  $sha256Path"
 Write-Host "Setup:   $desktopSetupPath"
 Write-Host "Updater: $updaterManifestPath"
+Write-Host "Channel: stable (GitHub Release)"
 Write-Host "Mode:    $(if ($Apply) { 'apply' } else { 'dry-run' })"
 Write-Host "Package: desktop setup + launcher/local_backend fallback zip + public docs"
 
@@ -298,9 +298,6 @@ if (-not $SkipDesktopBundle -and [string]::IsNullOrWhiteSpace($env:TAURI_SIGNING
 }
 
 if (-not $SkipDesktopBundle) {
-    if ($RequireAuthenticode -and [string]::IsNullOrWhiteSpace($env:TAURI_WINDOWS_SIGNING_CONFIG)) {
-        throw "Formal desktop Release requires TAURI_WINDOWS_SIGNING_CONFIG generated from a Windows code-signing certificate."
-    }
     $staleSignatures = @(
         Get-ChildItem -LiteralPath $tauriBundleRoot -Recurse -File -Filter "*.sig" -ErrorAction SilentlyContinue
     )
@@ -310,18 +307,15 @@ if (-not $SkipDesktopBundle) {
 }
 
 Push-Location $projectRoot
+$previousReleaseChannel = $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL
 try {
     Invoke-ReleaseBuildPhase -Name "frontend build" -Action {
         npm run build
     }
     if (-not $SkipDesktopBundle) {
         Invoke-ReleaseBuildPhase -Name "Tauri bundle and NSIS setup" -Action {
-            if ([string]::IsNullOrWhiteSpace($env:TAURI_WINDOWS_SIGNING_CONFIG)) {
-                npm run tauri:build
-            } else {
-                npm run release:assets
-                npx tauri build --config $env:TAURI_WINDOWS_SIGNING_CONFIG
-            }
+            $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = "stable"
+            npm run tauri:build
         }
     }
     Invoke-ReleaseBuildPhase -Name "release local backend" -Action {
@@ -329,6 +323,7 @@ try {
     }
 } finally {
     Pop-Location
+    $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = $previousReleaseChannel
     if ($loadedSigningKey) {
         Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
     }
@@ -346,7 +341,7 @@ Assert-UnderProject -Path $stagePath
 Assert-UnderProject -Path $zipPath
 
 $packageStartedAt = Get-Date
-Write-Host "::group::Release phase: fallback package, hashes, and updater manifest"
+Write-Host "::group::Release phase: public package, hashes, and updater manifest"
 try {
 New-Item -ItemType Directory -Path $outputRootPath -Force | Out-Null
 if (Test-Path -LiteralPath $stagePath) {
@@ -400,14 +395,6 @@ Write-Host "[PASS] SHA256: $hash"
 if (-not $SkipDesktopBundle) {
     $setupSource = Find-TauriBundleAsset -Pattern "*setup*.exe" -Label "NSIS setup exe"
     Assert-WindowsGuiExecutable -Path (Join-Path $projectRoot "src-tauri\target\release\codex-provider-switcher.exe") -Label "Tauri desktop binary"
-    if ($RequireAuthenticode) {
-        foreach ($path in @($setupSource, (Join-Path $projectRoot "src-tauri\target\release\codex-provider-switcher.exe"))) {
-            $signature = Get-AuthenticodeSignature -LiteralPath $path
-            if ($signature.Status -ne "Valid") {
-                throw "Windows Authenticode signature is invalid for ${path}: $($signature.Status)"
-            }
-        }
-    }
     Copy-Item -LiteralPath $setupSource -Destination $desktopSetupPath -Force
     $setupHash = Write-Sha256File -Path $desktopSetupPath
     Write-Host "[PASS] Desktop setup copied: $desktopSetupPath"
@@ -443,6 +430,6 @@ if (-not $SkipDesktopBundle) {
 }
 } finally {
     $packageElapsed = (Get-Date) - $packageStartedAt
-    Write-Host ("[TIMING] fallback package, hashes, and updater manifest: {0:N1}s" -f $packageElapsed.TotalSeconds)
+    Write-Host ("[TIMING] public package, hashes, and updater manifest: {0:N1}s" -f $packageElapsed.TotalSeconds)
     Write-Host "::endgroup::"
 }

@@ -1,15 +1,27 @@
 # 安装、更新与卸载
 
-`Signalman AI` 是 Windows alpha 软件。Microsoft Store 是下一次正式发布的优先渠道，但当前 Store 候选包尚未通过认证；当前日常使用仍以 GitHub Release 中标为 Latest 的版本为准，不要把源码目录或临时构建当成稳定安装版。
+`Signalman AI` 是 Windows alpha 软件，有两条安装路径：GitHub 提供日常更新较快的版本，Microsoft Store 提供低频稳定版本。它们不是两个不同产品；请在同一台电脑上选择其中一个作为日常入口，不要把源码开发版或维护者候选版当作稳定安装版。
 
-## 安装
+## GitHub 最新版
 
 1. 打开 [最新发布版](https://github.com/ga626/codex-provider-switcher/releases/latest)。
 2. 下载名称带 `setup.exe` 的 Windows 安装包和同名 `.sha256` 文件。
-3. 双击安装包，按安装向导完成安装。
+3. 确认下载页属于官方仓库、版本号与校验文件一致后，双击安装包并按安装向导完成安装。
 4. 从开始菜单或桌面图标打开 `Signalman AI`。
 
-正常情况下会出现一个桌面窗口：不需要浏览器、不需要输入端口、不应保留 CMD 窗口。若安装器被 Windows 拦截或窗口无法打开，先看 [排错指南](troubleshooting.zh.md)。
+未购买 Windows 代码签名时，Windows 可能显示 SmartScreen 提示。这不表示可以忽略未知来源：只在确认下载来自官方 GitHub Release 后自行决定是否继续。企业策略或 Smart App Control 可能直接阻止未签名安装包，本项目不能也不会提供绕过方法。
+
+GitHub 安装版的“检查更新”使用签名更新包。更新完成后应用会重新启动；不要手工替换程序目录。
+
+## Microsoft Store 稳定版
+
+1. 打开 [Microsoft Store 产品页](https://apps.microsoft.com/detail/9P7PGV62WKK6)。
+2. 安装 `Signalman AI`，之后由 Microsoft Store 自动检查和交付稳定更新。
+3. Store 版本只在稳定大版本时更新，因此版本可能晚于 GitHub。这是正常的发布节奏差异。
+
+Store 安装版不使用 GitHub updater，也不要求任何私钥、口令或发布配置。
+
+正常情况下两条路径都会打开一个桌面窗口：不需要浏览器、不需要输入端口、不应保留 CMD 窗口。若安装器被 Windows 拦截或窗口无法打开，先看 [排错指南](troubleshooting.zh.md)。
 
 ## 第一次使用
 
@@ -19,11 +31,8 @@
 
 ## 检查更新
 
-当前 GitHub 安装版中的“检查更新”会从 GitHub Release 获取签名更新包。首个 Microsoft Store 版本认证后，Store 安装版会由 Store 自动检查和交付更新，应用内按钮会打开对应的 Store 页面。你不需要输入私钥、口令或发布配置。
-
-- 只信任应用内更新或 GitHub Release 中同一版本的安装包。不要从聊天记录、网盘或未知镜像下载 setup。
+- 只信任应用内更新、GitHub Release 或 Microsoft Store。不要从聊天记录、网盘或未知镜像下载 setup。
 - 更新失败时不要手动替换程序目录；记录提示，按排错指南处理，或保留当前稳定版等待受控升级。
-- Store 认证完成后，安装指南会在对应发布版本中同步切换到 Store 入口；在那之前不要尝试从空的 Store 产品页安装。
 
 ## 卸载与数据保留
 
@@ -33,7 +42,7 @@
 
 ## 开发者和源码使用者
 
-开发版与已安装版本是两条不同路线。查看当前 PR 的界面和普通功能时，开发者使用：
+开发版与已安装版本是不同路线。查看当前 PR 的界面和普通功能时，开发者使用：
 
 ```powershell
 npm run qa:dev-desktop

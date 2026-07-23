@@ -24,6 +24,6 @@
 
 ## 发布边界
 
-发布包的目标优先级是经 Microsoft Store 认证的 MSIX、受控 GitHub 直装 setup、fallback Web zip、开发预览。首个 Store 版本认证前，当前交付仍是 GitHub setup，文档不得提前把 Store 页面写成可下载入口。Store 版本由 Microsoft Store 签名和更新，GitHub 直装版的 updater 签名与 Windows Authenticode 是另一条独立边界。发布必须使用新版本/tag，不覆盖既有不可变 Release；只有 Store 认证完成并从 Store 安装、启动和检查更新后，才能称为 Store 产品已交付。
+GitHub Release 是日常公开小版本的主路径；Microsoft Store 是低频稳定大版本路径。两条路径都必须从同一已验证 tag 构建，但不要求每个 GitHub 版本同步提交 Store。Store 版本由 Microsoft Store 签名和更新；GitHub 直装版使用 Tauri updater 签名确认更新完整性，但在未购买 Windows 代码签名时可能出现 SmartScreen 提示。发布必须使用新版本/tag，不覆盖既有不可变 Release；GitHub 与 Store 的交付状态分别记录，不能互相替代。
 
 实现和验证细节见 [开发与 PR 指南](../contributing/development-and-prs.zh.md)、[发布与交付手册](../maintainers/release-and-delivery.zh.md) 与 [旧工具替换手册](../maintainers/legacy-cutover.zh.md)。

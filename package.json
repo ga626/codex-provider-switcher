@@ -1,7 +1,7 @@
 {
   "name": "codex-provider-switcher",
   "private": true,
-  "version": "0.8.0-alpha",
+  "version": "0.9.0-alpha",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -31,6 +31,7 @@
     "release:verify-local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-local-release-package.ps1",
     "release:verify-upload-assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-release-upload-assets.ps1",
     "release:verify-remote": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-github-release-asset.ps1 -RemoteStructureOnly",
+    "release:channel-smoke": "node scripts/release/release-channel-smoke.mjs",
     "release:assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/generate-installer-assets.ps1",
     "store:build-msix": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/build-store-msix.ps1",
     "store:verify-package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/store-package.ps1",

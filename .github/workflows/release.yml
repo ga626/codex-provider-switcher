@@ -1,10 +1,13 @@
-name: GitHub direct-install fallback
+name: GitHub Release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing version tag for the signed GitHub fallback"
+        description: "Existing version tag to publish through GitHub Releases"
         required: true
         type: string
 
@@ -14,7 +17,7 @@ permissions:
   security-events: read
 
 env:
-  RELEASE_TAG: ${{ inputs.tag }}
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -40,7 +43,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify\release-readiness.ps1 -Channel github-direct -Tag $env:RELEASE_TAG -SkipRepositorySettings
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify\release-readiness.ps1 -Channel github -Tag $env:RELEASE_TAG -SkipRepositorySettings
 
       - name: Validate tag and version metadata
         id: identity
@@ -102,7 +105,7 @@ jobs:
           "release_state=complete" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
   build:
-    name: Build signed Windows assets
+    name: Build GitHub Windows assets
     needs: preflight
     if: needs.preflight.outputs.release_state == 'missing'
     runs-on: windows-latest
@@ -112,8 +115,7 @@ jobs:
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL: stable
     steps:
       - name: Checkout tagged commit
         uses: actions/checkout@v7
@@ -142,37 +144,14 @@ jobs:
         run: |
           if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'TAURI_SIGNING_PRIVATE_KEY secret is missing.' }
           if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) { throw 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is missing.' }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)) { throw 'WINDOWS_CERTIFICATE secret is missing.' }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { throw 'WINDOWS_CERTIFICATE_PASSWORD secret is missing.' }
 
-      - name: Import Windows code-signing certificate
-        id: windows_certificate
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ env.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ env.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          $pfxPath = Join-Path $env:RUNNER_TEMP 'codex-provider-switcher-signing.pfx'
-          [System.IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          try {
-            $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-            $certificate = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
-            if (-not $certificate.HasPrivateKey) { throw 'Imported Windows certificate has no private key.' }
-            $configPath = Join-Path $env:RUNNER_TEMP 'tauri.windows-signing.json'
-            $tauriConfig = @{ bundle = @{ windows = @{ certificateThumbprint = $certificate.Thumbprint } } }
-            $tauriConfig | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $configPath -Encoding UTF8
-            "TAURI_WINDOWS_SIGNING_CONFIG=$configPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          } finally {
-            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
-          }
-
-      - name: Build signed release assets with phase timing
+      - name: Build updater-signed release assets with phase timing
         shell: pwsh
         env:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
           $version = $env:RELEASE_TAG -replace '^v', ''
-          npm run release:build -- -Version $version -Apply -RequireAuthenticode
+          npm run release:build -- -Version $version -Apply
 
       - name: Verify local release assets
         shell: pwsh

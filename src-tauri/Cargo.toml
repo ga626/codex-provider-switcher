@@ -1,6 +1,6 @@
 [package]
 name = "codex-provider-switcher"
-version = "0.8.0-alpha"
+version = "0.9.0-alpha"
 description = "Signalman AI local provider profile manager"
 authors = ["ga626"]
 edition = "2021"

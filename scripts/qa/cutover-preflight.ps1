@@ -1,5 +1,5 @@
 param(
-    [string]$InstallRoot = "D:\Software\CodeX Provider Switcher",
+    [string]$InstallRoot = "D:\Software\Signalman AI",
     [string]$LegacyRoot = "D:\AI Studio\CodeX\Codex Switcher",
     [string]$CodexRoot = (Join-Path $env:USERPROFILE ".codex"),
     [switch]$ExplainOnly

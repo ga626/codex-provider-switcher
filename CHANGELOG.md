@@ -2,9 +2,15 @@
 
 这里记录已合并版本线的用户可见变化。是否已经可下载安装，以对应版本的发布说明和实际用户渠道为准。
 
-## 未发布
+## 0.9.0-alpha - 未发布
 
-- `0.8.0-alpha`：产品显示名称改为 Signalman AI；桌面窗口、安装器、MSIX 显示名、商店文案、截图和发布资产同步更新。
+- 确立 GitHub 日常发布和 Microsoft Store 稳定大版本的双渠道交付。GitHub 安装包保留 Tauri updater 签名，不再因缺少 Windows PFX 阻断；Microsoft Store 包改为从已验证 GitHub tag 手动构建。
+- GitHub Release 构建显式启用 stable 更新通道；Store 与维护者候选构建分别隔离为 store 和 candidate 通道。
+- 维护者本机 GitHub 稳定安装与候选安装目录分别固定为 `D:\Software\Signalman AI` 和 `D:\Software\Signalman AI Candidate`；候选脚本只清理自身入口，不触碰 Store 或用户资料。
+- README、安装、排错、开发与发布文档改为分别说明 GitHub 最新版与 Store 稳定版，并明确未购买 Windows 代码签名时的 SmartScreen 边界。
+## 0.8.0-alpha
+
+- 产品显示名称改为 Signalman AI；桌面窗口、安装器、MSIX 显示名、商店文案、截图和发布资产同步更新。
 - 保留既有 Store ID、MSIX Identity、可执行文件名、GitHub 仓库地址与本机数据目录，确保已安装用户仍可升级并读取 DPAPI 保护的资料。
 - 修复候选安装刷新时桌面进程占用导致的安装阻断。
 - 仓库与文档产品化：使用者、贡献者、发布维护者和历史资料分层；新增发布就绪检查和依赖风险登记。
