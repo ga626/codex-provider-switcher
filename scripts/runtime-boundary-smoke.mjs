@@ -21,6 +21,26 @@ async function stopProcessTree(child) {
   await new Promise((resolve) => child.once('exit', resolve))
 }
 
+async function buildProductionPreview() {
+  const command = process.platform === 'win32' ? 'cmd.exe' : 'npm'
+  const args = process.platform === 'win32'
+    ? ['/c', 'npm', 'run', 'build']
+    : ['run', 'build']
+  const env = { ...process.env }
+  delete env.VITE_CODEX_PROVIDER_SWITCHER_ALLOW_MOCK
+
+  const build = spawn(command, args, {
+    cwd: process.cwd(),
+    env,
+    stdio: 'inherit',
+    windowsHide: true,
+  })
+  const exitCode = await new Promise((resolve) => build.once('exit', resolve))
+  if (exitCode !== 0) {
+    throw new Error(`production build failed before runtime-boundary smoke: ${exitCode}`)
+  }
+}
+
 async function waitForStaticPreview() {
   const started = Date.now()
   let lastError = ''
@@ -38,6 +58,7 @@ async function waitForStaticPreview() {
 }
 
 await mkdir(outputDir, { recursive: true })
+await buildProductionPreview()
 
 const child = spawn(
   process.platform === 'win32' ? 'cmd.exe' : 'npm',

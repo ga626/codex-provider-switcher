@@ -9,6 +9,7 @@ const storeProductUrl = `https://apps.microsoft.com/detail/${storeProductId}`
 const storeLaunchUrl = `ms-windows-store://pdp/?productid=${storeProductId}`
 
 export const isStoreManagedBuild = __CODEX_RELEASE_CHANNEL__ === 'store'
+export const isGitHubReleaseBuild = __CODEX_RELEASE_CHANNEL__ === 'stable'
 
 let mockState: AppState = structuredClone(initialState)
 let webBackendAvailable: boolean | null = null
@@ -132,7 +133,7 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
         releaseUrl: storeProductUrl,
       }
     }
-    if (__CODEX_RELEASE_CHANNEL__ !== 'stable') {
+    if (!isGitHubReleaseBuild) {
       pendingTauriUpdate = null
       return {
         currentVersion: __APP_VERSION__,

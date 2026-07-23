@@ -1,7 +1,7 @@
 param(
     [string]$CurrentVersion = "",
     [string]$TargetVersion = "",
-    [string]$InstallRoot = "D:\Software\CodeX Provider Switcher",
+    [string]$InstallRoot = "D:\Software\Signalman AI",
     [switch]$ExplainOnly,
     [switch]$Collect
 )

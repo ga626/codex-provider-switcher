@@ -1,5 +1,5 @@
 param(
-    [string]$InstallRoot = "D:\Software\CodeX Provider Switcher",
+    [string]$InstallRoot = "D:\Software\Signalman AI Candidate",
     [string]$LegacyProfilesPath = "",
     [switch]$Apply,
     [switch]$ExplainOnly
@@ -28,6 +28,56 @@ function Get-SetupPath {
     return $matches[0].FullName
 }
 
+function Get-NormalizedPath([string]$Path) {
+    return [System.IO.Path]::GetFullPath($Path).TrimEnd("\\")
+}
+
+function Stop-CandidateDesktopProcess([string]$ExpectedExe) {
+    $expected = Get-NormalizedPath $ExpectedExe
+    $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'codex-provider-switcher.exe'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.ExecutablePath -and (Get-NormalizedPath $_.ExecutablePath) -eq $expected
+        })
+    foreach ($processItem in $processes) {
+        Stop-Process -Id $processItem.ProcessId -Force
+    }
+}
+
+function Remove-CandidateShortcuts([string]$ExpectedExe) {
+    $shell = New-Object -ComObject WScript.Shell
+    $roots = @(
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop),
+        (Join-Path $env:APPDATA "Microsoft\\Windows\\Start Menu\\Programs")
+    )
+    $expected = Get-NormalizedPath $ExpectedExe
+    foreach ($root in $roots) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        foreach ($shortcut in @(Get-ChildItem -LiteralPath $root -Recurse -Filter "*.lnk" -File -ErrorAction SilentlyContinue)) {
+            $target = $shell.CreateShortcut($shortcut.FullName).TargetPath
+            if ($target -and (Get-NormalizedPath $target) -eq $expected) {
+                Remove-Item -LiteralPath $shortcut.FullName -Force
+            }
+        }
+    }
+}
+
+function Remove-CandidateUninstallEntries([string]$ExpectedRoot) {
+    $expected = Get-NormalizedPath $ExpectedRoot
+    foreach ($registryRoot in @(
+        "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+        "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
+    )) {
+        if (-not (Test-Path -LiteralPath $registryRoot -PathType Container)) { continue }
+        foreach ($entry in @(Get-ChildItem -LiteralPath $registryRoot -ErrorAction SilentlyContinue)) {
+            $properties = Get-ItemProperty -LiteralPath $entry.PSPath -ErrorAction SilentlyContinue
+            $installLocation = [string]$properties.InstallLocation
+            if ($installLocation -and (Get-NormalizedPath $installLocation) -eq $expected) {
+                Remove-Item -LiteralPath $entry.PSPath -Recurse -Force
+            }
+        }
+    }
+}
+
 $package = Get-Content -LiteralPath (Join-Path $projectRoot "package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 $head = (& git -C $projectRoot rev-parse HEAD).Trim()
 $currentBranch = (& git -C $projectRoot branch --show-current).Trim()
@@ -52,13 +102,11 @@ if (-not $Apply) {
 }
 
 Push-Location $projectRoot
+$previousReleaseChannel = $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL
 try {
-    # The development desktop executable shares the release output path with Tauri's build.
-    # Stop it before compiling so Rust can replace the binary on Windows.
-    $running = @(Get-Process -Name "codex-provider-switcher" -ErrorAction SilentlyContinue)
-    foreach ($processItem in $running) {
-        Stop-Process -Id $processItem.Id -Force
-    }
+    # Only stop the prior candidate executable. Store and GitHub installations must not be touched.
+    $candidateExe = Join-Path $InstallRoot "codex-provider-switcher.exe"
+    Stop-CandidateDesktopProcess -ExpectedExe $candidateExe
 
     npm run release:assets
     if ($LASTEXITCODE -ne 0) { throw "Installer asset generation failed." }
@@ -67,6 +115,7 @@ try {
     if (-not (Test-Path -LiteralPath $candidateConfigPath -PathType Leaf)) {
         throw "Candidate build config is missing: $candidateConfigPath"
     }
+    $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = "candidate"
     npx tauri build --bundles nsis --config $candidateConfigPath
     if ($LASTEXITCODE -ne 0) { throw "Desktop candidate build failed." }
 
@@ -80,6 +129,8 @@ try {
     if (-not (Test-Path -LiteralPath $installedExe -PathType Leaf)) {
         throw "Candidate installer did not create the expected executable: $installedExe"
     }
+    Remove-CandidateShortcuts -ExpectedExe $installedExe
+    Remove-CandidateUninstallEntries -ExpectedRoot $InstallRoot
 
     if ($LegacyProfilesPath) {
         $legacyFullPath = [System.IO.Path]::GetFullPath($LegacyProfilesPath)
@@ -99,6 +150,8 @@ try {
     }
     $state | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallRoot "candidate-install-state.json") -Encoding UTF8
     Write-Host "[PASS] Local candidate refreshed at $InstallRoot"
+    Write-Host "[PASS] Candidate-only shortcuts and uninstall entries were removed."
 } finally {
     Pop-Location
+    $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = $previousReleaseChannel
 }

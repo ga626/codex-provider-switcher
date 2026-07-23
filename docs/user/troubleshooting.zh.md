@@ -1,25 +1,25 @@
 # 排错指南
 
-先确认你正在使用的是什么：从 GitHub Release 安装的发布版，还是开发者打开的源码树开发版。首个 Microsoft Store 版本认证后，安装来源会显示为 Microsoft Store。不同来源的启动和更新方式不同。
+先确认你正在使用的是什么：GitHub Release 安装版、Microsoft Store 安装版，还是开发者打开的源码树开发版。不同来源的启动和更新方式不同。
 
 ## 安装后窗口没有打开
 
 1. 从开始菜单或桌面图标启动 `Signalman AI`，不要直接运行源码脚本。
 2. 确认下载的是 Release 中带 `setup.exe` 的安装包，而不是源码 zip。
 3. 确认 Windows WebView2 Runtime 可用。多数新版 Windows 已内置；缺失时安装 Microsoft Edge WebView2 Evergreen Runtime。
-4. 若安装器被拦截，记录 Windows 显示的提示和版本号，不要下载来源不明的替代安装包。
+4. GitHub 安装器若被 SmartScreen 拦截，只在确认下载页属于官方 Release、版本号和 `.sha256` 一致后决定是否继续；企业策略或 Smart App Control 阻止时，不要寻找绕过方法，改用 Store 稳定版或联系设备管理员。
 
 正常产品入口不应打开浏览器，也不应留下 CMD 窗口。若出现这些现象，请在 Issue 中提供版本、启动方式和脱敏错误摘要。
 
 ## 检查更新失败
 
-开发版不会使用稳定更新通道，这是预期行为。当前 GitHub 安装版更新失败时：
+开发版和维护者候选版不会使用稳定更新通道，这是预期行为。GitHub 安装版更新失败时：
 
 1. 确认网络可以访问 GitHub Release。
 2. 在 Release 页面确认该版本同时有 setup、`.sha256`、`.sig` 和 `latest.json`。
 3. 不要手工替换安装目录；保留当前稳定版，必要时从新的 Release setup 受控升级。
 
-签名校验失败表示更新包不能被信任，应停止更新并报告问题。Store 版本认证后，遇到 Store 更新错误时再改为记录 Store 错误码、应用版本和发生时间。
+签名校验失败表示更新包不能被信任，应停止更新并报告问题。Store 安装版遇到更新错误时，记录 Store 错误码、应用版本和发生时间。
 
 ## provider 或模型测试不通过
 

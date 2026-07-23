@@ -1,7 +1,7 @@
 param(
     [string]$Version,
     [string]$ReleaseRoot,
-    [string]$InstallRoot = "D:\Software\CodeX Provider Switcher",
+    [string]$InstallRoot = "D:\Software\Signalman AI",
     [switch]$Apply,
     [switch]$Uninstall,
     [switch]$ExplainOnly
@@ -55,11 +55,11 @@ if ($Uninstall) {
 }
 
 if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf)) {
-    throw "Stable installer not found: $setupPath. Build a signed release first."
+    throw "GitHub Release installer not found: $setupPath. Build the updater-signed release first."
 }
 
 if (-not $Apply) {
-    Write-Host "Dry run: would launch the signed installer with NSIS target $InstallRoot."
+    Write-Host "Dry run: would launch the GitHub Release installer with NSIS target $InstallRoot."
     Write-Host "Re-run with -Apply for local stable-install QA."
     exit 0
 }

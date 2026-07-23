@@ -88,6 +88,7 @@ assert(adapterTs.includes('function isTrustedStoreUrl(value: string)'), 'Store u
 assert(adapterTs.includes("parsed.hostname === 'apps.microsoft.com'"), 'Store trust check must allow only the canonical Store product page')
 assert(adapterTs.includes("parsed.protocol === 'ms-windows-store:'"), 'Store update action must open the Microsoft Store protocol')
 assert(adapterTs.includes("export const isStoreManagedBuild = __CODEX_RELEASE_CHANNEL__ === 'store'"), 'Store builds must not use the GitHub updater channel')
+assert(adapterTs.includes("export const isGitHubReleaseBuild = __CODEX_RELEASE_CHANNEL__ === 'stable'"), 'Only stable builds may present the GitHub updater')
 assert(adapterTs.indexOf('if (isTauri && pendingTauriUpdate)') < adapterTs.indexOf('const trustedStoreUrl = isTrustedStoreUrl(url)'), 'Signed Tauri updates must not be blocked by fallback URL guards')
 assert(capabilityText.includes('ms-windows-store://pdp/*'), 'Tauri capability must explicitly allow opening the Store product page')
 assert(libRs.includes('fn is_store_release_channel() -> bool'), 'Rust runtime must identify Store-channel builds')

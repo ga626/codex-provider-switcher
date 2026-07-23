@@ -26,6 +26,7 @@ import './App.css'
 import {
   deleteProfile,
   checkForUpdate,
+  isGitHubReleaseBuild,
   isStoreManagedBuild,
   loadState,
   openUpdate,
@@ -398,6 +399,9 @@ function App() {
       }
       return
     }
+    if (!isGitHubReleaseBuild) {
+      return
+    }
     if (updateInfo?.available) {
       try {
         await openUpdate(updateInfo.downloadUrl ?? updateInfo.releaseUrl)
@@ -462,7 +466,9 @@ function App() {
     ? '正在检查'
     : isStoreManagedBuild
       ? '在 Store 检查更新'
-    : updateInfo?.available
+      : !isGitHubReleaseBuild
+        ? '开发版不检查更新'
+      : updateInfo?.available
       ? `下载 v${updateInfo.latestVersion}`
       : updateInfo
         ? '已是最新版'
@@ -483,8 +489,8 @@ function App() {
             className="ghost-button update-button"
             type="button"
             onClick={handleUpdate}
-            disabled={updateBusy}
-            title={isStoreManagedBuild ? '在 Microsoft Store 中检查更新' : updateInfo?.available ? `下载 ${updateInfo.latestVersion} 安装包` : '检查 GitHub Release 更新'}
+            disabled={updateBusy || (!isStoreManagedBuild && !isGitHubReleaseBuild)}
+            title={isStoreManagedBuild ? '在 Microsoft Store 中检查更新' : isGitHubReleaseBuild ? (updateInfo?.available ? `下载 ${updateInfo.latestVersion} 安装包` : '检查 GitHub Release 更新') : '开发版和维护者候选版不检查公开更新'}
           >
             {updateBusy
               ? <RefreshCcw className="spin" size={15} />

@@ -41,6 +41,9 @@ jobs:
       - name: Smoke Tauri desktop boundary
         run: npm run tauri:desktop-boundary:smoke
 
+      - name: Verify GitHub and Store release channel boundary
+        run: npm run release:channel-smoke
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 

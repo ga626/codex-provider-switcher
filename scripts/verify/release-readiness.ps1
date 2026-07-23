@@ -1,8 +1,8 @@
 param(
     [string]$Repository = "ga626/codex-provider-switcher",
     [string]$Tag = "",
-    [ValidateSet("store", "github-direct", "all")]
-    [string]$Channel = "store",
+    [ValidateSet("store", "github", "all")]
+    [string]$Channel = "github",
     [switch]$ReportOnly,
     [switch]$SkipRepositorySettings
 )
@@ -95,7 +95,7 @@ try {
         Add-Blocker "GitHub repository is archived."
     }
 
-    if ($Channel -in @("github-direct", "all")) {
+    if ($Channel -in @("github", "all")) {
         $previousErrorActionPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
@@ -116,12 +116,10 @@ try {
             }
             foreach ($requiredName in @(
                 "TAURI_SIGNING_PRIVATE_KEY",
-                "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
-                "WINDOWS_CERTIFICATE",
-                "WINDOWS_CERTIFICATE_PASSWORD"
+                "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
             )) {
                 if ($requiredName -notin $secretNames) {
-                    Add-Blocker "Required GitHub Secret name is missing for the GitHub direct-install fallback: $requiredName"
+                    Add-Blocker "Required GitHub updater-signing Secret name is missing: $requiredName"
                 }
             }
         }
@@ -162,7 +160,7 @@ try {
         }
     }
 
-    if ($Channel -in @("github-direct", "all")) {
+    if ($Channel -in @("github", "all")) {
         $existingRelease = Invoke-GhJson -Arguments @("api", "repos/$Repository/releases/tags/$Tag") -FailureMessage "Unable to inspect the requested release tag." -AllowNotFound
         if ($existingRelease) {
             Add-Blocker "Release $Tag already exists. Immutable releases must not be overwritten."

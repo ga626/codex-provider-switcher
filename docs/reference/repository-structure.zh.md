@@ -19,4 +19,6 @@
 
 程序文件与可变用户数据分开：安装包由用户选择位置；为保证升级后仍能读取现有资料，当前用户数据保留在历史兼容目录 `%LOCALAPPDATA%\CodeX Provider Switcher`。旧版 `D:\AI Studio\CodeX\Codex Switcher` 仅作参考和回滚源，不属于本仓库。
 
+维护者本机约定的 GitHub 稳定安装目录是 `D:\Software\Signalman AI`，短期候选目录是 `D:\Software\Signalman AI Candidate`；它们不进入仓库，也不与 Microsoft Store 的 Windows 管理安装目录混用。目录职责和迁移边界见 [发布与交付手册](../maintainers/release-and-delivery.zh.md)。
+
 产品显示名与技术兼容标识的完整边界见 [品牌与兼容性边界](brand-and-compatibility.zh.md)。
