@@ -27,10 +27,11 @@ exit /b 1
 
     $env:PATH = "$fakeRoot;$originalPath"
 
-    $runnerOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $readinessScript -Mode RunnerSafe -Channel github -Tag v0.9.0-alpha -SourceRef v0.9.0-alpha 2>&1 | Out-String
+    $runnerOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $readinessScript -Mode RunnerSafe -Channel github -Tag v0.9.0-alpha -SourceRef HEAD 2>&1 | Out-String
     $runnerExitCode = $LASTEXITCODE
     Assert-Condition ($runnerExitCode -eq 0) "RunnerSafe readiness must pass when Secret and Dependabot APIs are denied. Output: $runnerOutput"
     Assert-Condition ($runnerOutput -match "\[PASS\] Release readiness checks passed") "RunnerSafe readiness did not report success. Output: $runnerOutput"
+    Assert-Condition ($runnerOutput -match "Source:\s+HEAD") "RunnerSafe readiness did not inspect the requested source ref. Output: $runnerOutput"
 
     $maintainerOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $readinessScript -Mode Maintainer -Channel github -Tag v0.9.0-alpha 2>&1 | Out-String
     $maintainerExitCode = $LASTEXITCODE

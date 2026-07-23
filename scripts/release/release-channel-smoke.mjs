@@ -32,6 +32,7 @@ assert(!releaseWorkflow.includes('WINDOWS_CERTIFICATE'), 'GitHub releases must n
 assert(releaseWorkflow.includes('-Mode RunnerSafe'), 'GitHub Release workflow must use the runner-safe readiness mode')
 assert(releaseWorkflow.includes('-SourceRef $env:RELEASE_TAG'), 'Runner-safe readiness must inspect the target tag, not controller files')
 assert(releaseWorkflow.includes('Checkout release controller'), 'Manual recovery must load release control logic before checking out the artifact tag')
+assert(releaseWorkflow.includes('fetch-depth: 0'), 'Release controller checkout must fetch the requested immutable tag')
 assert(!releaseWorkflow.includes('-SkipRepositorySettings'), 'GitHub Release workflow must not rely on an ambiguous skip switch')
 assert(readinessSmoke.includes('RunnerSafe readiness must pass'), 'Readiness behavior smoke must cover denied runner governance APIs')
 assert(readinessSmoke.includes('Maintainer readiness must fail'), 'Readiness behavior smoke must cover maintainer governance enforcement')
