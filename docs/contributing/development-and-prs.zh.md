@@ -30,9 +30,10 @@ npm run backend:ui-smoke
 npm run runtime-boundary:smoke
 npm run tauri:desktop-boundary:smoke
 npm run release:channel-smoke
+npm run release:readiness:smoke
 npm run qa:preview-smoke
 npm run store:verify-package
-npm run release:readiness -- -Channel github -ReportOnly
+npm run release:readiness -- -Mode Maintainer -Channel github -ReportOnly
 git diff --check
 ```
 
@@ -48,7 +49,7 @@ npm run qa:dev-desktop
 
 1. 普通 PR 创建后，`pull_request` CI 是该分支的权威云端验证；不要等待重复的分支 push CI。
 2. 普通 PR 合并不自动创建 GitHub Release，也不自动构建 Store 上传包。
-3. 用户可见 GitHub 版本在合并后创建新 tag，由 `GitHub Release` workflow 交付；它需要 Tauri updater Secret，不需要 Windows PFX。
+3. 用户可见 GitHub 版本在合并后、main CI 通过且维护者门禁通过后创建新 tag，由 `GitHub Release` workflow 交付；它需要 Tauri updater Secret，不需要 Windows PFX。workflow 只运行 runner-safe 检查，不能代替维护者门禁。
 4. Store 只在稳定大版本时，由维护者手动选择已经完成 GitHub 验收的 tag 构建 MSIX 并提交 Partner Center。
 5. GitHub 与 Store 都完成各自普通用户安装验收前，不能把“代码已合并”写成“产品已交付”。
 

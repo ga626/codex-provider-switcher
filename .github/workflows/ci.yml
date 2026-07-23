@@ -44,6 +44,9 @@ jobs:
       - name: Verify GitHub and Store release channel boundary
         run: npm run release:channel-smoke
 
+      - name: Verify release readiness permission boundary
+        run: npm run release:readiness:smoke
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 

@@ -27,6 +27,7 @@
     "backend:dev": "cargo run --manifest-path src-tauri/Cargo.toml --bin local_backend --",
     "verify:doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/doctor-codex-provider-switcher.ps1 -PublicRelease",
     "release:readiness": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/release-readiness.ps1",
+    "release:readiness:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/release-readiness-behavior-smoke.ps1",
     "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/build-codex-provider-switcher-release.ps1",
     "release:verify-local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-local-release-package.ps1",
     "release:verify-upload-assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/verify-release-upload-assets.ps1",
