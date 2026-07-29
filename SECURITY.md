@@ -10,9 +10,10 @@
 
 ## 产品边界
 
-- provider API key 与本工具创建的敏感恢复副本使用当前 Windows 用户的 DPAPI 保护。
+- 切换器 profile 中保存的 provider API key 与本工具创建的敏感恢复副本使用当前 Windows 用户的 DPAPI 保护。执行切换时，Codex 所需的 custom provider `api_key` 与认证状态会写入 Codex 自己的 `config.toml` 和 `auth.json`；这些文件受当前 Windows 用户账户保护，但不应被描述为切换器的 DPAPI 加密副本。
 - Microsoft Store MSIX 在 Partner Center 提交后由 Store 签名；Store 用户不接触发布凭据。GitHub 直装备用渠道的 Tauri updater 签名私钥和 Windows Authenticode 证书是两套不同的发布凭据，只能放在 GitHub Actions Secrets，不进入仓库、安装包或普通日志。
 - 写入 Codex 配置前必须创建备份、显示影响范围、保留无凭据时间线并提供恢复入口。
+- 删除切换器或其本机资料不会自动撤销已写入的 Codex 配置；先恢复确认过的恢复点，再决定是否删除本机资料。
 
 ## 报告问题
 

@@ -42,6 +42,13 @@ npm run release:readiness -- -Channel store
 
 普通 PR 合并不等于发布。没有完成对应渠道的实际安装验收，只能写“代码已合并，产品未交付”。
 
+## 当前已交付基线
+
+- GitHub `v0.9.0-alpha` 已作为不可变 Release 交付；远端下载、SHA256、`latest.json`、安装和启动验收均已完成。
+- 该版本的 GitHub stable 本机安装位于 `D:\Software\Signalman AI`，并是当前维护者桌面入口。
+- Microsoft Store `0.8.0.0` 仍为独立、低频稳定渠道，未被 GitHub alpha 交付或本机 cutover 覆盖。
+- 这一基线不代表后续 PR 自动发布；任何新的用户可见版本仍必须从新的 tag 重新走本手册。
+
 ## GitHub 发布步骤
 
 1. 合并用户可见版本的 PR 后，切到干净的最新 `main`，确认 main CI 成功。
@@ -90,8 +97,8 @@ npm run qa:refresh-local-candidate -- -Apply
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/prepare-local-install-migration.ps1
 ```
 
-只有 GitHub 稳定安装已实际 smoke 通过后，才由新的 Codex 会话执行后续本机清理或旧工具交接。
+只有 GitHub 稳定安装已实际 smoke 通过后，才由新的 Codex 会话执行后续本机清理或旧工具交接。2026-07-24 已完成一次受限历史清理：它仅移除了 `D:\Software\CodeX Provider Switcher` 及其匹配失效快捷方式，不能据此扩大到 Store、Codex 配置、用户资料或 `D:\AI Studio\CodeX\Codex Switcher`。
 
 ## 旧工具与最终替换
 
-发布成功后，由新的 Codex 会话运行 `npm run qa:cutover-preflight` 做只读确认。用户确认后再进行真实 provider 切换、旧工具停用与重启复查。当前开发会话不得执行这些动作；旧目录保留作回滚参考。完整步骤见 [旧工具替换手册](legacy-cutover.zh.md)。
+2026-07-24 的真实 provider canary、只读预检和受限旧候选清理已经完成。当前开发会话不得重复切换或清理；`D:\AI Studio\CodeX\Codex Switcher` 继续保留作回滚参考。任何未来退役该参考目录的决定必须单独批准、重新预检并提供新的回滚方案。完整历史见 [旧工具替换记录](legacy-cutover.zh.md)。
