@@ -18,13 +18,15 @@
 
 ## 当前已知事项
 
-Dependabot #1 涉及 `glib` 的中等风险告警。当前锁定依赖图由 Tauri 的非 Windows GTK 分支带来；`cargo tree --target x86_64-pc-windows-msvc -i glib` 没有输出，说明它不链接到当前 Windows 发布目标。它没有被标记为“已修复”：`.github/security-risk-register.json` 记录了适用范围、证据、复核日期和受控升级动作。登记过期、依赖图变化或发布目标变化后，必须重新评估；升级仍应在单独的 Tauri/GTK 兼容 PR 中完成。
+Dependabot #1 涉及 `glib` 的中等风险告警。当前锁定依赖图由 Tauri 的非 Windows GTK 分支带来；`cargo tree --target x86_64-pc-windows-msvc -i glib` 没有输出，说明它不链接到当前 Windows 发布目标。它没有被标记为“已修复”：`.github/security-risk-register.json` 记录了适用范围、证据、复核日期和受控升级动作。维护者必须在 `2026-08-16` 前复核，或在目标/依赖图变化时提前复核；升级仍应在单独的 Tauri/GTK 兼容 PR 中完成。
 
 ## CodeQL 与仓库政策
 
 `.github/workflows/codeql.yml` 在 Windows runner 上扫描 Rust 与 TypeScript，并以真实构建产出分析结果。CodeQL 首先建立分析基线；新增告警按严重度、可达性和修复路径分流，不能把“没有历史分析”或“没有告警”写成“零风险”。
 
-分支保护、required review、签名提交和线性历史属于仓库政策。本仓库只在维护者明确确认后修改这些设置；依赖、安全扫描或 action pin PR 不得静默改变它们。
+`main` 必须同时要求 `validate`、`Analyze JavaScript and TypeScript` 与 `Analyze Rust` 三项成功检查，并要求解决全部会话；管理员也受保护规则约束。当前仓库是单维护者模式，不启用 required review，维护者可在检查通过后合并自己创建的 PR。若以后增加独立维护者并决定启用审批，必须作为单独的仓库治理变更，不能让单人仓库陷入无法合规合并的状态。检查名以 workflow job 显示名为准，改名时必须先同步 branch protection，不能保留失效或不存在的 required check。
+
+仓库应启用合并后自动删除已合并分支，并要求 GitHub Actions 使用完整 SHA 固定 action；后者保留 `allowed_actions=all`，不额外收紧已审核 action 的使用范围。分支保护、审批、签名提交和线性历史属于仓库政策。本仓库只在维护者明确确认后修改这些设置；依赖、安全扫描或 action pin PR 不得静默改变它们。
 
 ## 机密与文档
 
