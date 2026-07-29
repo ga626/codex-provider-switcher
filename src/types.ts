@@ -82,6 +82,7 @@ export type BackupItem = {
   time: string
   label: string
   files: number
+  fileCategories: string[]
 }
 
 export type UpdateInfo = {

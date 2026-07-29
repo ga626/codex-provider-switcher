@@ -67,7 +67,7 @@ function assertSidebarLayout(metrics, label) {
 }
 
 try {
-  const desktop = await newPage({ width: 1440, height: 1000 })
+  const desktop = await newPage({ width: 1280, height: 860 })
   await desktop.goto(url, { waitUntil: 'networkidle' })
   await desktop.locator('.app-shell').waitFor()
   await desktop.locator('.navigation-pane').waitFor()
@@ -154,6 +154,9 @@ try {
   await desktop.getByRole('button', { name: '复制配置' }).click()
   await desktop.getByLabel('服务商名称').fill('Example Provider Smoke Copy')
   await desktop.getByRole('button', { name: '保存更改' }).click()
+  await desktop.getByRole('dialog', { name: '确认保存手动模型？' }).waitFor()
+  await desktop.getByRole('button', { name: '仍然保存' }).click()
+  await desktop.getByRole('dialog', { name: '确认保存手动模型？' }).waitFor({ state: 'detached' })
   await desktop.locator('.provider-row').filter({ hasText: 'Example Provider Smoke Copy' }).waitFor()
   await desktop.getByRole('button', { name: '删除服务商' }).click()
   await desktop.locator('.provider-row').filter({ hasText: 'Example Provider Smoke Copy' }).waitFor({ state: 'detached' })
@@ -162,13 +165,26 @@ try {
   await desktop.getByRole('button', { name: '设为默认' }).click()
   await desktop.locator('.provider-row').filter({ hasText: '示例服务商 B' }).locator('svg').waitFor()
 
+  await desktop.locator('.provider-row').filter({ hasText: '示例服务商 C' }).click()
   await desktop.getByRole('button', { name: /安全检查/ }).click()
+  await desktop.getByText('额度或配额不足').first().waitFor()
+  await desktop.getByText('检查服务商余额或配额后重新测试。').waitFor()
+  await desktop.screenshot({ path: join(outputDir, 'desktop-safety-billing.png'), fullPage: true })
   await desktop.getByRole('heading', { name: '安全检查' }).waitFor()
   await desktop.locator('.check-list').first().waitFor()
   await desktop.locator('.check-list.compact-check-list').first().waitFor()
+  await desktop.locator('.provider-row').filter({ hasText: '示例服务商 B' }).click()
+  await desktop.getByText('服务端已响应，结果待确认').first().waitFor()
+  await desktop.getByText('服务端可达不等于该模型可以被 Codex 正常调用。').waitFor()
+  await desktop.screenshot({ path: join(outputDir, 'desktop-safety-unconfirmed.png'), fullPage: true })
+
+  await desktop.locator('.provider-row').filter({ hasText: '示例服务商 D' }).click()
+  await desktop.getByText('可调用（标准 Responses）').first().waitFor()
+  await desktop.getByText('这不保证未来额度、长上下文、工具调用或远端服务持续可用。').waitFor()
+
   const safetyLayout = await desktop.evaluate(() => {
     const button = document.querySelector('.safety-run-button')?.getBoundingClientRect()
-    const summary = document.querySelector('.safety-summary')?.getBoundingClientRect()
+    const summary = document.querySelector('.safety-overview')?.getBoundingClientRect()
     const icon = document.querySelector('.switch-card-heading .switch-icon')?.getBoundingClientRect()
     const label = document.querySelector('.switch-card-heading span:last-child')?.getBoundingClientRect()
     return {
@@ -198,7 +214,7 @@ try {
   await desktop.locator('.activity-list').waitFor()
   await desktop.screenshot({ path: join(outputDir, 'desktop-after-save.png'), fullPage: true })
 
-  const compactDesktop = await newPage({ width: 980, height: 760 })
+  const compactDesktop = await newPage({ width: 980, height: 700 })
   await compactDesktop.goto(url, { waitUntil: 'networkidle' })
   await compactDesktop.locator('.app-shell').waitFor()
   await compactDesktop.locator('.navigation-pane').waitFor()
@@ -217,9 +233,9 @@ try {
   await compactDesktop.getByRole('button', { name: /安全检查/ }).click()
   await compactDesktop.getByRole('heading', { name: '安全检查' }).waitFor()
   const compactSafetyLayout = await compactDesktop.evaluate(() => {
-    const summary = document.querySelector('.safety-summary')?.getBoundingClientRect()
+    const summary = document.querySelector('.safety-overview')?.getBoundingClientRect()
     const button = document.querySelector('.safety-run-button')?.getBoundingClientRect()
-    const cards = [...document.querySelectorAll('.safety-summary > div')].map((element) => element.getBoundingClientRect())
+    const cards = [...document.querySelectorAll('.safety-overview article')].map((element) => element.getBoundingClientRect())
     return {
       buttonHeight: button?.height ?? 0,
       buttonTop: button?.top ?? 0,
@@ -250,7 +266,7 @@ try {
     ok: true,
     url,
     outputDir,
-    screenshots: ['desktop.png', 'desktop-models.png', 'desktop-safety.png', 'desktop-after-save.png', 'compact-desktop.png', 'wide-safety.png'],
+    screenshots: ['desktop.png', 'desktop-models.png', 'desktop-safety-billing.png', 'desktop-safety-unconfirmed.png', 'desktop-safety.png', 'desktop-after-save.png', 'compact-desktop.png', 'wide-safety.png'],
     metrics: {
       desktop: desktopMetrics,
       compact: compactMetrics,

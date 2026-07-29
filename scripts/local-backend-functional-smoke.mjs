@@ -359,6 +359,10 @@ try {
   assert(switchedAuth.preserved === 'yes', 'switch removed unrelated auth data')
   assert(switched.backups.length === 1, 'switch did not create exactly one backup')
   assert(switched.backups[0].files >= 3, 'switch backup did not include a manifest')
+  assert(
+    switched.backups[0].fileCategories?.includes('Codex 配置') && switched.backups[0].fileCategories?.includes('本机凭据'),
+    'switch backup did not expose the expected redacted file categories'
+  )
   const backupLabels = await readdir(join(localAppData, 'CodeX Provider Switcher', 'backups'))
   const manifest = JSON.parse(await readFile(join(localAppData, 'CodeX Provider Switcher', 'backups', backupLabels[0], 'manifest.json'), 'utf8'))
   assert(manifest.reason === 'before_switch', 'backup manifest did not record its reason')
