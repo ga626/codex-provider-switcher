@@ -2,9 +2,9 @@
 
 ## 日常节奏
 
-`.github/dependabot.yml` 每周检查 npm 与 Cargo 依赖。Dependabot PR 不自动合并：维护者先看变更范围、CI、桌面运行边界与发布风险，再决定是否合并。
+`.github/dependabot.yml` 每周检查 npm 与 Cargo 依赖。Dependabot 保留版本和安全告警，但不自动创建版本更新 PR；维护者先按告警将有关联验证范围的更新编入一个计划维护 PR，再审阅变更范围、CI、桌面运行边界与发布风险。
 
-同一配置也每周检查 GitHub Actions。所有 workflow action 必须固定到完整 commit SHA，并在行尾保留原始 tag 或通道注释，便于审阅和 Dependabot 提供可追溯更新。不得把固定 SHA 改回浮动 tag，也不得手动猜测 SHA；更新必须来自上游 tag 或通道的已核验提交。
+同一配置也每周检查 GitHub Actions。所有 workflow action 必须固定到完整 commit SHA，并在行尾保留原始 tag 或通道注释，便于审阅和 Dependabot 告警提供可追溯更新候选。不得把固定 SHA 改回浮动 tag，也不得手动猜测 SHA；更新必须来自上游 tag 或通道的已核验提交。
 
 能通过现有 CI 的小范围更新可独立评审。涉及 Vite、TypeScript、React 插件或 Tauri 图形链的大版本升级必须进入兼容性 PR：先解决 peer dependency 或编译错误，再做完整桌面与发布验证。不得使用 `--force` 或 `--legacy-peer-deps` 把无法解析的依赖树强行并入发布事故修复。
 

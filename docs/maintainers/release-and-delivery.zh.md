@@ -23,7 +23,7 @@ npm run release:readiness -- -Mode Maintainer -Channel github
 
 GitHub Actions 使用 `RunnerSafe` 模式。它只检查 tag、源码版本和既有 Release 状态，不枚举 Secret 名称，不读取 Dependabot 告警，也不要求个人 PAT。构建 job 对实际注入的 updater Secret 做非空校验。
 
-Release 与 Store workflow 使用固定 commit SHA 的 GitHub Actions；其更新由 Dependabot 的 `github-actions` 生态提出并按[依赖与安全治理](dependency-security.zh.md)审阅。固定 action 供应链不会改变 Release 的 RunnerSafe 权限边界，也不替代正式发布验收。
+Release 与 Store workflow 使用固定 commit SHA 的 GitHub Actions；其更新候选由 Dependabot 的 `github-actions` 告警发现，再按[依赖与安全治理](dependency-security.zh.md)编入计划维护 PR 审阅。固定 action 供应链不会改变 Release 的 RunnerSafe 权限边界，也不替代正式发布验收。
 
 Store 大版本准备前运行：
 
