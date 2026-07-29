@@ -80,6 +80,8 @@ npm run qa:dev-desktop
 | GitHub/Store、更新、版本或 Release | 发布手册、release notes、脚本索引、PR 发布计划 |
 | CI、测试、脚本或依赖 | 脚本索引、维护手册、PR 验证段 |
 
+依赖兼容、CodeQL、Dependabot 与 GitHub Actions 固定策略见[依赖与安全治理](../maintainers/dependency-security.zh.md)。这类工程化 PR 不改变产品功能、版本、安装或 Store 路径时，不自动进入发布流程；但必须完整记录本地依赖和扫描验证结果。
+
 ## 本机候选安装
 
 候选版不是公开产品，也不会在每次合并后自动刷新。只有维护者明确要验收已合并但尚未发布的版本时，才在干净 `main` 运行：

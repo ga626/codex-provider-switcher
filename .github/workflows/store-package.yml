@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout tagged commit
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.RELEASE_TAG }}
 
@@ -48,16 +48,16 @@ jobs:
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Restore Rust and Tauri build cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           workspaces: "src-tauri -> target"
 
@@ -95,7 +95,7 @@ jobs:
         run: npm run store:verify-package -- -Version $env:RELEASE_VERSION -PackagePath "store-assets/SignalmanAI-windows-x64-$env:RELEASE_VERSION.msix"
 
       - name: Upload Partner Center package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: microsoft-store-msix-${{ env.RELEASE_TAG }}
           path: store-assets/*.msix

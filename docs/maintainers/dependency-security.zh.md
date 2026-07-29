@@ -4,6 +4,8 @@
 
 `.github/dependabot.yml` 每周检查 npm 与 Cargo 依赖。Dependabot PR 不自动合并：维护者先看变更范围、CI、桌面运行边界与发布风险，再决定是否合并。
 
+同一配置也每周检查 GitHub Actions。所有 workflow action 必须固定到完整 commit SHA，并在行尾保留原始 tag 或通道注释，便于审阅和 Dependabot 提供可追溯更新。不得把固定 SHA 改回浮动 tag，也不得手动猜测 SHA；更新必须来自上游 tag 或通道的已核验提交。
+
 能通过现有 CI 的小范围更新可独立评审。涉及 Vite、TypeScript、React 插件或 Tauri 图形链的大版本升级必须进入兼容性 PR：先解决 peer dependency 或编译错误，再做完整桌面与发布验证。不得使用 `--force` 或 `--legacy-peer-deps` 把无法解析的依赖树强行并入发布事故修复。
 
 ## 收到告警时
@@ -17,6 +19,12 @@
 ## 当前已知事项
 
 Dependabot #1 涉及 `glib` 的中等风险告警。当前锁定依赖图由 Tauri 的非 Windows GTK 分支带来；`cargo tree --target x86_64-pc-windows-msvc -i glib` 没有输出，说明它不链接到当前 Windows 发布目标。它没有被标记为“已修复”：`.github/security-risk-register.json` 记录了适用范围、证据、复核日期和受控升级动作。登记过期、依赖图变化或发布目标变化后，必须重新评估；升级仍应在单独的 Tauri/GTK 兼容 PR 中完成。
+
+## CodeQL 与仓库政策
+
+`.github/workflows/codeql.yml` 在 Windows runner 上扫描 Rust 与 TypeScript，并以真实构建产出分析结果。CodeQL 首先建立分析基线；新增告警按严重度、可达性和修复路径分流，不能把“没有历史分析”或“没有告警”写成“零风险”。
+
+分支保护、required review、签名提交和线性历史属于仓库政策。本仓库只在维护者明确确认后修改这些设置；依赖、安全扫描或 action pin PR 不得静默改变它们。
 
 ## 机密与文档
 
