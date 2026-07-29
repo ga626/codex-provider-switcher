@@ -80,7 +80,7 @@ Windows 上的 Codex provider 管理工具。它把手工修改 `config.toml` �
 
 ### 旧切换工具什么时候可以停？
 
-本机旧候选的受限退役已在受控切换中完成；GitHub stable `Signalman AI` 是当前桌面入口。`D:\AI Studio\CodeX\Codex Switcher` 仍保留为受保护的回滚参考，除非有新的明确批准，不应删除或重复执行切换。历史条件见 [旧工具替换手册](docs/maintainers/legacy-cutover.zh.md)。
+本机旧候选的受限退役已在受控切换中完成；GitHub stable `Signalman AI` 是当前桌面入口。原有切换工具仍保留为受保护的回滚参考，除非有新的明确批准，不应删除或重复执行切换。历史条件见 [旧工具替换手册](docs/maintainers/legacy-cutover.zh.md)。
 
 ### 遇到问题怎么办？
 
