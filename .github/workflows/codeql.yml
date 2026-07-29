@@ -16,8 +16,8 @@ permissions:
   security-events: write
 
 jobs:
-  analyze:
-    name: Analyze Rust and TypeScript
+  analyze-javascript:
+    name: Analyze JavaScript and TypeScript
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -27,8 +27,8 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@adfda868f108ac4222129de456ea554034a27db7 # v4
         with:
-          languages: javascript-typescript, rust
-          build-mode: manual
+          languages: javascript-typescript
+          build-mode: none
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -39,14 +39,31 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Build TypeScript for analysis
+        run: npm run build
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@adfda868f108ac4222129de456ea554034a27db7 # v4
+
+  analyze-rust:
+    name: Analyze Rust
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@adfda868f108ac4222129de456ea554034a27db7 # v4
+        with:
+          languages: rust
+          build-mode: manual
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Build Rust targets for analysis
         run: cargo build --manifest-path src-tauri/Cargo.toml --bins
-
-      - name: Build TypeScript for analysis
-        run: npm run build
 
       - name: Analyze
         uses: github/codeql-action/analyze@adfda868f108ac4222129de456ea554034a27db7 # v4
