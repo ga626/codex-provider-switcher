@@ -18,6 +18,7 @@
     "qa:stable-install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/stable-install.ps1",
     "qa:refresh-local-candidate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/refresh-local-candidate.ps1",
     "qa:cutover-preflight": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/cutover-preflight.ps1",
+    "qa:retire-local-candidate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/retire-local-candidate.ps1",
     "backend:build": "cargo build --manifest-path src-tauri/Cargo.toml --bin local_backend --bin profile_recovery --jobs 1",
     "backend:smoke": "node scripts/local-backend-smoke.mjs",
     "backend:functional-smoke": "node scripts/local-backend-functional-smoke.mjs",

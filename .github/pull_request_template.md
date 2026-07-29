@@ -1,3 +1,10 @@
+## 变更分类与本地验收
+
+- 类型：文档/内部维护 | 普通功能 | 用户可见流程 | 发布影响 | 紧急修复
+- 用户验收：无需 | 截图 | 功能 | 安装发布 | cutover 确认
+- 本地验证等级：最小 | 功能 | 桌面 | 发布
+- 发布结论：非发布影响 | 合并后不发布 | 合并后按计划发布
+
 ## 摘要
 
 说明这次改动解决了什么问题，以及项目推进到了什么状态。
@@ -9,7 +16,7 @@
 
 ## 验证
 
-列出实际运行过的高信号命令和结论。小改动写相关验证；发布影响 PR 还要写开发版验收、`npm run release:channel-smoke`、`npm run release:readiness:smoke` 和 `npm run release:readiness -- -Mode Maintainer -Channel github -ReportOnly` 的结论。
+列出实际运行过的命令和结论。未运行的检查必须写“未运行 + 原因”，不能只保留模板提示。小改动写相关验证；发布影响 PR 还要写开发版验收、`npm run release:channel-smoke`、`npm run release:readiness:smoke` 和 `npm run release:readiness -- -Mode Maintainer -Channel github -ReportOnly` 的结论。
 
 ## 风险和边界
 

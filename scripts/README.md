@@ -15,5 +15,6 @@
 | 远端交付 | `npm run release:verify-remote` | 下载并检查已发布的 GitHub Release |
 | cutover 准备 | `npm run qa:cutover-preflight` | 只读记录新安装版和旧工具状态；不执行真实切换 |
 | 本机迁移预检 | `scripts/qa/prepare-local-install-migration.ps1` | 只读确认 GitHub 稳定、候选和旧候选目录；不清理任何内容 |
+| 旧候选退役 | `npm run qa:retire-local-candidate -- -ExplainOnly` / `npm run qa:retire-local-candidate -- -Apply` | 先只读说明受限边界；仅在明确批准且以管理员身份运行时，删除 `D:\Software\CodeX Provider Switcher` 及其匹配快捷方式，并在前后核验稳定入口和旧工具回滚状态 |
 
 按改动类型选择命令、以及何时必须运行安装发布验收，见 [开发与 PR 指南](../docs/contributing/development-and-prs.zh.md)。
