@@ -57,14 +57,25 @@ async function waitForStaticPreview() {
   throw new Error(`static preview did not become ready: ${lastError}`)
 }
 
+async function waitForStaticPreviewToStop() {
+  const started = Date.now()
+  while (Date.now() - started < 10000) {
+    try {
+      await fetch(baseUrl)
+    } catch {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  throw new Error(`runtime-boundary preview was still listening after cleanup: ${baseUrl}`)
+}
+
 await mkdir(outputDir, { recursive: true })
 await buildProductionPreview()
 
 const child = spawn(
-  process.platform === 'win32' ? 'cmd.exe' : 'npm',
-  process.platform === 'win32'
-    ? ['/c', 'npm', 'run', 'preview', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort']
-    : ['run', 'preview', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+  process.execPath,
+  [join(process.cwd(), 'node_modules', 'vite', 'bin', 'vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
   {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -99,4 +110,5 @@ try {
 } finally {
   await browser.close()
   await stopProcessTree(child)
+  await waitForStaticPreviewToStop()
 }

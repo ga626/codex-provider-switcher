@@ -1,10 +1,10 @@
 # 安装、更新与卸载
 
-`Signalman AI` 是 Windows alpha 软件，有两条安装路径：GitHub 提供日常更新较快的版本，Microsoft Store 提供低频稳定版本。它们不是两个不同产品；请在同一台电脑上选择其中一个作为日常入口，不要把源码开发版或维护者候选版当作稳定安装版。
+`Signalman AI` 是 Windows alpha 软件，有两条正式交付路径：GitHub 提供日常更新较快的版本，Microsoft Store 提供低频稳定版本。各路径实际可下载的版本以其页面为准；源码分支、PR 和 Git tag 不等于已经交付。它们不是两个不同产品；请在同一台电脑上选择其中一个作为日常入口，不要把源码开发版或维护者候选版当作稳定安装版。
 
 ## GitHub 最新版
 
-1. 打开 [最新发布版](https://github.com/ga626/codex-provider-switcher/releases/latest)。
+1. 打开 [最新发布版](https://github.com/ga626/codex-provider-switcher/releases/latest)，确认页面标为 `Latest` 的版本。
 2. 下载名称带 `setup.exe` 的 Windows 安装包和同名 `.sha256` 文件。
 3. 确认下载页属于官方仓库、版本号与校验文件一致后，双击安装包并按安装向导完成安装。
 4. 从开始菜单或桌面图标打开 `Signalman AI`。

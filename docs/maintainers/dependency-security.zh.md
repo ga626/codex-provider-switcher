@@ -4,6 +4,8 @@
 
 `.github/dependabot.yml` 每周检查 npm 与 Cargo 依赖。Dependabot PR 不自动合并：维护者先看变更范围、CI、桌面运行边界与发布风险，再决定是否合并。
 
+能通过现有 CI 的小范围更新可独立评审。涉及 Vite、TypeScript、React 插件或 Tauri 图形链的大版本升级必须进入兼容性 PR：先解决 peer dependency 或编译错误，再做完整桌面与发布验证。不得使用 `--force` 或 `--legacy-peer-deps` 把无法解析的依赖树强行并入发布事故修复。
+
 ## 收到告警时
 
 1. 记录告警编号、严重度、受影响依赖、可用安全版本和依赖来源。
