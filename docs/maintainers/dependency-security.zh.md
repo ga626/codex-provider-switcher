@@ -24,7 +24,7 @@ Dependabot #1 涉及 `glib` 的中等风险告警。当前锁定依赖图由 Tau
 
 `.github/workflows/codeql.yml` 在 Windows runner 上扫描 Rust 与 TypeScript，并以真实构建产出分析结果。CodeQL 首先建立分析基线；新增告警按严重度、可达性和修复路径分流，不能把“没有历史分析”或“没有告警”写成“零风险”。
 
-`main` 必须同时要求 `validate`、`Analyze JavaScript and TypeScript` 与 `Analyze Rust` 三项成功检查，并要求至少 1 个审批及解决全部会话；管理员也受保护规则约束。检查名以 workflow job 显示名为准，改名时必须先同步 branch protection，不能保留失效或不存在的 required check。
+`main` 必须同时要求 `validate`、`Analyze JavaScript and TypeScript` 与 `Analyze Rust` 三项成功检查，并要求解决全部会话；管理员也受保护规则约束。当前仓库是单维护者模式，不启用 required review，维护者可在检查通过后合并自己创建的 PR。若以后增加独立维护者并决定启用审批，必须作为单独的仓库治理变更，不能让单人仓库陷入无法合规合并的状态。检查名以 workflow job 显示名为准，改名时必须先同步 branch protection，不能保留失效或不存在的 required check。
 
 仓库应启用合并后自动删除已合并分支，并要求 GitHub Actions 使用完整 SHA 固定 action；后者保留 `allowed_actions=all`，不额外收紧已审核 action 的使用范围。分支保护、审批、签名提交和线性历史属于仓库政策。本仓库只在维护者明确确认后修改这些设置；依赖、安全扫描或 action pin PR 不得静默改变它们。
 
