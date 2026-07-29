@@ -136,6 +136,7 @@ pub struct BackupItem {
     pub time: String,
     pub label: String,
     pub files: usize,
+    pub file_categories: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -976,10 +977,13 @@ fn list_backups() -> Result<Vec<BackupItem>, SwitcherError> {
             continue;
         }
         let path = entry.path();
-        let files = fs::read_dir(&path)?
+        let file_names = fs::read_dir(&path)?
             .filter_map(Result::ok)
-            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
-            .count();
+            .filter(|entry| entry.file_type().map(|file_type| file_type.is_file()).unwrap_or(false))
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .collect::<Vec<_>>();
+        let files = file_names.len();
+        let file_categories = backup_file_categories(&file_names);
         let label = entry.file_name().to_string_lossy().to_string();
         let metadata = entry.metadata()?;
         let modified = metadata.modified().ok();
@@ -991,10 +995,28 @@ fn list_backups() -> Result<Vec<BackupItem>, SwitcherError> {
             time,
             label,
             files,
+            file_categories,
         });
     }
     items.sort_by(|a, b| b.label.cmp(&a.label));
     Ok(items)
+}
+
+fn backup_file_categories(file_names: &[String]) -> Vec<String> {
+    let mut categories = BTreeSet::new();
+    for file_name in file_names {
+        let file_name = file_name.to_ascii_lowercase();
+        if file_name.starts_with("config.toml") {
+            categories.insert("Codex 配置".to_string());
+        } else if file_name.starts_with("auth.json") {
+            categories.insert("本机凭据".to_string());
+        } else if file_name.starts_with("profiles.json") {
+            categories.insert("服务商目录".to_string());
+        } else if file_name == "manifest.json" {
+            categories.insert("恢复说明".to_string());
+        }
+    }
+    categories.into_iter().collect()
 }
 
 fn activity_seed() -> ActivityItem {

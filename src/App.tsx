@@ -42,6 +42,14 @@ import type { AppState, BackupItem, EditableProfile, ModelCatalog, ProviderProfi
 
 type ViewId = 'providers' | 'models' | 'safety' | 'timeline'
 
+type VerificationGuidance = {
+  title: string
+  evidence: string
+  meaning: string
+  limitation: string
+  nextStep: string
+}
+
 const emptyProfile: EditableProfile = {
   id: '',
   name: '',
@@ -193,6 +201,83 @@ function verificationLabel(profile: ProviderProfile | undefined) {
   return labels[profile.verificationStatus] ?? '待验证'
 }
 
+function verificationStageLabel(stage: string | undefined) {
+  const labels: Record<string, string> = {
+    inference: '推理请求',
+    billing: '额度检查',
+    response_shape: '响应形状判断',
+    authentication: '认证检查',
+    transport: '传输检查',
+  }
+  return stage ? labels[stage] ?? stage : '未记录'
+}
+
+function verificationResponseShapeLabel(shape: ProviderProfile['verificationResponseShape']) {
+  if (shape === 'standard_responses') return '标准 Responses'
+  if (shape === 'compatible_response') return '兼容响应'
+  return '尚未确认'
+}
+
+function verificationGuidance(profile: ProviderProfile | undefined): VerificationGuidance {
+  if (!profile) {
+    return {
+      title: '尚未选择服务商',
+      evidence: '没有可展示的服务商验证记录。',
+      meaning: '当前不能判断是否可以安全切换。',
+      limitation: '不会读取或展示任何 API 密钥。',
+      nextStep: '先保存一条服务商记录，再运行可用性测试。',
+    }
+  }
+
+  if (profile.verified && profile.verificationStatus === 'verified') {
+    return {
+      title: verificationLabel(profile),
+      evidence: profile.lastVerificationDetail ?? '已有可用性测试通过记录。',
+      meaning: '该服务商通过了切换前的一次短时 Responses 请求。',
+      limitation: '这不保证未来额度、长上下文、工具调用或远端服务持续可用。',
+      nextStep: '确认配置未改动后可切换；完成后请在新的 Codex 会话确认实际使用。',
+    }
+  }
+
+  if (profile.verificationStatus === 'billing_unavailable' || profile.verificationStatus === 'rate_limited') {
+    return {
+      title: verificationLabel(profile),
+      evidence: profile.lastVerificationDetail ?? '服务商未通过额度或限流检查。',
+      meaning: '本次请求没有取得可用于切换的可用性证据。',
+      limitation: '这不代表保存的密钥已丢失，也不会改写 Codex 配置。',
+      nextStep: profile.verificationStatus === 'rate_limited' ? '等待限流结束后重新测试。' : '检查服务商余额或配额后重新测试。',
+    }
+  }
+
+  if (profile.verificationStatus === 'response_shape_unconfirmed' || profile.verificationStatus === 'response_unparseable') {
+    return {
+      title: verificationLabel(profile),
+      evidence: profile.lastVerificationDetail ?? '服务端已有响应，但结果尚不足以确认。',
+      meaning: '服务端可达不等于该模型可以被 Codex 正常调用。',
+      limitation: '本工具不会因这类结果写入 Codex 配置或自动猜测协议。',
+      nextStep: '核对服务商的 Responses 兼容性、模型和端点后重新测试。',
+    }
+  }
+
+  if (profile.verificationStatus === 'not_checked' || profile.verificationStatus === 'missing_key' || profile.verificationStatus === 'invalid_profile') {
+    return {
+      title: verificationLabel(profile),
+      evidence: profile.lastVerificationDetail ?? '尚无一次有效的可用性测试记录。',
+      meaning: '当前没有可用于切换的 provider 可用性证据。',
+      limitation: '保存服务商资料本身不会证明远端 provider 可用。',
+      nextStep: '补齐地址、模型和已保存密钥后运行可用性测试。',
+    }
+  }
+
+  return {
+    title: verificationLabel(profile),
+    evidence: profile.lastVerificationDetail ?? '最近一次测试未能给出可用结论。',
+    meaning: '当前服务商被切换门禁拦截。',
+    limitation: '失败测试不会改写 Codex 配置、认证或恢复点。',
+    nextStep: '根据诊断阶段和服务商代码处理问题后重新测试。',
+  }
+}
+
 function requiresManualModelConfirmation(
   draft: EditableProfile,
   profile: ProviderProfile | undefined,
@@ -224,6 +309,7 @@ function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [restoreConfirm, setRestoreConfirm] = useState<BackupItem | null>(null)
+  const [switchConfirm, setSwitchConfirm] = useState<ProviderProfile | null>(null)
   const [manualModelConfirm, setManualModelConfirm] = useState<string | null>(null)
   const [syncConfirm, setSyncConfirm] = useState(false)
   const [restartNotice, setRestartNotice] = useState(false)
@@ -430,6 +516,19 @@ function App() {
     setRestoreConfirm(null)
   }
 
+  function requestSwitch() {
+    if (selectedProfile && canSwitch) {
+      setSwitchConfirm(selectedProfile)
+    }
+  }
+
+  async function confirmSwitch() {
+    if (!switchConfirm) return
+    const profileId = switchConfirm.id
+    setSwitchConfirm(null)
+    await runAction('switch', () => switchProfile(profileId))
+  }
+
   if (!state && error) {
     return (
       <main className="loading-shell runtime-error-shell">
@@ -526,6 +625,16 @@ function App() {
           busy={busy !== null}
           onCancel={() => setRestoreConfirm(null)}
           onConfirm={() => void restoreLatest()}
+        />
+      )}
+
+      {switchConfirm && (
+        <SwitchConfirmDialog
+          profile={switchConfirm}
+          latestBackup={state.backups[0]}
+          busy={busy !== null}
+          onCancel={() => setSwitchConfirm(null)}
+          onConfirm={() => void confirmSwitch()}
         />
       )}
 
@@ -703,13 +812,21 @@ function App() {
                     ? '保存后需要运行真实服务商检查。'
                   : requiredFailures === 0
                     ? '切换前会自动生成恢复点。'
-                    : '先处理必填项，再执行服务商切换。'}
+                  : '先处理必填项，再执行服务商切换。'}
               </p>
+              {selectedProfile && (
+                <ul className="switch-impact-list">
+                  <li>目标：{selectedProfile.name} · {selectedProfile.model || '未设置模型'}</li>
+                  <li>写入：服务商、模型、接口地址和本机凭据类别；不显示具体值。</li>
+                  <li>恢复：切换前自动创建一个受保护恢复点。</li>
+                  <li>确认：完成后必须在新的 Codex 会话检查实际使用。</li>
+                </ul>
+              )}
             </div>
             <button
               className="primary-button"
               type="button"
-              onClick={() => selectedProfile && runAction('switch', () => switchProfile(selectedProfile.id))}
+              onClick={requestSwitch}
               disabled={!canSwitch}
             >
               <PlugZap size={16} />
@@ -1115,20 +1232,29 @@ function SafetyWorkspace({
   runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
 }) {
   const latestBackup = backups[0]
+  const guidance = verificationGuidance(selectedProfile)
+  const availabilityVisual = getCheckVisual(availabilityChecks[0] ?? { ok: false, severity: 'required' })
   return (
     <div className="workspace-stack">
-      <section className="surface-panel safety-summary">
-        <div>
+      <section className="surface-panel safety-overview">
+        <article>
           <ShieldCheck size={22} />
-          <span>安全模式</span>
+          <span>本地写入安全</span>
           <strong>{safeMode ? '已开启' : '未开启'}</strong>
-        </div>
-        <div>
+          <small>可用性测试只发起短请求，不写入 Codex 配置。</small>
+        </article>
+        <article className={availabilityVisual.className}>
           <KeyRound size={22} />
-          <span>服务商可用性测试</span>
-          <strong>切换前必须通过</strong>
-          <small>发起一笔短时、低 token 的已认证 Responses 请求。未通过时不会改写 Codex 配置。</small>
-        </div>
+          <span>当前可用性证据</span>
+          <strong>{guidance.title}</strong>
+          <small>{selectedProfile?.lastVerifiedAt ? `最后测试：${selectedProfile.lastVerifiedAt}` : '尚无最近测试时间。'}</small>
+        </article>
+        <article>
+          <RotateCcw size={22} />
+          <span>恢复 / 回滚状态</span>
+          <strong>{backups.length > 0 ? `${backups.length} 个恢复点` : '尚无恢复点'}</strong>
+          <small>{selectedProfile?.lastSwitchedAt ? `最近切换：${selectedProfile.lastSwitchedAt}` : '尚未记录服务商切换。'}</small>
+        </article>
         <button
           className="primary-button safety-run-button"
           type="button"
@@ -1139,13 +1265,37 @@ function SafetyWorkspace({
           {!selectedProfile ? '先新增服务商' : hasUnsavedChanges ? '请先保存更改' : '运行可用性测试'}
         </button>
       </section>
+      <section className="surface-panel evidence-panel">
+        <div className="section-heading-row">
+          <div>
+            <span className="eyebrow">服务商可用性证据</span>
+            <h3>{selectedProfile?.name ?? '未选择服务商'}</h3>
+          </div>
+          <span className={`evidence-status ${availabilityVisual.className}`}>{guidance.title}</span>
+        </div>
+        <div className="evidence-facts" aria-label="最近验证事实">
+          <div><span>最后验证</span><strong>{selectedProfile?.lastVerifiedAt ?? '未记录'}</strong></div>
+          <div><span>诊断阶段</span><strong>{verificationStageLabel(selectedProfile?.lastVerificationStage)}</strong></div>
+          <div><span>HTTP 状态</span><strong>{selectedProfile?.lastVerificationHttpStatus ? `HTTP ${selectedProfile.lastVerificationHttpStatus}` : '未记录'}</strong></div>
+          <div><span>响应形状</span><strong>{verificationResponseShapeLabel(selectedProfile?.verificationResponseShape)}</strong></div>
+          {selectedProfile?.lastVerificationProviderCode && (
+            <div><span>服务商代码</span><strong>{selectedProfile.lastVerificationProviderCode}</strong></div>
+          )}
+        </div>
+        <div className="evidence-explanation">
+          <div><span>证据</span><p>{guidance.evidence}</p></div>
+          <div><span>说明</span><p>{guidance.meaning}</p></div>
+          <div><span>不保证</span><p>{guidance.limitation}</p></div>
+          <div><span>下一步</span><p>{guidance.nextStep}</p></div>
+        </div>
+      </section>
       <section className="surface-panel">
         <div className="check-section-heading">
           <div>
-            <span>目标服务商可用性</span>
+            <span>切换门禁中的可用性结论</span>
             <strong>{selectedProfile?.name ?? '未选择'}</strong>
           </div>
-          <small>测试只覆盖一次短请求；它是切换门槛，但不替代长上下文、工具调用或最终 Codex 验收。</small>
+          <small>这是一次切换前短请求的证据；不替代长期使用或最终 Codex 验收。</small>
         </div>
         <div className="check-list">
           {availabilityChecks.map((check) => {
@@ -1240,26 +1390,38 @@ function SafetyWorkspace({
         <div className="section-heading-row">
           <div>
             <span className="eyebrow">恢复中心</span>
-            <h3>最近备份</h3>
+            <h3>工具创建的恢复点</h3>
           </div>
-          <span className="section-meta">切换前自动生成</span>
+          <span className="section-meta">恢复不证明远端服务商可用</span>
         </div>
         {latestBackup ? (
-          <div className="recovery-row">
-            <div>
-              <strong>{latestBackup.label}</strong>
-              <span>{latestBackup.time} · {latestBackup.files} 个备份文件</span>
+          <>
+            <div className="recovery-list">
+              {backups.map((backup, index) => (
+                <div className="recovery-row" key={backup.id}>
+                  <div>
+                    <strong>{backup.label}</strong>
+                    <span>{backup.time} · {backup.files} 个文件 · {index === 0 ? '最近恢复点' : '历史恢复点'}</span>
+                    <div className="recovery-categories">
+                      {backup.fileCategories.map((category) => <span key={category}>{category}</span>)}
+                    </div>
+                  </div>
+                  {index === 0 && (
+                    <button className="danger-button" type="button" onClick={onRestoreRequested} disabled={busy !== null}>
+                      <RotateCcw size={16} />
+                      恢复最近备份
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
-            <button className="danger-button" type="button" onClick={onRestoreRequested} disabled={busy !== null}>
-              <RotateCcw size={16} />
-              恢复最近备份
-            </button>
-          </div>
+            <p className="recovery-boundary">恢复只回退本工具创建的本地备份；恢复后仍须重新检查当前服务商的可用性。</p>
+          </>
         ) : (
           <div className="empty-state recovery-empty">
             <RotateCcw size={26} />
             <strong>尚未创建恢复点</strong>
-            <span>成功切换服务商前会自动生成配置和凭据备份。</span>
+            <span>成功切换服务商前会自动生成受保护的配置和凭据备份。</span>
           </div>
         )}
       </section>
@@ -1285,13 +1447,53 @@ function RestoreConfirmDialog({
         <div>
           <span className="eyebrow">恢复最近备份</span>
           <h2 id="restore-dialog-title">确认恢复配置？</h2>
-          <p>将恢复 {backup.label} 中的 Codex 配置和凭据。恢复后需要重新检查当前服务商状态。</p>
+          <p>将恢复 {backup.label} 中由本工具创建的 Codex 配置和本机凭据备份。恢复不证明远端服务商可用，完成后需要重新检查当前服务商状态。</p>
         </div>
         <div className="command-row">
           <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
           <button className="danger-button" type="button" onClick={onConfirm} disabled={busy}>
             <RotateCcw size={16} />
             确认恢复
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function SwitchConfirmDialog({
+  profile,
+  latestBackup,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  profile: ProviderProfile
+  latestBackup: BackupItem | undefined
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div className="confirm-backdrop" role="presentation">
+      <section className="confirm-dialog switch-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="switch-dialog-title">
+        <div className="confirm-dialog-icon"><GitCompareArrows size={20} /></div>
+        <div>
+          <span className="eyebrow">切换影响确认</span>
+          <h2 id="switch-dialog-title">确认切换到 {profile.name}？</h2>
+          <p>已确认该服务商有最近可用性证据。切换会创建新的受保护恢复点，并更新 Codex 的服务商、接口地址、模型和本机凭据类别；不会显示 API 密钥或完整配置内容。</p>
+          <dl className="switch-confirm-facts">
+            <div><dt>目标模型</dt><dd>{profile.model}</dd></div>
+            <div><dt>最近验证</dt><dd>{profile.lastVerifiedAt ?? '未记录'}</dd></div>
+            <div><dt>恢复点</dt><dd>{latestBackup ? `将在 ${latestBackup.label} 之后新增` : '切换前将创建首个恢复点'}</dd></div>
+          </dl>
+          <p>完成后请关闭当前 Codex 会话，并在新的会话中确认实际 provider 使用情况。</p>
+        </div>
+        <div className="command-row">
+          <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
+          <button className="primary-button" type="button" onClick={onConfirm} disabled={busy}>
+            <PlugZap size={16} />
+            确认切换
           </button>
         </div>
       </section>

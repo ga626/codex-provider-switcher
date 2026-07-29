@@ -1,6 +1,7 @@
 import { chromium } from 'playwright'
 import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, access, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, access, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -29,12 +30,63 @@ async function waitForBackend() {
   throw new Error(`local backend did not become ready: ${lastError}`)
 }
 
+async function apiPost(path, body) {
+  const response = await fetch(`${baseUrl.slice(0, -1)}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    throw new Error(`fixture API ${path} failed: HTTP ${response.status}`)
+  }
+  return response.json()
+}
+
 await mkdir(outputDir, { recursive: true })
 await mkdir(codexDir, { recursive: true })
 await mkdir(localAppData, { recursive: true })
+await writeFile(join(codexDir, 'config.toml'), [
+  'model = "baseline-model"',
+  'model_provider = "custom"',
+  'disable_response_storage = true',
+  '',
+  '[model_providers.custom]',
+  'name = "Baseline"',
+  'wire_api = "responses"',
+  'requires_openai_auth = true',
+  'base_url = "https://baseline.example/v1"',
+  'api_key = "baseline-key"',
+].join('\r\n'), 'utf8')
+await writeFile(join(codexDir, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'baseline-key' }), 'utf8')
 await access(exePath).catch(() => {
   throw new Error(`local backend binary not found: ${exePath}. Run npm run backend:build first.`)
 })
+
+const providerServer = createServer((request, response) => {
+  if (request.url !== '/v1/responses') {
+    response.writeHead(404, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ error: 'not found' }))
+    return
+  }
+  request.resume()
+  request.on('end', () => {
+    if (request.headers.authorization !== 'Bearer ui-fixture-key') {
+      response.writeHead(401, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ error: { message: 'unauthorized' } }))
+      return
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ id: 'resp_ui_fixture', object: 'response' }))
+  })
+})
+await new Promise((resolve, reject) => {
+  providerServer.once('error', reject)
+  providerServer.listen(0, '127.0.0.1', resolve)
+})
+const providerAddress = providerServer.address()
+if (!providerAddress || typeof providerAddress === 'string') {
+  throw new Error('fixture provider did not expose a TCP address')
+}
 
 const child = spawn(exePath, ['--port', String(port)], {
   cwd: process.cwd(),
@@ -55,6 +107,24 @@ const consoleEvents = []
 
 try {
   await waitForBackend()
+  const saved = await apiPost('/api/profiles/save', {
+    profile: {
+      id: '',
+      name: 'UI Fixture Provider',
+      baseUrl: `http://127.0.0.1:${providerAddress.port}/v1`,
+      model: 'ui-fixture-model',
+      note: '本地 UI smoke fixture。',
+      apiKey: 'ui-fixture-key',
+    },
+  })
+  const profileId = saved.profiles.find((profile) => profile.name === 'UI Fixture Provider')?.id
+  if (!profileId) {
+    throw new Error('fixture provider was not saved')
+  }
+  const verified = await apiPost('/api/profiles/verify', { profileId })
+  if (!verified.profiles.find((profile) => profile.id === profileId)?.verified) {
+    throw new Error('fixture provider was not verified')
+  }
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
   page.on('console', (message) => {
     if (['error', 'warning'].includes(message.type())) {
@@ -68,9 +138,14 @@ try {
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
   await page.locator('.app-shell').waitFor()
   await page.getByRole('heading', { name: 'Signalman AI' }).waitFor()
-  await page.getByText('0 个配置').waitFor()
-  await page.getByRole('heading', { name: '新增服务商' }).waitFor()
+  await page.getByText('1 个配置').waitFor()
+  await page.getByRole('heading', { name: '编辑 UI Fixture Provider' }).waitFor()
+  await page.getByRole('button', { name: '切换到 UI Fixture Provider' }).click()
+  await page.getByRole('dialog', { name: '确认切换到 UI Fixture Provider？' }).waitFor()
+  await page.getByText('切换影响确认').waitFor()
+  await page.getByText('本机凭据类别').first().waitFor()
   await page.screenshot({ path: join(outputDir, 'local-web-backend.png'), fullPage: true })
+  await page.getByRole('button', { name: '取消' }).click()
 
   const seriousConsoleEvents = consoleEvents.filter((event) => !event.includes('Download the React DevTools'))
   if (seriousConsoleEvents.length > 0) {
@@ -82,7 +157,7 @@ try {
     url: baseUrl,
     outputDir,
     screenshot: 'local-web-backend.png',
-    assertion: 'frontend rendered through the local Web backend with an empty new-user provider catalog, not browser preview mock',
+    assertion: 'frontend rendered through the local Web backend with a verified local fixture provider and showed the switch-impact confirmation without performing a switch',
   }, null, 2))
 } finally {
   await browser.close()
@@ -91,4 +166,5 @@ try {
     if (!child.killed) child.kill('SIGKILL')
   }, 500)
   await rm(fixtureRoot, { recursive: true, force: true })
+  await new Promise((resolve) => providerServer.close(resolve))
 }

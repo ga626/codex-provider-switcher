@@ -787,14 +787,10 @@ textarea {
   color: var(--text);
 }
 
-.safety-summary {
+.safety-overview {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
   gap: 12px;
-}
-
-.safety-summary {
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   align-items: stretch;
 }
 
@@ -805,7 +801,7 @@ textarea {
   white-space: nowrap;
 }
 
-.safety-summary > div {
+.safety-overview article {
   min-width: 0;
   display: grid;
   gap: 4px;
@@ -815,14 +811,95 @@ textarea {
   border-radius: 7px;
 }
 
-.safety-summary svg {
+.safety-overview svg {
   color: var(--accent);
 }
 
-.safety-summary small {
+.safety-overview small {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.safety-overview article.warning {
+  border-color: rgba(161, 98, 7, 0.25);
+  background: var(--amber-soft);
+}
+
+.safety-overview article.warning svg {
+  color: var(--amber);
+}
+
+.safety-overview article.danger {
+  border-color: rgba(180, 35, 24, 0.25);
+  background: var(--red-soft);
+}
+
+.safety-overview article.danger svg {
+  color: var(--red);
+}
+
+.evidence-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.evidence-status {
+  align-self: start;
+  padding: 4px 7px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.evidence-status.warning {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.evidence-status.danger {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.evidence-facts,
+.evidence-explanation {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.evidence-facts > div,
+.evidence-explanation > div {
+  min-width: 0;
+  padding: 10px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.evidence-facts span,
+.evidence-explanation span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.evidence-facts strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.evidence-explanation p {
+  margin: 5px 0 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .check-row,
@@ -885,6 +962,11 @@ textarea {
   gap: 12px;
 }
 
+.recovery-list {
+  display: grid;
+  gap: 8px;
+}
+
 .recovery-row {
   display: flex;
   align-items: center;
@@ -914,6 +996,30 @@ textarea {
   margin-top: 4px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.recovery-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.recovery-categories span {
+  display: inline;
+  margin: 0;
+  padding: 2px 6px;
+  color: var(--muted);
+  background: #edf1f5;
+  border-radius: 999px;
+  font-size: 10px;
+}
+
+.recovery-boundary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .recovery-empty {
@@ -967,6 +1073,37 @@ textarea {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.switch-confirm-dialog {
+  width: min(580px, 100%);
+}
+
+.switch-confirm-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.switch-confirm-facts > div {
+  min-width: 0;
+  padding: 8px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.switch-confirm-facts dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.switch-confirm-facts dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
 }
 
 .confirm-dialog .command-row {
@@ -1171,6 +1308,26 @@ textarea {
   line-height: 1.45;
 }
 
+.switch-impact-list {
+  display: grid;
+  gap: 5px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.switch-impact-list li {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.switch-impact-list li::before {
+  content: '•';
+  margin-right: 5px;
+  color: var(--accent);
+}
+
 .mini-check {
   min-height: 30px;
   display: flex;
@@ -1212,13 +1369,18 @@ textarea {
     grid-template-columns: 244px minmax(0, 1fr) 286px;
   }
 
-  .safety-summary {
+  .safety-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .safety-run-button {
     grid-column: 1 / -1;
     justify-self: end;
+  }
+
+  .evidence-facts,
+  .evidence-explanation {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .check-section-heading {
