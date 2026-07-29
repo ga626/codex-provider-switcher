@@ -39,10 +39,11 @@ npm run release:readiness -- -Channel store
 | --- | --- |
 | PR 就绪 | 本地验证、文档同步、开发版验收、PR 描述中的发布计划 |
 | 代码已合并 | PR 合并，最新 `main` CI 正常 |
+| 非发布 PR 已收口 | 已明确为非发布影响；本次无新 tag、Release、Store 包或渠道安装验收义务，既有已交付版本保持有效 |
 | GitHub 已交付 | 新 tag、不可变 GitHub Release、远端下载、安装、启动和更新验收完成 |
 | Store 已交付 | 已验证 GitHub tag 的 MSIX、Partner Center 认证、从 Store 安装、启动和更新验收完成 |
 
-普通 PR 合并不等于发布。没有完成对应渠道的实际安装验收，只能写“代码已合并，产品未交付”。
+合并回执先写 PR 分类。非发布影响 PR 合并不等于发布，但也没有发布义务：`main` CI 通过后写“非发布 PR 已收口”，将 tag、Release、Store 包和渠道安装验收标为“不适用”。只有发布影响 PR 的对应渠道实际安装验收尚未完成时，才写“代码已合并，产品未交付”；必须注明这是已批准暂缓还是 `release incident`。
 
 ## 当前已交付基线
 
@@ -50,6 +51,10 @@ npm run release:readiness -- -Channel store
 - 该版本的 GitHub stable 本机安装位于 `D:\Software\Signalman AI`，并是当前维护者桌面入口。
 - Microsoft Store `0.8.0.0` 仍为独立、低频稳定渠道，未被 GitHub alpha 交付或本机 cutover 覆盖。
 - 这一基线不代表后续 PR 自动发布；任何新的用户可见版本仍必须从新的 tag 重新走本手册。
+
+## 历史例外
+
+`v0.7.0-alpha` 只有 tag 而没有 GitHub Release。这是当时为 Microsoft Store 候选流程生成 MSIX artifact 的历史例外，不是遗漏的 GitHub 交付。不得补发、重打或覆盖这个旧 tag；后续 Store 大版本必须遵循本手册的“已验证 GitHub tag”前置条件。
 
 ## GitHub 发布步骤
 

@@ -3,7 +3,7 @@
 - 类型：文档/内部维护 | 普通功能 | 用户可见流程 | 发布影响 | 紧急修复
 - 用户验收：无需 | 截图 | 功能 | 安装发布 | cutover 确认
 - 本地验证等级：最小 | 功能 | 桌面 | 发布
-- 发布结论：非发布影响 | 合并后不发布 | 合并后按计划发布
+- 发布结论：非发布影响（渠道动作不适用） | 发布影响（合并后按计划发布） | 发布影响（已批准暂缓，须说明原因）
 
 ## 摘要
 
@@ -28,6 +28,6 @@
 
 ## 发布计划/后续动作
 
-说明是否为发布影响 PR、目标版本和 tag、计划发布的资产，以及合并后需要做的下载/安装验收。GitHub 日常发布和 Store 稳定发布必须分开说明：Store 不跟随每个 GitHub tag。发布影响 PR 必须粘贴 `npm run release:readiness -- -Mode Maintainer -Channel github -ReportOnly` 的简短结论；若缺 updater 签名或其他发布条件，明确写“代码可合并，产品未交付”和下一步负责人。
+先写明分类。非发布影响 PR 必须写“合并后无新版本或渠道交付义务；tag、Release、Store 包和渠道安装验收均不适用；既有已交付版本保持有效”。发布影响 PR 说明目标版本和 tag、计划发布的资产，以及合并后需要做的下载/安装验收。GitHub 日常发布和 Store 稳定发布必须分开说明：Store 不跟随每个 GitHub tag。发布影响 PR 必须粘贴 `npm run release:readiness -- -Mode Maintainer -Channel github -ReportOnly` 的简短结论；若缺 updater 签名或其他发布条件，明确写“代码可合并，产品未交付”并说明暂缓/事故原因和下一步负责人。
 
-没有完成新 tag、不可变 GitHub Release、远端下载、安装、启动和升级验收时，状态只能写“代码已合并，产品未交付”。不得复用旧 tag 或覆盖旧 Release。
+仅发布影响 PR：没有完成新 tag、不可变 GitHub Release、远端下载、安装、启动和升级验收时，状态写“代码已合并，产品未交付”。非发布影响 PR 不得使用这句话；不得复用旧 tag 或覆盖旧 Release。
