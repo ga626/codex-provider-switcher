@@ -165,7 +165,8 @@ function verificationDetail(profile: ProviderProfile | undefined) {
 
 function verificationLabel(profile: ProviderProfile | undefined) {
   if (!profile) return '未保存'
-  if (profile.verified && profile.verificationStatus === 'verified') {
+  if (profile.verificationStatus === 'verified') {
+    if (!profile.verified) return '待验证'
     return profile.verificationResponseShape === 'compatible_response'
       ? '可调用（兼容响应）'
       : '可调用（标准 Responses）'
