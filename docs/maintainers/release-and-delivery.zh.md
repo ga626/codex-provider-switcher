@@ -11,15 +11,17 @@
 
 不购买 Windows Authenticode/Artifact Signing 是本项目已确认的策略。GitHub `setup.exe` 因此可能出现 SmartScreen 提示；不要把 Store 的微软签名说成 GitHub 安装包的签名，也不要生成自签名 PFX 冒充可信发布。
 
-## 发布前检查
+## 两种发布检查
 
-GitHub 发布前运行：
+维护者在创建 tag 前运行：
 
 ```powershell
-npm run release:readiness -- -Channel github
+npm run release:readiness -- -Mode Maintainer -Channel github
 ```
 
-它只检查版本、GitHub 状态、Dependabot 告警和两个 Tauri updater Secret 名称，不读取 Secret 值，也不创建 tag 或 Release。
+默认是 `Maintainer` 模式。它检查版本、GitHub 状态、Dependabot 告警、immutable Release 设置和两个 Tauri updater Secret 名称；不读取 Secret 值，也不创建 tag 或 Release。这个检查必须在维护者本机、使用具有仓库治理读取权限的登录态运行。
+
+GitHub Actions 使用 `RunnerSafe` 模式。它只检查 tag、源码版本和既有 Release 状态，不枚举 Secret 名称，不读取 Dependabot 告警，也不要求个人 PAT。构建 job 对实际注入的 updater Secret 做非空校验。
 
 Store 大版本准备前运行：
 
@@ -40,6 +42,13 @@ npm run release:readiness -- -Channel store
 
 普通 PR 合并不等于发布。没有完成对应渠道的实际安装验收，只能写“代码已合并，产品未交付”。
 
+## 当前已交付基线
+
+- GitHub `v0.9.0-alpha` 已作为不可变 Release 交付；远端下载、SHA256、`latest.json`、安装和启动验收均已完成。
+- 该版本的 GitHub stable 本机安装位于 `D:\Software\Signalman AI`，并是当前维护者桌面入口。
+- Microsoft Store `0.8.0.0` 仍为独立、低频稳定渠道，未被 GitHub alpha 交付或本机 cutover 覆盖。
+- 这一基线不代表后续 PR 自动发布；任何新的用户可见版本仍必须从新的 tag 重新走本手册。
+
 ## GitHub 发布步骤
 
 1. 合并用户可见版本的 PR 后，切到干净的最新 `main`，确认 main CI 成功。
@@ -49,6 +58,12 @@ npm run release:readiness -- -Channel store
 5. workflow 必须生成 setup、SHA256、updater `.sig` 与 `latest.json`。Tauri updater 私钥只存在 GitHub Actions Secret 中，普通用户不需要也看不到它。
 6. 从 GitHub Release 按普通用户路径下载、核对 SHA256、安装、启动并检查更新。未购买 Windows 代码签名时，记录 SmartScreen 行为，但不要把“无提示”作为 GitHub 交付门槛。
 7. 完成后才写“GitHub 已交付”。
+
+### 发布事故处理
+
+如果 tag 已创建但 workflow 在资产生成前失败，状态必须写为“代码已合并，产品未交付（release incident）”，并暂停新的发布影响 PR。不能删除或重打同一个 tag，也不能手工补传资产。
+
+只允许创建一个修复发布控制逻辑的 PR。该 PR 合并并通过 main CI 后，从默认分支手动运行 `GitHub Release` workflow，输入原 tag。workflow 会先 checkout 修复后的控制逻辑，用 Git 读取原 tag 的版本元数据；只有身份检查完成后才 checkout 原 tag 构建，因此最终资产仍来自原 SHA。完成远端下载、安装、启动和更新验收前，事故不能关闭。
 
 ## Microsoft Store 大版本步骤
 
@@ -82,8 +97,8 @@ npm run qa:refresh-local-candidate -- -Apply
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/prepare-local-install-migration.ps1
 ```
 
-只有 GitHub 稳定安装已实际 smoke 通过后，才由新的 Codex 会话执行后续本机清理或旧工具交接。
+只有 GitHub 稳定安装已实际 smoke 通过后，才由新的 Codex 会话执行后续本机清理或旧工具交接。2026-07-24 已完成一次受限历史清理：它仅移除了 `D:\Software\CodeX Provider Switcher` 及其匹配失效快捷方式，不能据此扩大到 Store、Codex 配置、用户资料或 `D:\AI Studio\CodeX\Codex Switcher`。
 
 ## 旧工具与最终替换
 
-发布成功后，由新的 Codex 会话运行 `npm run qa:cutover-preflight` 做只读确认。用户确认后再进行真实 provider 切换、旧工具停用与重启复查。当前开发会话不得执行这些动作；旧目录保留作回滚参考。完整步骤见 [旧工具替换手册](legacy-cutover.zh.md)。
+2026-07-24 的真实 provider canary、只读预检和受限旧候选清理已经完成。当前开发会话不得重复切换或清理；`D:\AI Studio\CodeX\Codex Switcher` 继续保留作回滚参考。任何未来退役该参考目录的决定必须单独批准、重新预检并提供新的回滚方案。完整历史见 [旧工具替换记录](legacy-cutover.zh.md)。

@@ -6,20 +6,20 @@ Windows 上的 Codex provider 管理工具。它把手工修改 `config.toml` �
 
 > 截图使用离线示例配置生成，不包含真实服务商、地址、密钥或本机资料。
 
-**当前状态：** 产品仍处于 alpha 阶段，但已提供两条正式下载路径。源码分支和 PR 中的功能不等于已经交付给安装用户。
+**交付状态：** 产品仍处于 alpha 阶段。GitHub 和 Store 是否已经交付、各自可下载的版本号，以对应渠道页面为准；`main`、PR 和 Git tag 出现更高版本并不等于安装用户已经拿到它。
 
 ## 选择下载方式
 
 | 你想要什么 | 选择 | 更新节奏 | 第一次安装 |
 | --- | --- | --- | --- |
-| 尽快拿到已经发布的新功能 | [GitHub Releases](https://github.com/ga626/codex-provider-switcher/releases/latest) | 日常小版本优先在这里发布；应用内可检查签名更新 | 未购买 Windows 代码签名时，Windows 可能显示 SmartScreen 提示 |
+| 尽快拿到已经公开交付的新功能 | [GitHub Releases](https://github.com/ga626/codex-provider-switcher/releases/latest) | 日常小版本优先在这里发布；应用内可检查签名更新 | 未购买 Windows 代码签名时，Windows 可能显示 SmartScreen 提示 |
 | 更省心、由微软管理更新 | [Microsoft Store](https://apps.microsoft.com/detail/9P7PGV62WKK6) | 只发布经过一段时间验证的稳定大版本，可能落后于 GitHub | Store 安装包由 Microsoft Store 管理签名和更新，正常情况下没有 SmartScreen 下载提示 |
 
-这不是两个不同的软件。两条路径使用同一份已验证的源码；差别只在发布节奏和 Windows 的安装信任方式。一台电脑请选择其中一个作为日常入口，不要把开发版、维护者候选版和两个安装版混在一起使用。
+这不是两个不同的软件。两条路径从已验证的版本 tag 构建，但交付节奏不同，版本号也可能不同；差别还包括 Windows 的安装信任方式。一台电脑请选择其中一个作为日常入口，不要把开发版、维护者候选版和两个安装版混在一起使用。
 
 ## 你打开它后会做什么
 
-1. 保存 provider 的名称、接口地址、模型和 API 密钥；密钥只保存在当前 Windows 用户的本机资料中。
+1. 保存 provider 的名称、接口地址、模型和 API 密钥；切换器自己的敏感资料使用当前 Windows 用户的 DPAPI 保护。
 2. 运行“服务商可用性测试”，确认地址、密钥、模型和 Responses 协议能够完成一次真实短请求。
 3. 测试通过后执行切换；应用先创建恢复点，再写入 Codex 配置。
 4. 关闭并重新打开 Codex，在新会话里确认实际工作正常；需要回退时，从恢复中心还原最近备份。
@@ -47,7 +47,7 @@ Windows 上的 Codex provider 管理工具。它把手工修改 `config.toml` �
 
 ### GitHub 最新版
 
-1. 打开 [最新发布版](https://github.com/ga626/codex-provider-switcher/releases/latest)，下载名称带 `setup.exe` 的 Windows 安装包及同名 `.sha256` 文件。
+1. 打开 [最新发布版](https://github.com/ga626/codex-provider-switcher/releases/latest)，确认页面标为 `Latest` 的版本，再下载名称带 `setup.exe` 的 Windows 安装包及同名 `.sha256` 文件。
 2. 只在确认下载页属于本仓库官方 Release、版本号与校验文件一致后运行安装包。未购买 Windows 代码签名时，SmartScreen 提示是已知边界；企业策略或 Smart App Control 可能不允许继续。
 3. 从开始菜单或桌面图标启动 `Signalman AI`。之后使用应用内“检查更新”获取 GitHub 签名更新。
 
@@ -61,9 +61,10 @@ Windows 上的 Codex provider 管理工具。它把手工修改 `config.toml` �
 
 ## 数据和安全边界
 
-- provider API key 与本工具创建的敏感恢复副本使用当前 Windows 用户的 DPAPI 保护。
+- 切换器保存的 provider profile API key 与本工具创建的敏感恢复副本使用当前 Windows 用户的 DPAPI 保护。执行切换时，Codex 所需的 custom provider `api_key` 与认证状态仍会写入 Codex 的 `config.toml` 和 `auth.json`；不要把这些受当前 Windows 用户账户保护的 Codex 文件误称为切换器的 DPAPI 加密副本。
 - 应用写入前会创建备份；不要用它在正在工作的同一个 Codex 会话中做最终 provider 切换。
 - 不要把本机应用数据目录中的 profiles、备份或日志发送到公开 Issue。
+- 删除切换器或其本机资料不会自动撤销最近一次 Codex 配置写入；如需回退，先在应用内恢复确认过的恢复点。
 - 应用不提供默认开机自启、托盘常驻或后台 daemon；关闭窗口即退出。
 - GitHub updater 的签名与 Windows 对首次下载的信任是两条独立安全链路。Store 安装版由 Microsoft Store 管理包签名和更新。每个版本是否已经完成完整交付，以对应渠道的版本说明为准。
 
@@ -79,7 +80,7 @@ Windows 上的 Codex provider 管理工具。它把手工修改 `config.toml` �
 
 ### 旧切换工具什么时候可以停？
 
-先完成新版本下载、安装、启动、更新和真实服务商验收；再在新的 Codex 会话中运行只读交接预检并完成一次新工具切换。通过后才停止旧工具，旧目录先保留作回滚参考。详细条件见 [旧工具替换手册](docs/maintainers/legacy-cutover.zh.md)。
+本机旧候选的受限退役已在受控切换中完成；GitHub stable `Signalman AI` 是当前桌面入口。原有切换工具仍保留为受保护的回滚参考，除非有新的明确批准，不应删除或重复执行切换。历史条件见 [旧工具替换手册](docs/maintainers/legacy-cutover.zh.md)。
 
 ### 遇到问题怎么办？
 

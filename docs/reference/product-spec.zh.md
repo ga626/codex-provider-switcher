@@ -16,11 +16,12 @@
 
 - 写 `config.toml` 或 `auth.json` 前先备份。
 - 保留 `model_provider = "custom"`、Responses wire API、response storage 设置及用户既有 Codex 功能配置。
-- API key 与应用创建的敏感恢复副本使用 DPAPI 保护。
+- 切换器 profile 中保存的 API key 与应用创建的敏感恢复副本使用 DPAPI 保护；执行切换时，Codex 所需的 custom provider `api_key` 与认证状态按其文件格式写入 `config.toml` 和 `auth.json`，不应被误称为切换器的 DPAPI 加密副本。
 - 模型目录表示服务商列出模型，不等于模型已被 Codex 完整验证。
 - 只有当前保存的地址、模型和密钥已通过一次已认证的 Responses 请求，才允许写入 Codex 配置。
 - 修改 provider 或从 Codex 同步新的模型后，旧测试结果立即失效，必须重新测试。
 - 当前运行中的 Codex 会话不执行最终 provider cutover。
+- 删除切换器或其本机资料不会自动撤销已写入的 Codex 配置；回退必须先恢复确认过的恢复点。
 
 ## 发布边界
 
