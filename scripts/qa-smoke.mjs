@@ -72,7 +72,6 @@ try {
   await desktop.locator('.app-shell').waitFor()
   await desktop.locator('.navigation-pane').waitFor()
   await desktop.locator('.workspace-panel').waitFor()
-  await desktop.locator('.inspector-panel').waitFor()
   await desktop.locator('.statusbar').waitFor()
 
   const updateButton = desktop.locator('header').getByRole('button', { name: '检查更新' })
@@ -133,29 +132,34 @@ try {
   await desktop.getByLabel('服务商名称').fill('Smoke Test API')
   await desktop.getByLabel('接口地址').fill('https://smoke.example.com/v1')
   await desktop.getByLabel('默认模型').fill('gpt-smoke')
-  await desktop.getByLabel('API 密钥').fill('sk-smoke-test')
+  await desktop.getByLabel('访问密钥').fill('sk-smoke-test')
   await desktop.getByLabel('备注').fill('由 qa:smoke 自动生成。')
   await desktop.getByRole('button', { name: '保存更改' }).click()
   await desktop.getByRole('dialog', { name: '确认保存手动模型？' }).waitFor()
-  await desktop.getByRole('button', { name: '仍然保存' }).click()
+  await desktop.getByRole('button', { name: '继续保存' }).click()
   await desktop.getByRole('dialog', { name: '确认保存手动模型？' }).waitFor({ state: 'detached' })
   await desktop.locator('.provider-row').filter({ hasText: 'Smoke Test API' }).waitFor()
   await desktop.getByRole('heading', { name: '编辑 Smoke Test API' }).waitFor()
 
-  await desktop.getByRole('button', { name: /安全检查/ }).click()
+  await desktop.getByRole('button', { name: /切换前检查/ }).click()
   await desktop.getByRole('button', { name: '运行可用性测试' }).click()
-  await desktop.getByText('没有连接远端服务商').waitFor()
+  await desktop.getByText('开发预览不会发送真实服务商请求。').waitFor()
   await desktop.getByRole('button', { name: /服务商/ }).first().click()
+  if (await desktop.getByRole('button', { name: '切换到 Smoke Test API' }).count()) {
+    throw new Error('Provider configuration must not repeat the switch action.')
+  }
+  await desktop.getByRole('button', { name: /切换前检查/ }).click()
   if (!await desktop.getByRole('button', { name: '切换到 Smoke Test API' }).isDisabled()) {
     throw new Error('Preview mode must not enable a simulated provider switch.')
   }
 
   await desktop.locator('.provider-row').filter({ hasText: '示例服务商 C' }).click()
+  await desktop.getByRole('button', { name: /服务商/ }).first().click()
   await desktop.getByRole('button', { name: '复制配置' }).click()
   await desktop.getByLabel('服务商名称').fill('Example Provider Smoke Copy')
   await desktop.getByRole('button', { name: '保存更改' }).click()
   await desktop.getByRole('dialog', { name: '确认保存手动模型？' }).waitFor()
-  await desktop.getByRole('button', { name: '仍然保存' }).click()
+  await desktop.getByRole('button', { name: '继续保存' }).click()
   await desktop.getByRole('dialog', { name: '确认保存手动模型？' }).waitFor({ state: 'detached' })
   await desktop.locator('.provider-row').filter({ hasText: 'Example Provider Smoke Copy' }).waitFor()
   await desktop.getByRole('button', { name: '删除服务商' }).click()
@@ -163,51 +167,62 @@ try {
 
   await desktop.locator('.provider-row').filter({ hasText: '示例服务商 B' }).click()
   await desktop.getByRole('button', { name: '设为默认' }).click()
-  await desktop.locator('.provider-row').filter({ hasText: '示例服务商 B' }).locator('svg').waitFor()
+  await desktop.locator('.provider-row').filter({ hasText: '示例服务商 B' }).locator('svg.lucide-star').waitFor()
 
   await desktop.locator('.provider-row').filter({ hasText: '示例服务商 C' }).click()
-  await desktop.getByRole('button', { name: /安全检查/ }).click()
-  await desktop.getByText('额度或配额不足').first().waitFor()
-  await desktop.getByText('检查服务商余额或配额后重新测试。').waitFor()
+  await desktop.getByRole('button', { name: /切换前检查/ }).click()
+  await desktop.getByText(/额度不足/).first().waitFor()
+  await desktop.getByRole('heading', { name: '完成以下检查后即可切换' }).waitFor()
+  await desktop.getByRole('heading', { name: '这些设置会在切换后继续生效' }).waitFor()
+  await desktop.getByText('Responses 线路协议').waitFor()
   await desktop.screenshot({ path: join(outputDir, 'desktop-safety-billing.png'), fullPage: true })
-  await desktop.getByRole('heading', { name: '安全检查' }).waitFor()
+  await desktop.getByRole('heading', { name: '切换前检查' }).waitFor()
   await desktop.locator('.check-list').first().waitFor()
-  await desktop.locator('.check-list.compact-check-list').first().waitFor()
+  if (await desktop.locator('.compact-check-list').count()) {
+    throw new Error('Switch check must not render a nested check list.')
+  }
+  if (await desktop.locator('.inspector-panel').count()) {
+    throw new Error('Switch check must not render a duplicate right-side inspector.')
+  }
   await desktop.locator('.provider-row').filter({ hasText: '示例服务商 B' }).click()
-  await desktop.getByText('服务端已响应，结果待确认').first().waitFor()
-  await desktop.getByText('服务端可达不等于该模型可以被 Codex 正常调用。').waitFor()
+  await desktop.getByText('服务端已返回 JSON，但无法确认其可供 Codex 使用。').waitFor()
   await desktop.screenshot({ path: join(outputDir, 'desktop-safety-unconfirmed.png'), fullPage: true })
 
   await desktop.locator('.provider-row').filter({ hasText: '示例服务商 D' }).click()
-  await desktop.getByText('可调用（标准 Responses）').first().waitFor()
-  await desktop.getByText('这不保证未来额度、长上下文、工具调用或远端服务持续可用。').waitFor()
+  await desktop.getByText('最近一次连接测试通过。').waitFor()
 
   const safetyLayout = await desktop.evaluate(() => {
-    const button = document.querySelector('.safety-run-button')?.getBoundingClientRect()
-    const summary = document.querySelector('.safety-overview')?.getBoundingClientRect()
-    const icon = document.querySelector('.switch-card-heading .switch-icon')?.getBoundingClientRect()
-    const label = document.querySelector('.switch-card-heading span:last-child')?.getBoundingClientRect()
+    const button = document.querySelector('.check-actions .primary-button')?.getBoundingClientRect()
+    const panel = document.querySelector('.check-panel')?.getBoundingClientRect()
     return {
       buttonHeight: button?.height ?? 0,
-      buttonCenterDelta: button && summary
-        ? Math.abs((button.top + button.height / 2) - (summary.top + summary.height / 2))
-        : null,
-      switchIconCenterDelta: icon && label
-        ? Math.abs((icon.top + icon.height / 2) - (label.top + label.height / 2))
+      buttonRightInset: button && panel
+        ? Math.abs(panel.right - button.right - 16)
         : null,
     }
   })
-  if (safetyLayout.buttonHeight < 32 || safetyLayout.buttonHeight > 44 || (safetyLayout.buttonCenterDelta ?? 99) > 2) {
+  if (safetyLayout.buttonHeight < 32 || safetyLayout.buttonHeight > 44 || (safetyLayout.buttonRightInset ?? 99) > 2) {
     throw new Error(`Safety check button is stretched or misaligned: ${JSON.stringify(safetyLayout)}`)
   }
-  if ((safetyLayout.switchIconCenterDelta ?? 99) > 2) {
-    throw new Error(`Switch card icon is not vertically aligned with its label: ${JSON.stringify(safetyLayout)}`)
-  }
-  await desktop.getByRole('button', { name: '恢复最近备份' }).click()
-  await desktop.getByRole('dialog', { name: '确认恢复配置？' }).waitFor()
-  await desktop.getByRole('button', { name: '取消' }).click()
-  await desktop.getByRole('dialog', { name: '确认恢复配置？' }).waitFor({ state: 'detached' })
-  await desktop.screenshot({ path: join(outputDir, 'desktop-safety.png'), fullPage: true })
+  await desktop.getByRole('button', { name: /配置保护/ }).click()
+  await desktop.getByRole('heading', { name: '首次启动基线备份已就绪' }).waitFor()
+  await desktop.getByRole('heading', { name: '已保护的恢复点' }).waitFor()
+  await desktop.getByRole('button', { name: '立即备份当前状态' }).click()
+  const manualRecoveryRow = desktop.locator('.recovery-row').filter({ hasText: '手动备份' })
+  await manualRecoveryRow.waitFor()
+  await manualRecoveryRow.getByRole('button', { name: '安全恢复' }).click()
+  const restoreDialog = desktop.getByRole('dialog', { name: '确认回到这个恢复点？' })
+  await restoreDialog.waitFor()
+  const restoreButton = restoreDialog.getByRole('button', { name: '确认恢复' })
+  if (!await restoreButton.isDisabled()) throw new Error('restore confirmation must require the confirmation phrase')
+  await restoreDialog.getByPlaceholder('恢复').fill('恢复')
+  await restoreButton.click()
+  await restoreDialog.waitFor({ state: 'detached' })
+  await desktop.getByRole('status').getByText('已恢复配置备份').waitFor()
+  await desktop.getByRole('button', { name: /活动记录/ }).click()
+  await desktop.getByText('已恢复配置备份').first().waitFor()
+  await desktop.getByRole('button', { name: /配置保护/ }).click()
+  await desktop.screenshot({ path: join(outputDir, 'desktop-protection.png'), fullPage: true })
 
   await desktop.getByRole('button', { name: /活动记录/ }).click()
   await desktop.getByRole('heading', { name: '活动记录' }).waitFor()
@@ -219,7 +234,6 @@ try {
   await compactDesktop.locator('.app-shell').waitFor()
   await compactDesktop.locator('.navigation-pane').waitFor()
   await compactDesktop.locator('.workspace-panel').waitFor()
-  await compactDesktop.locator('.inspector-panel').waitFor()
   const compactMetrics = await compactDesktop.evaluate(() => ({
     bodyScrollHeight: document.body.scrollHeight,
     bodyClientHeight: document.body.clientHeight,
@@ -230,21 +244,21 @@ try {
   }
   const compactSidebarMetrics = await sidebarMetrics(compactDesktop)
   assertSidebarLayout(compactSidebarMetrics, 'Compact sidebar')
-  await compactDesktop.getByRole('button', { name: /安全检查/ }).click()
-  await compactDesktop.getByRole('heading', { name: '安全检查' }).waitFor()
+  await compactDesktop.getByRole('button', { name: /切换前检查/ }).click()
+  await compactDesktop.getByRole('heading', { name: '切换前检查' }).waitFor()
   const compactSafetyLayout = await compactDesktop.evaluate(() => {
-    const summary = document.querySelector('.safety-overview')?.getBoundingClientRect()
-    const button = document.querySelector('.safety-run-button')?.getBoundingClientRect()
-    const cards = [...document.querySelectorAll('.safety-overview article')].map((element) => element.getBoundingClientRect())
+    const panel = document.querySelector('.check-panel')?.getBoundingClientRect()
+    const button = document.querySelector('.check-actions .primary-button')?.getBoundingClientRect()
     return {
       buttonHeight: button?.height ?? 0,
-      buttonTop: button?.top ?? 0,
-      cardBottom: cards.length ? Math.max(...cards.map((card) => card.bottom)) : 0,
-      summaryWidth: summary?.width ?? 0,
+      buttonLeftInset: button && panel
+        ? Math.abs(button.left - panel.left - 16)
+        : null,
+      panelWidth: panel?.width ?? 0,
     }
   })
-  if (compactSafetyLayout.buttonHeight < 32 || compactSafetyLayout.buttonHeight > 44 || compactSafetyLayout.buttonTop < compactSafetyLayout.cardBottom + 8) {
-    throw new Error(`Compact safety controls overlap or stretch: ${JSON.stringify(compactSafetyLayout)}`)
+  if (compactSafetyLayout.buttonHeight < 32 || compactSafetyLayout.buttonHeight > 44 || (compactSafetyLayout.buttonLeftInset ?? 99) > 2) {
+    throw new Error(`Compact safety controls are misaligned: ${JSON.stringify(compactSafetyLayout)}`)
   }
   await compactDesktop.screenshot({ path: join(outputDir, 'compact-desktop.png'), fullPage: true })
 
@@ -253,8 +267,8 @@ try {
   await wideDesktop.locator('.app-shell').waitFor()
   const wideSidebarMetrics = await sidebarMetrics(wideDesktop)
   assertSidebarLayout(wideSidebarMetrics, 'Wide desktop sidebar')
-  await wideDesktop.getByRole('button', { name: /安全检查/ }).click()
-  await wideDesktop.getByRole('heading', { name: '安全检查' }).waitFor()
+  await wideDesktop.getByRole('button', { name: /切换前检查/ }).click()
+  await wideDesktop.getByRole('heading', { name: '切换前检查' }).waitFor()
   await wideDesktop.screenshot({ path: join(outputDir, 'wide-safety.png'), fullPage: true })
 
   const seriousConsoleEvents = consoleEvents.filter((event) => !event.includes('Download the React DevTools'))
@@ -266,14 +280,14 @@ try {
     ok: true,
     url,
     outputDir,
-    screenshots: ['desktop.png', 'desktop-models.png', 'desktop-safety-billing.png', 'desktop-safety-unconfirmed.png', 'desktop-safety.png', 'desktop-after-save.png', 'compact-desktop.png', 'wide-safety.png'],
+    screenshots: ['desktop.png', 'desktop-models.png', 'desktop-safety-billing.png', 'desktop-safety-unconfirmed.png', 'desktop-protection.png', 'desktop-after-save.png', 'compact-desktop.png', 'wide-safety.png'],
     metrics: {
       desktop: desktopMetrics,
       compact: compactMetrics,
       sidebar: { desktop: desktopSidebarMetrics, compact: compactSidebarMetrics, wide: wideSidebarMetrics },
       safety: { desktop: safetyLayout, compact: compactSafetyLayout },
     },
-    interaction: '检查更新 -> 模型目录 -> 刷新并选择模型 -> 新增服务商 -> 保存 -> 安全检查显示预览边界 -> 复制 -> 删除 -> 设为默认 -> 活动记录',
+    interaction: '检查更新 -> 模型目录 -> 刷新并选择模型 -> 新增服务商 -> 保存 -> 完整切换检查 -> 手动备份 -> 双重确认恢复 -> 复制 -> 删除 -> 设为默认 -> 活动记录',
   }, null, 2))
 } finally {
   await browser.close()

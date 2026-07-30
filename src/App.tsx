@@ -5,6 +5,7 @@ import {
   Copy,
   Activity,
   Download,
+  GripVertical,
   GitCompareArrows,
   KeyRound,
   LayoutDashboard,
@@ -26,29 +27,24 @@ import './App.css'
 import {
   deleteProfile,
   checkForUpdate,
+  createManualBackup,
   isGitHubReleaseBuild,
   isStoreManagedBuild,
   loadState,
   openUpdate,
+  prepareSwitch,
   refreshModels,
-  restoreLatestBackup,
+  reorderProfiles,
+  restoreBackup,
   saveProfile,
   setDefaultProfile,
   syncCurrentConfiguration,
   switchProfile,
   verifyProfile,
 } from './adapter'
-import type { AppState, BackupItem, EditableProfile, ModelCatalog, ProviderProfile, UpdateInfo, ValidationCheck } from './types'
+import type { AppState, BackupItem, ConfigurationProtection, EditableProfile, ModelCatalog, ProviderProfile, SwitchPreflight, UpdateInfo, ValidationCheck } from './types'
 
-type ViewId = 'providers' | 'models' | 'safety' | 'timeline'
-
-type VerificationGuidance = {
-  title: string
-  evidence: string
-  meaning: string
-  limitation: string
-  nextStep: string
-}
+type ViewId = 'providers' | 'models' | 'switch-check' | 'protection' | 'timeline'
 
 const emptyProfile: EditableProfile = {
   id: '',
@@ -68,6 +64,16 @@ function toEditable(profile: ProviderProfile): EditableProfile {
     note: profile.note,
     apiKey: '',
   }
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'string' && error.trim()) return error
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string' && message.trim()) return message
+  }
+  return fallback
 }
 
 function getCheckVisual(check: { ok: boolean; severity: 'required' | 'warning' | 'info' }) {
@@ -116,9 +122,9 @@ function profileConfigurationChecks(profile: ProviderProfile | undefined, draft:
     },
     {
       id: 'profile-api-key',
-      label: 'API 密钥',
+      label: '访问密钥',
       ok: hasKey,
-      detail: hasKey ? '已保存密钥或本次已输入新密钥。' : '切换前必须保存 API 密钥。',
+      detail: hasKey ? '已保存访问密钥。' : '切换前需要保存访问密钥。',
       severity: 'required',
     },
   ]
@@ -158,124 +164,12 @@ function providerAvailabilityChecks(
 
 function verificationDetail(profile: ProviderProfile | undefined) {
   if (!profile?.lastVerificationDetail) {
-    return '尚未运行可用性测试。切换前必须发送一笔短时、低 token 的 Responses 请求。'
+    return '尚未运行连接测试。'
   }
 
-  const diagnostics = [
-    profile.lastVerificationHttpStatus ? `HTTP ${profile.lastVerificationHttpStatus}` : '',
-    profile.lastVerificationProviderCode ? `服务商代码：${profile.lastVerificationProviderCode}` : '',
-  ].filter(Boolean)
-
-  return diagnostics.length > 0
-    ? `${profile.lastVerificationDetail}（${diagnostics.join('，')}）`
+  return profile.verified && profile.verificationStatus === 'verified'
+    ? '最近一次连接测试通过。'
     : profile.lastVerificationDetail
-}
-
-function verificationLabel(profile: ProviderProfile | undefined) {
-  if (!profile) return '未保存'
-  if (profile.verificationStatus === 'verified') {
-    if (!profile.verified) return '待验证'
-    return profile.verificationResponseShape === 'compatible_response'
-      ? '可调用（兼容响应）'
-      : '可调用（标准 Responses）'
-  }
-  const labels: Record<Exclude<ProviderProfile['verificationStatus'], 'verified'>, string> = {
-    not_checked: '未运行测试',
-    missing_key: '测试未执行',
-    invalid_profile: '测试未执行',
-    unauthorized: '认证被拒绝',
-    billing_unavailable: '额度或配额不足',
-    rate_limited: '服务商正在限流',
-    model_unavailable: '模型不可用',
-    endpoint_or_model_unavailable: '路径或模型不可用',
-    request_incompatible: '请求不被接受',
-    protocol_incompatible: '旧版协议结果',
-    response_shape_unconfirmed: '服务端已响应，结果待确认',
-    response_unparseable: '服务端已响应，无法解析',
-    service_error: '服务商异常',
-    timeout: '请求超时，未得出结论',
-    network_error: '网络不可达',
-    transport_error: '传输过程异常',
-    provider_error: '服务商返回错误',
-  }
-  return labels[profile.verificationStatus] ?? '待验证'
-}
-
-function verificationStageLabel(stage: string | undefined) {
-  const labels: Record<string, string> = {
-    inference: '推理请求',
-    billing: '额度检查',
-    response_shape: '响应形状判断',
-    authentication: '认证检查',
-    transport: '传输检查',
-  }
-  return stage ? labels[stage] ?? stage : '未记录'
-}
-
-function verificationResponseShapeLabel(shape: ProviderProfile['verificationResponseShape']) {
-  if (shape === 'standard_responses') return '标准 Responses'
-  if (shape === 'compatible_response') return '兼容响应'
-  return '尚未确认'
-}
-
-function verificationGuidance(profile: ProviderProfile | undefined): VerificationGuidance {
-  if (!profile) {
-    return {
-      title: '尚未选择服务商',
-      evidence: '没有可展示的服务商验证记录。',
-      meaning: '当前不能判断是否可以安全切换。',
-      limitation: '不会读取或展示任何 API 密钥。',
-      nextStep: '先保存一条服务商记录，再运行可用性测试。',
-    }
-  }
-
-  if (profile.verified && profile.verificationStatus === 'verified') {
-    return {
-      title: verificationLabel(profile),
-      evidence: profile.lastVerificationDetail ?? '已有可用性测试通过记录。',
-      meaning: '该服务商通过了切换前的一次短时 Responses 请求。',
-      limitation: '这不保证未来额度、长上下文、工具调用或远端服务持续可用。',
-      nextStep: '确认配置未改动后可切换；完成后请在新的 Codex 会话确认实际使用。',
-    }
-  }
-
-  if (profile.verificationStatus === 'billing_unavailable' || profile.verificationStatus === 'rate_limited') {
-    return {
-      title: verificationLabel(profile),
-      evidence: profile.lastVerificationDetail ?? '服务商未通过额度或限流检查。',
-      meaning: '本次请求没有取得可用于切换的可用性证据。',
-      limitation: '这不代表保存的密钥已丢失，也不会改写 Codex 配置。',
-      nextStep: profile.verificationStatus === 'rate_limited' ? '等待限流结束后重新测试。' : '检查服务商余额或配额后重新测试。',
-    }
-  }
-
-  if (profile.verificationStatus === 'response_shape_unconfirmed' || profile.verificationStatus === 'response_unparseable') {
-    return {
-      title: verificationLabel(profile),
-      evidence: profile.lastVerificationDetail ?? '服务端已有响应，但结果尚不足以确认。',
-      meaning: '服务端可达不等于该模型可以被 Codex 正常调用。',
-      limitation: '本工具不会因这类结果写入 Codex 配置或自动猜测协议。',
-      nextStep: '核对服务商的 Responses 兼容性、模型和端点后重新测试。',
-    }
-  }
-
-  if (profile.verificationStatus === 'not_checked' || profile.verificationStatus === 'missing_key' || profile.verificationStatus === 'invalid_profile') {
-    return {
-      title: verificationLabel(profile),
-      evidence: profile.lastVerificationDetail ?? '尚无一次有效的可用性测试记录。',
-      meaning: '当前没有可用于切换的 provider 可用性证据。',
-      limitation: '保存服务商资料本身不会证明远端 provider 可用。',
-      nextStep: '补齐地址、模型和已保存密钥后运行可用性测试。',
-    }
-  }
-
-  return {
-    title: verificationLabel(profile),
-    evidence: profile.lastVerificationDetail ?? '最近一次测试未能给出可用结论。',
-    meaning: '当前服务商被切换门禁拦截。',
-    limitation: '失败测试不会改写 Codex 配置、认证或恢复点。',
-    nextStep: '根据诊断阶段和服务商代码处理问题后重新测试。',
-  }
 }
 
 function requiresManualModelConfirmation(
@@ -306,13 +200,15 @@ function App() {
   const [draft, setDraft] = useState<EditableProfile>(emptyProfile)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [restoreConfirm, setRestoreConfirm] = useState<BackupItem | null>(null)
-  const [switchConfirm, setSwitchConfirm] = useState<ProviderProfile | null>(null)
+  const [switchConfirm, setSwitchConfirm] = useState<SwitchPreflight | null>(null)
   const [manualModelConfirm, setManualModelConfirm] = useState<string | null>(null)
   const [syncConfirm, setSyncConfirm] = useState(false)
   const [restartNotice, setRestartNotice] = useState(false)
+  const [draggedProviderId, setDraggedProviderId] = useState<string | null>(null)
 
   useEffect(() => {
     async function loadInitialState() {
@@ -327,7 +223,7 @@ function App() {
         }
         setError(null)
       } catch (err) {
-        setError(err instanceof Error ? err.message : '加载切换器状态失败。')
+        setError(errorMessage(err, '加载切换器状态失败。'))
       } finally {
         setBusy(null)
       }
@@ -335,6 +231,12 @@ function App() {
 
     void loadInitialState()
   }, [])
+
+  useEffect(() => {
+    if (!notice) return undefined
+    const timeout = window.setTimeout(() => setNotice(null), 5000)
+    return () => window.clearTimeout(timeout)
+  }, [notice])
 
   async function refresh() {
     setBusy('refresh')
@@ -348,7 +250,7 @@ function App() {
       }
       setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载切换器状态失败。')
+      setError(errorMessage(err, '加载切换器状态失败。'))
     } finally {
       setBusy(null)
     }
@@ -398,6 +300,7 @@ function App() {
       if (label === 'switch') {
         setRestartNotice(true)
       }
+      setNotice(next.activity[0]?.title ?? '操作已完成')
       setError(null)
     } catch (err) {
       try {
@@ -406,7 +309,7 @@ function App() {
       } catch {
         // Preserve the operation error when the follow-up state refresh also fails.
       }
-      setError(err instanceof Error ? err.message : '操作失败。')
+      setError(errorMessage(err, '操作失败。'))
     } finally {
       setBusy(null)
     }
@@ -428,9 +331,10 @@ function App() {
         setSelectedId(saved.id)
         setDraft(toEditable(saved))
       }
+      setNotice(next.activity[0]?.title ?? '已保存配置')
       setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存配置失败。')
+      setError(errorMessage(err, '保存配置失败。'))
     } finally {
       setBusy(null)
     }
@@ -459,6 +363,16 @@ function App() {
     setActiveView('providers')
   }
 
+  function moveProvider(profileId: string, targetIndex: number) {
+    if (!state) return
+    const sourceIndex = state.profiles.findIndex((profile) => profile.id === profileId)
+    if (sourceIndex < 0 || sourceIndex === targetIndex) return
+    const nextIds = state.profiles.map((profile) => profile.id)
+    const [movedId] = nextIds.splice(sourceIndex, 1)
+    nextIds.splice(targetIndex, 0, movedId)
+    void runAction('reorder-profiles', () => reorderProfiles(nextIds))
+  }
+
   function duplicateProfile() {
     if (!selectedProfile) return
     setSelectedId('')
@@ -480,7 +394,7 @@ function App() {
         await openUpdate(next.releaseUrl)
         setError(null)
       } catch (err) {
-        setError(err instanceof Error ? err.message : '无法打开 Microsoft Store。')
+      setError(errorMessage(err, '无法打开 Microsoft Store。'))
       } finally {
         setUpdateBusy(false)
       }
@@ -494,7 +408,7 @@ function App() {
         await openUpdate(updateInfo.downloadUrl ?? updateInfo.releaseUrl)
         setError(null)
       } catch (err) {
-        setError(err instanceof Error ? err.message : '无法打开更新下载。')
+      setError(errorMessage(err, '无法打开更新下载。'))
       }
       return
     }
@@ -505,28 +419,36 @@ function App() {
       setUpdateInfo(next)
       setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '检查更新失败。')
+      setError(errorMessage(err, '检查更新失败。'))
     } finally {
       setUpdateBusy(false)
     }
   }
 
-  async function restoreLatest() {
-    await runAction('restore-backup', restoreLatestBackup)
+  async function restoreLatest(confirmation: string) {
+    if (!restoreConfirm) return
+    await runAction('restore-backup', () => restoreBackup(restoreConfirm.id, confirmation))
     setRestoreConfirm(null)
   }
 
-  function requestSwitch() {
-    if (selectedProfile && canSwitch) {
-      setSwitchConfirm(selectedProfile)
+  async function requestSwitch() {
+    if (!selectedProfile || !canSwitch) return
+    setBusy('prepare-switch')
+    try {
+      setSwitchConfirm(await prepareSwitch(selectedProfile.id))
+      setError(null)
+    } catch (err) {
+      setError(errorMessage(err, '切换前检查失败。'))
+    } finally {
+      setBusy(null)
     }
   }
 
   async function confirmSwitch() {
     if (!switchConfirm) return
-    const profileId = switchConfirm.id
+    const { profileId, operationId } = switchConfirm
     setSwitchConfirm(null)
-    await runAction('switch', () => switchProfile(profileId))
+    await runAction('switch', () => switchProfile(profileId, operationId))
   }
 
   if (!state && error) {
@@ -557,11 +479,11 @@ function App() {
   const navItems: Array<{ id: ViewId; label: string; note: string; icon: React.ReactNode }> = [
     { id: 'providers', label: '服务商', note: `${state.profiles.length} 个配置`, icon: <LayoutDashboard size={17} /> },
     { id: 'models', label: '模型目录', note: selectedModelCatalog?.status === 'ok' ? '已同步' : '待刷新', icon: <Boxes size={17} /> },
-    { id: 'safety', label: '安全检查', note: !selectedProfile ? '先新增服务商' : hasUnsavedChanges ? '请先保存' : requiredFailures === 0 ? '可以切换' : `${requiredFailures} 个待处理`, icon: <ShieldCheck size={17} /> },
+    { id: 'switch-check', label: '切换前检查', note: !selectedProfile ? '先新增服务商' : hasUnsavedChanges ? '请先保存' : requiredFailures === 0 ? '可以切换' : `${requiredFailures} 项待处理`, icon: <ShieldCheck size={17} /> },
+    { id: 'protection', label: '配置保护', note: state.configurationProtection.baselineReady ? '备份已就绪' : '需要处理', icon: <ShieldCheck size={17} /> },
     { id: 'timeline', label: '活动记录', note: latestActivity?.time ?? '暂无记录', icon: <Activity size={17} /> },
   ]
   const selectedIsCurrent = Boolean(selectedProfile?.active)
-  const switchCardState = selectedIsCurrent ? 'current' : !selectedProfile || hasUnsavedChanges || requiredFailures > 0 ? 'blocked' : 'ready'
   const updateLabel = updateBusy
     ? '正在检查'
     : isStoreManagedBuild
@@ -619,19 +541,26 @@ function App() {
         </section>
       )}
 
+      {notice && (
+        <div className="success-toast" role="status">
+          <CheckCircle2 size={17} />
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} aria-label="关闭完成提示"><X size={15} /></button>
+        </div>
+      )}
+
       {restoreConfirm && (
         <RestoreConfirmDialog
           backup={restoreConfirm}
           busy={busy !== null}
           onCancel={() => setRestoreConfirm(null)}
-          onConfirm={() => void restoreLatest()}
+          onConfirm={(confirmation) => void restoreLatest(confirmation)}
         />
       )}
 
       {switchConfirm && (
         <SwitchConfirmDialog
-          profile={switchConfirm}
-          latestBackup={state.backups[0]}
+          preflight={switchConfirm}
           busy={busy !== null}
           onCancel={() => setSwitchConfirm(null)}
           onConfirm={() => void confirmSwitch()}
@@ -681,14 +610,42 @@ function App() {
             </div>
 
             <div className="provider-list" aria-label="服务商列表">
-              {state.profiles.map((profile) => (
-                <button
+              {state.profiles.map((profile, index) => (
+                <div
                   key={profile.id}
-                  className={`provider-row ${profile.id === selectedId ? 'selected' : ''} ${profile.active ? 'active' : ''}`}
-                  type="button"
-                  disabled={busy !== null}
+                  className={`provider-row ${profile.id === selectedId ? 'selected' : ''} ${profile.active ? 'active' : ''} ${draggedProviderId === profile.id ? 'dragging' : ''}`}
+                  role="button"
+                  tabIndex={busy === null ? 0 : -1}
+                  draggable={busy === null}
+                  aria-label={`${profile.name}。按住拖动可调整列表顺序；按 Alt 加方向键也可移动。`}
+                  onDragStart={(event) => {
+                    setDraggedProviderId(profile.id)
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setData('text/plain', profile.id)
+                  }}
+                  onDragEnd={() => setDraggedProviderId(null)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    const sourceId = event.dataTransfer.getData('text/plain') || draggedProviderId
+                    setDraggedProviderId(null)
+                    if (sourceId) moveProvider(sourceId, index)
+                  }}
                   onClick={() => selectProfile(profile)}
+                  onKeyDown={(event) => {
+                    if (event.altKey && event.key === 'ArrowUp') {
+                      event.preventDefault()
+                      moveProvider(profile.id, Math.max(0, index - 1))
+                    } else if (event.altKey && event.key === 'ArrowDown') {
+                      event.preventDefault()
+                      moveProvider(profile.id, Math.min(state.profiles.length - 1, index + 1))
+                    } else if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      selectProfile(profile)
+                    }
+                  }}
                 >
+                  <span className="provider-drag-handle" title="按住拖动排序" aria-hidden="true"><GripVertical size={15} /></span>
                   <span className="provider-symbol" aria-hidden="true"><Server size={16} /></span>
                   <span className="provider-row-main">
                     <strong>
@@ -698,7 +655,7 @@ function App() {
                     <small>{profile.baseUrl}</small>
                   </span>
                   <span className={`row-state ${profile.verified ? 'ok' : 'warning'}`} />
-                </button>
+                </div>
               ))}
             </div>
           </section>
@@ -711,6 +668,9 @@ function App() {
             selectedProfile={selectedProfile}
             requiredFailures={requiredFailures}
             selectedModelCatalog={selectedModelCatalog}
+            canSwitch={canSwitch}
+            selectedIsCurrent={selectedIsCurrent}
+            onSwitchRequested={requestSwitch}
           />
           <div className="workspace-scroll">
             {activeView === 'providers' && (
@@ -734,138 +694,35 @@ function App() {
                 runAction={runAction}
               />
             )}
-            {activeView === 'safety' && (
+            {activeView === 'switch-check' && (
               <SafetyWorkspace
                 availabilityChecks={availabilityChecks}
                 profileConfigChecks={profileConfigChecks}
-                configChecks={configChecks}
-                safeMode={state.safeMode}
+                configChecks={state.checks}
                 selectedProfile={selectedProfile}
                 busy={busy}
                 hasUnsavedChanges={hasUnsavedChanges}
-                backups={state.backups}
-                configurationDrift={state.configurationDrift}
-                onRestoreRequested={() => setRestoreConfirm(state.backups[0] ?? null)}
-                onSyncRequested={() => setSyncConfirm(true)}
                 runAction={runAction}
+              />
+            )}
+            {activeView === 'protection' && (
+              <ConfigurationProtectionWorkspace
+                protection={state.configurationProtection}
+                backups={state.backups}
+                busy={busy}
+                onRestoreRequested={(backup) => setRestoreConfirm(backup)}
+                onBackupRequested={() => void runAction('create-manual-backup', createManualBackup)}
               />
             )}
             {activeView === 'timeline' && <TimelineWorkspace state={state} />}
           </div>
         </section>
 
-        <aside className="inspector-panel">
-          <div className="inspector-section current-object">
-            <div className="panel-heading">
-              <span>当前目标</span>
-              <strong>{selectedProfile?.name ?? '新增服务商'}</strong>
-            </div>
-            <dl className="inspector-facts">
-              <div>
-                <dt>状态</dt>
-                <dd className={selectedProfile?.active ? 'value-good' : ''}>{selectedProfile?.active ? '运行中' : '未启用'}</dd>
-              </div>
-              <div>
-                <dt>验证</dt>
-                <dd className={selectedProfile?.verified ? 'value-good' : ''}>{verificationLabel(selectedProfile)}</dd>
-              </div>
-              <div>
-                <dt>模型</dt>
-                <dd>{draft.model || '未设置'}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div className={`switch-card ${switchCardState}`}>
-            <div>
-              <div className="switch-card-heading">
-                <span className="switch-icon"><ShieldCheck size={16} /></span>
-                <span>
-                  {selectedIsCurrent
-                    ? '当前连接'
-                    : !selectedProfile
-                      ? '请先新增服务商'
-                      : hasUnsavedChanges
-                      ? '请先保存更改'
-                    : requiredFailures === 0
-                      ? '安全检查已通过'
-                      : '需要处理安全项'}
-                </span>
-              </div>
-              <strong>
-                {selectedIsCurrent
-                  ? '当前已启用'
-                  : !selectedProfile
-                    ? '尚未创建服务商'
-                    : hasUnsavedChanges
-                    ? '尚未保存'
-                  : requiredFailures === 0
-                    ? '可以切换'
-                    : `${requiredFailures} 个阻断项`}
-              </strong>
-              <p>
-                {selectedIsCurrent
-                  ? '选择其他连接后可执行切换。'
-                  : !selectedProfile
-                    ? '填写并保存自己的服务商配置后，再运行可用性测试。'
-                    : hasUnsavedChanges
-                    ? '保存后需要运行真实服务商检查。'
-                  : requiredFailures === 0
-                    ? '切换前会自动生成恢复点。'
-                  : '先处理必填项，再执行服务商切换。'}
-              </p>
-              {selectedProfile && (
-                <ul className="switch-impact-list">
-                  <li>目标：{selectedProfile.name} · {selectedProfile.model || '未设置模型'}</li>
-                  <li>写入：服务商、模型、接口地址和本机凭据类别；不显示具体值。</li>
-                  <li>恢复：切换前自动创建一个受保护恢复点。</li>
-                  <li>确认：完成后必须在新的 Codex 会话检查实际使用。</li>
-                </ul>
-              )}
-            </div>
-            <button
-              className="primary-button"
-              type="button"
-              onClick={requestSwitch}
-              disabled={!canSwitch}
-            >
-              <PlugZap size={16} />
-              {selectedIsCurrent ? '当前使用中' : selectedProfile ? `切换到 ${selectedProfile.name}` : '先新增服务商'}
-            </button>
-          </div>
-
-          <div className="inspector-section checks-mini">
-            <div className="panel-heading">
-              <span>切换前置条件</span>
-              <strong>{switchGateChecks.length} 项</strong>
-            </div>
-            <div className="mini-check-list">
-              {switchGateChecks.slice(0, 7).map((check) => {
-                const visual = getCheckVisual(check)
-                return (
-                  <div className={`mini-check ${visual.className}`} key={check.id}>
-                    {visual.icon}
-                    <span>{check.label}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          <div className="inspector-section">
-            <div className="panel-heading">
-              <span>最近活动</span>
-              <strong>{latestActivity?.time ?? '暂无'}</strong>
-            </div>
-            <p className="inspector-note">{latestActivity?.detail ?? '完成检查或切换后会更新。'}</p>
-          </div>
-        </aside>
       </section>
 
       <footer className="statusbar">
         <span>{busy ? `正在执行：${busy}` : '就绪'}</span>
-        <span>{state.safeMode ? '安全模式开启' : '安全模式关闭'}</span>
-        <span>凭据仅保存在此设备</span>
+        <span>本机资料仅保存在此设备</span>
       </footer>
       {syncConfirm && state.configurationDrift && (
         <SyncCurrentConfigurationDialog
@@ -888,12 +745,19 @@ function WorkspaceHeader({
   selectedProfile,
   requiredFailures,
   selectedModelCatalog,
+  canSwitch,
+  selectedIsCurrent,
+  onSwitchRequested,
 }: {
   activeView: ViewId
   selectedProfile: ProviderProfile | undefined
   requiredFailures: number
   selectedModelCatalog: ModelCatalog | undefined
+  canSwitch: boolean
+  selectedIsCurrent: boolean
+  onSwitchRequested: () => void
 }) {
+  const showSwitchAction = activeView === 'switch-check'
   const copy: Record<ViewId, { title: string; note: string }> = {
     providers: {
       title: selectedProfile ? `编辑 ${selectedProfile.name}` : '新增服务商',
@@ -903,9 +767,13 @@ function WorkspaceHeader({
       title: '模型目录',
       note: selectedModelCatalog?.statusDetail ?? '尚未同步模型目录。',
     },
-    safety: {
-      title: '安全检查',
-      note: !selectedProfile ? '先新增并保存自己的服务商配置。' : requiredFailures === 0 ? '当前配置满足切换前置条件。' : '还有必填检查未通过。',
+    'switch-check': {
+      title: '切换前检查',
+      note: !selectedProfile ? '先新增并保存服务商。' : requiredFailures === 0 ? '已满足切换条件。' : '请先处理未通过的项目。',
+    },
+    protection: {
+      title: '配置保护',
+      note: '查看备份、受保护内容和恢复入口。',
     },
     timeline: {
       title: '活动记录',
@@ -919,9 +787,17 @@ function WorkspaceHeader({
         <h2>{copy[activeView].title}</h2>
         <p>{copy[activeView].note}</p>
       </div>
-      <span className={`workspace-badge ${selectedProfile && requiredFailures === 0 ? 'ok' : 'warning'}`}>
-        {!selectedProfile ? '先新增服务商' : requiredFailures === 0 ? '安全门禁通过' : `${requiredFailures} 个阻断项`}
-      </span>
+      {showSwitchAction && (
+        <div className="workspace-header-actions">
+          <span className={`workspace-badge ${selectedProfile && requiredFailures === 0 ? 'ok' : 'warning'}`}>
+            {!selectedProfile ? '未选择服务商' : requiredFailures === 0 ? '可以切换' : `${requiredFailures} 项待处理`}
+          </span>
+          <button className="primary-button header-switch-button" type="button" onClick={onSwitchRequested} disabled={!canSwitch}>
+            <PlugZap size={16} />
+            {selectedIsCurrent ? '当前使用中' : selectedProfile ? `切换到 ${selectedProfile.name}` : '先新增服务商'}
+          </button>
+        </div>
+      )}
     </header>
   )
 }
@@ -1001,13 +877,13 @@ function ProviderWorkspace({
             />
           </label>
           <label>
-            API 密钥
+            访问密钥
             <div className="key-field">
               <KeyRound size={15} />
               <input
                 value={draft.apiKey}
                 onChange={(event) => updateDraft('apiKey', event.target.value)}
-                placeholder={selectedProfile?.hasApiKey ? '已保存密钥。如需替换请重新输入。' : '粘贴 API 密钥'}
+                placeholder={selectedProfile?.hasApiKey ? '已保存访问密钥；如需替换请重新输入。' : '粘贴访问密钥'}
                 type="password"
               />
             </div>
@@ -1168,7 +1044,7 @@ function ManualModelConfirmDialog({
         </div>
         <div className="command-row">
           <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
-          <button className="danger-button" type="button" onClick={onConfirm} disabled={busy}>仍然保存</button>
+          <button className="danger-button" type="button" onClick={onConfirm} disabled={busy}>继续保存</button>
         </div>
       </section>
     </div>
@@ -1208,170 +1084,63 @@ function SafetyWorkspace({
   availabilityChecks,
   profileConfigChecks,
   configChecks,
-  safeMode,
   selectedProfile,
   busy,
   hasUnsavedChanges,
-  backups,
-  configurationDrift,
-  onRestoreRequested,
-  onSyncRequested,
   runAction,
 }: {
   availabilityChecks: ValidationCheck[]
   profileConfigChecks: ValidationCheck[]
   configChecks: ValidationCheck[]
-  safeMode: boolean
   selectedProfile: ProviderProfile | undefined
   busy: string | null
   hasUnsavedChanges: boolean
-  backups: BackupItem[]
-  configurationDrift: AppState['configurationDrift']
-  onRestoreRequested: () => void
-  onSyncRequested: () => void
   runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
 }) {
-  const latestBackup = backups[0]
-  const guidance = verificationGuidance(selectedProfile)
-  const availabilityVisual = getCheckVisual(availabilityChecks[0] ?? { ok: false, severity: 'required' })
+  const targetChecks = [...availabilityChecks, ...profileConfigChecks]
   return (
     <div className="workspace-stack">
-      <section className="surface-panel safety-overview">
-        <article>
-          <ShieldCheck size={22} />
-          <span>本地写入安全</span>
-          <strong>{safeMode ? '已开启' : '未开启'}</strong>
-          <small>可用性测试只发起短请求，不写入 Codex 配置。</small>
-        </article>
-        <article className={availabilityVisual.className}>
-          <KeyRound size={22} />
-          <span>当前可用性证据</span>
-          <strong>{guidance.title}</strong>
-          <small>{selectedProfile?.lastVerifiedAt ? `最后测试：${selectedProfile.lastVerifiedAt}` : '尚无最近测试时间。'}</small>
-        </article>
-        <article>
-          <RotateCcw size={22} />
-          <span>恢复 / 回滚状态</span>
-          <strong>{backups.length > 0 ? `${backups.length} 个恢复点` : '尚无恢复点'}</strong>
-          <small>{selectedProfile?.lastSwitchedAt ? `最近切换：${selectedProfile.lastSwitchedAt}` : '尚未记录服务商切换。'}</small>
-        </article>
-        <button
-          className="primary-button safety-run-button"
-          type="button"
-          onClick={() => selectedProfile && runAction('verify', () => verifyProfile(selectedProfile.id))}
-          disabled={!selectedProfile || hasUnsavedChanges || busy !== null}
-        >
-          <ShieldCheck size={16} />
-          {!selectedProfile ? '先新增服务商' : hasUnsavedChanges ? '请先保存更改' : '运行可用性测试'}
-        </button>
-      </section>
-      <section className="surface-panel evidence-panel">
+      <section className="surface-panel check-panel">
         <div className="section-heading-row">
           <div>
-            <span className="eyebrow">服务商可用性证据</span>
-            <h3>{selectedProfile?.name ?? '未选择服务商'}</h3>
+            <span className="eyebrow">切换条件</span>
+            <h3>完成以下检查后即可切换</h3>
           </div>
-          <span className={`evidence-status ${availabilityVisual.className}`}>{guidance.title}</span>
-        </div>
-        <div className="evidence-facts" aria-label="最近验证事实">
-          <div><span>最后验证</span><strong>{selectedProfile?.lastVerifiedAt ?? '未记录'}</strong></div>
-          <div><span>诊断阶段</span><strong>{verificationStageLabel(selectedProfile?.lastVerificationStage)}</strong></div>
-          <div><span>HTTP 状态</span><strong>{selectedProfile?.lastVerificationHttpStatus ? `HTTP ${selectedProfile.lastVerificationHttpStatus}` : '未记录'}</strong></div>
-          <div><span>响应形状</span><strong>{verificationResponseShapeLabel(selectedProfile?.verificationResponseShape)}</strong></div>
-          {selectedProfile?.lastVerificationProviderCode && (
-            <div><span>服务商代码</span><strong>{selectedProfile.lastVerificationProviderCode}</strong></div>
-          )}
-        </div>
-        <div className="evidence-explanation">
-          <div><span>证据</span><p>{guidance.evidence}</p></div>
-          <div><span>说明</span><p>{guidance.meaning}</p></div>
-          <div><span>不保证</span><p>{guidance.limitation}</p></div>
-          <div><span>下一步</span><p>{guidance.nextStep}</p></div>
-        </div>
-      </section>
-      <section className="surface-panel">
-        <div className="check-section-heading">
-          <div>
-            <span>切换门禁中的可用性结论</span>
-            <strong>{selectedProfile?.name ?? '未选择'}</strong>
-          </div>
-          <small>这是一次切换前短请求的证据；不替代长期使用或最终 Codex 验收。</small>
-        </div>
-        <div className="check-list">
-          {availabilityChecks.map((check) => {
-            const visual = getCheckVisual(check)
-            return (
-              <div className={`check-row ${visual.className}`} key={check.id}>
-                {visual.icon}
-                <div>
-                  <strong>{check.label}</strong>
-                  <span>{check.detail}</span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </section>
-      <section className="surface-panel compact-surface">
-        <div className="section-heading-row">
-          <div>
-            <span className="eyebrow">切换门禁</span>
-            <h3>目标配置完整性</h3>
-          </div>
-          <span className="section-meta">地址、模型、密钥与真实可用性测试都必须通过</span>
-        </div>
-        <div className="check-list compact-check-list">
-          {profileConfigChecks.map((check) => {
-            const visual = getCheckVisual(check)
-            return (
-              <div className={`check-row ${visual.className}`} key={check.id}>
-                {visual.icon}
-                <div>
-                  <strong>{check.label}</strong>
-                  <span>{check.detail}</span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-        <div className="path-grid verification-boundary">
-          <div>
-            <span>配置写入</span>
-            <strong>只有切换时才生成恢复点</strong>
-          </div>
-          <div>
-            <span>可用性测试</span>
-            <strong>手动运行，不写入 Codex 配置</strong>
-          </div>
-        </div>
-      </section>
-      {configurationDrift && (
-        <section className="surface-panel compact-surface configuration-drift-panel">
-          <div className="section-heading-row">
-            <div>
-              <span className="eyebrow">当前配置差异</span>
-              <h3>同步目录前请确认</h3>
-            </div>
-            <span className="section-meta">不会改写 Codex 配置</span>
-          </div>
-          <p>{configurationDrift.detail}</p>
-          <div className="command-row">
-            <button className="primary-button" type="button" onClick={onSyncRequested} disabled={busy !== null}>
-              <GitCompareArrows size={16} />
-              同步当前模型到目录
+          <div className="check-actions">
+            <span className="section-meta">{selectedProfile ? `当前：${selectedProfile.name}` : '请选择服务商'} · 检查不会修改现有服务商设置</span>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => selectedProfile && runAction('verify', () => verifyProfile(selectedProfile.id))}
+              disabled={!selectedProfile || hasUnsavedChanges || busy !== null}
+            >
+              <ShieldCheck size={16} />
+              {!selectedProfile ? '先新增服务商' : hasUnsavedChanges ? '请先保存更改' : '运行可用性测试'}
             </button>
           </div>
-        </section>
-      )}
-      <section className="surface-panel compact-surface">
-        <div className="section-heading-row">
-          <div>
-            <span className="eyebrow">切换门禁</span>
-            <h3>Codex 当前配置</h3>
-          </div>
-          <span className="section-meta">切换后仍须保持的本地不变量</span>
         </div>
-        <div className="check-list compact-check-list">
+        <div className="check-list">
+          {targetChecks.map((check) => {
+            const visual = getCheckVisual(check)
+            return (
+              <div className={`check-row ${visual.className}`} key={check.id}>
+                {visual.icon}
+                <div>
+                  <strong>{check.label}</strong>
+                  <span>{check.detail}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="check-group-heading">
+          <div>
+            <span className="eyebrow">Codex 运行设置</span>
+            <h4>这些设置会在切换后继续生效</h4>
+          </div>
+          <span>{configChecks.length} 项实际检查</span>
+        </div>
+        <div className="check-list">
           {configChecks.map((check) => {
             const visual = getCheckVisual(check)
             return (
@@ -1386,44 +1155,98 @@ function SafetyWorkspace({
           })}
         </div>
       </section>
-      <section className="surface-panel recovery-panel">
+    </div>
+  )
+}
+
+function ConfigurationProtectionWorkspace({
+  protection,
+  backups,
+  busy,
+  onRestoreRequested,
+  onBackupRequested,
+}: {
+  protection: ConfigurationProtection
+  backups: BackupItem[]
+  busy: string | null
+  onRestoreRequested: (backup: BackupItem) => void
+  onBackupRequested: () => void
+}) {
+  const backupTitle: Record<BackupItem['kind'], string> = {
+    initial_install: '首次启动基线备份',
+    daily: '今日自动备份',
+    manual: '手动备份',
+    before_switch: '切换前备份',
+    before_restore: '恢复前备份',
+    legacy_backup: '旧版备份',
+  }
+  return (
+    <div className="workspace-stack">
+      <section className="surface-panel protection-overview">
+        <div className="protection-hero">
+          <div>
+            <span className="eyebrow">备份状态</span>
+            <h3>{protection.baselineReady ? '首次启动基线备份已就绪' : '首次启动基线备份尚未完成'}</h3>
+            <p>{protection.baselineDetail}</p>
+          </div>
+          <ShieldCheck size={34} aria-hidden="true" />
+        </div>
+        <div className="protection-scope">
+          <div>
+            <span className="eyebrow">本工具管理</span>
+            <strong>服务商、模型、接口地址和本机登录信息</strong>
+          </div>
+          <div>
+            <span className="eyebrow">保持不变</span>
+            <strong>MCP、插件、项目设置和个人偏好</strong>
+          </div>
+        </div>
+      </section>
+      <section className="surface-panel protection-list-panel">
         <div className="section-heading-row">
           <div>
-            <span className="eyebrow">恢复中心</span>
-            <h3>工具创建的恢复点</h3>
+            <span className="eyebrow">保留的设置</span>
+            <h3>切换时会保留这些设置</h3>
           </div>
-          <span className="section-meta">恢复不证明远端服务商可用</span>
+          <span className="section-meta">仅显示状态，不显示内容或密钥</span>
         </div>
-        {latestBackup ? (
-          <>
-            <div className="recovery-list">
-              {backups.map((backup, index) => (
-                <div className="recovery-row" key={backup.id}>
-                  <div>
-                    <strong>{backup.label}</strong>
-                    <span>{backup.time} · {backup.files} 个文件 · {index === 0 ? '最近恢复点' : '历史恢复点'}</span>
-                    <div className="recovery-categories">
-                      {backup.fileCategories.map((category) => <span key={category}>{category}</span>)}
-                    </div>
-                  </div>
-                  {index === 0 && (
-                    <button className="danger-button" type="button" onClick={onRestoreRequested} disabled={busy !== null}>
-                      <RotateCcw size={16} />
-                      恢复最近备份
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-            <p className="recovery-boundary">恢复只回退本工具创建的本地备份；恢复后仍须重新检查当前服务商的可用性。</p>
-          </>
-        ) : (
-          <div className="empty-state recovery-empty">
-            <RotateCcw size={26} />
-            <strong>尚未创建恢复点</strong>
-            <span>成功切换服务商前会自动生成受保护的配置和凭据备份。</span>
+        <div className="protection-grid">
+          {protection.items.map((item) => (
+            <article className={`protection-item ${item.state}`} key={item.id}>
+              <CheckCircle2 size={17} aria-hidden="true" />
+              <div>
+                <strong>{item.label}{typeof item.count === 'number' ? ` · ${item.count} 项` : ''}</strong>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="surface-panel recovery-panel">
+        <div className="section-heading-row">
+          <div><span className="eyebrow">恢复中心</span><h3>已保护的恢复点</h3></div>
+          <div className="recovery-actions">
+            <span className="section-meta">每天首次打开会自动备份；也可以保存当前状态。</span>
+            <button className="primary-button" type="button" onClick={onBackupRequested} disabled={busy !== null}>
+              <Save size={16} />
+              立即备份当前状态
+            </button>
           </div>
-        )}
+        </div>
+        {backups.length > 0 ? <div className="recovery-list">
+          {backups.map((backup) => (
+            <div className="recovery-row" key={backup.id}>
+              <div>
+                <strong>{backupTitle[backup.kind]}</strong>
+                <span>{backup.time} · {backup.files} 个文件</span>
+                <div className="recovery-categories">{backup.fileCategories.map((category) => <span key={category}>{category}</span>)}</div>
+              </div>
+              <button className="danger-button" type="button" onClick={() => onRestoreRequested(backup)} disabled={busy !== null || !backup.restoreReady} title={backup.restoreDetail}>
+                <RotateCcw size={16} />
+                {backup.restoreReady ? '安全恢复' : '暂不可恢复'}
+              </button>
+            </div>
+          ))}
+        </div> : <div className="empty-state recovery-empty"><RotateCcw size={26} /><strong>首次启动基线备份尚未完成</strong><span>完成前不会允许切换服务商。</span></div>}
       </section>
     </div>
   )
@@ -1438,20 +1261,25 @@ function RestoreConfirmDialog({
   backup: BackupItem
   busy: boolean
   onCancel: () => void
-  onConfirm: () => void
+  onConfirm: (confirmation: string) => void
 }) {
+  const [confirmation, setConfirmation] = useState('')
   return (
     <div className="confirm-backdrop" role="presentation">
       <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="restore-dialog-title">
         <div className="confirm-dialog-icon"><AlertTriangle size={20} /></div>
         <div>
-          <span className="eyebrow">恢复最近备份</span>
-          <h2 id="restore-dialog-title">确认恢复配置？</h2>
-          <p>将恢复 {backup.label} 中由本工具创建的 Codex 配置和本机凭据备份。恢复不证明远端服务商可用，完成后需要重新检查当前服务商状态。</p>
+          <span className="eyebrow">安全恢复 · {backup.time}</span>
+          <h2 id="restore-dialog-title">确认回到这个恢复点？</h2>
+          <p>将只回退本工具写入的服务商、模型、接口地址和本机登录信息。MCP、插件、项目设置和你后来新增的内容不会被覆盖。</p>
+          <label className="restore-confirmation-field">
+            输入“恢复”后启用确认按钮
+            <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="恢复" autoFocus />
+          </label>
         </div>
         <div className="command-row">
           <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
-          <button className="danger-button" type="button" onClick={onConfirm} disabled={busy}>
+          <button className="danger-button" type="button" onClick={() => onConfirm(confirmation)} disabled={busy || confirmation.trim() !== '恢复'}>
             <RotateCcw size={16} />
             确认恢复
           </button>
@@ -1462,14 +1290,12 @@ function RestoreConfirmDialog({
 }
 
 function SwitchConfirmDialog({
-  profile,
-  latestBackup,
+  preflight,
   busy,
   onCancel,
   onConfirm,
 }: {
-  profile: ProviderProfile
-  latestBackup: BackupItem | undefined
+  preflight: SwitchPreflight
   busy: boolean
   onCancel: () => void
   onConfirm: () => void
@@ -1480,14 +1306,14 @@ function SwitchConfirmDialog({
         <div className="confirm-dialog-icon"><GitCompareArrows size={20} /></div>
         <div>
           <span className="eyebrow">切换影响确认</span>
-          <h2 id="switch-dialog-title">确认切换到 {profile.name}？</h2>
-          <p>已确认该服务商有最近可用性证据。切换会创建新的受保护恢复点，并更新 Codex 的服务商、接口地址、模型和本机凭据类别；不会显示 API 密钥或完整配置内容。</p>
+          <h2 id="switch-dialog-title">确认切换到 {preflight.targetName}？</h2>
+          <p>该服务商最近一次连接测试已通过。确认时会再次核对当前配置没有变化，再创建新的恢复点；不会显示访问密钥或完整配置内容。</p>
           <dl className="switch-confirm-facts">
-            <div><dt>目标模型</dt><dd>{profile.model}</dd></div>
-            <div><dt>最近验证</dt><dd>{profile.lastVerifiedAt ?? '未记录'}</dd></div>
-            <div><dt>恢复点</dt><dd>{latestBackup ? `将在 ${latestBackup.label} 之后新增` : '切换前将创建首个恢复点'}</dd></div>
+            <div><dt>目标模型</dt><dd>{preflight.targetModel}</dd></div>
+            <div><dt>恢复点</dt><dd>{preflight.backupDetail}</dd></div>
+            <div><dt>保护检查</dt><dd>{preflight.protectedDetail}</dd></div>
           </dl>
-          <p>完成后请关闭当前 Codex 会话，并在新的会话中确认实际 provider 使用情况。</p>
+          <p>此预览有效至 {preflight.expiresAt}。完成后请关闭当前 Codex 会话，并在新的会话中确认实际 provider 使用情况。</p>
         </div>
         <div className="command-row">
           <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
+import { connect } from 'node:net'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -76,6 +77,51 @@ async function expectApiFailure(path, body) {
   throw new Error(`${path} unexpectedly succeeded`)
 }
 
+async function prepareSwitch(profileId) {
+  return api('/api/profiles/prepare-switch', { profileId })
+}
+
+async function confirmSwitch(profileId, operationId) {
+  return api('/api/profiles/switch', { profileId, operationId })
+}
+
+async function assertMissingFile(path, message) {
+  try {
+    await readFile(path)
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return
+    throw error
+  }
+  throw new Error(message)
+}
+
+async function requestStatus(path, body) {
+  const response = await fetch(`${backendUrl}${path}`, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  return response.status
+}
+
+async function oversizedRequestStatus() {
+  return new Promise((resolve, reject) => {
+    const socket = connect(backendPort, '127.0.0.1')
+    let response = ''
+    socket.setEncoding('utf8')
+    socket.once('error', reject)
+    socket.on('data', (chunk) => { response += chunk })
+    socket.on('close', () => {
+      const match = /^HTTP\/1\.1\s+(\d+)/.exec(response)
+      if (!match) reject(new Error(`oversized request did not receive an HTTP response: ${response}`))
+      else resolve(Number(match[1]))
+    })
+    socket.on('connect', () => {
+      socket.write('POST /api/profiles/save HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 262145\r\n\r\n')
+    })
+  })
+}
+
 async function runProfileRecovery(source, environment) {
   const child = spawn(recoveryExePath, [source], {
     cwd: process.cwd(),
@@ -110,10 +156,47 @@ const originalConfig = [
   'requires_openai_auth = true',
   'base_url = "https://baseline.example/v1"',
   'api_key = "baseline-key"',
+  '# This user-owned custom field must survive provider switching.',
+  'user_owned_extension = "keep-me"',
   '',
   '[features]',
   'fixture_marker = true',
+  '',
+  '[projects."D:\\\\Fixture Workspace"]',
+  'trust_level = "trusted"',
+  '',
+  '[mcp_servers.fixture_server]',
+  'command = "fixture-mcp.exe"',
+  '',
+  '[plugins."fixture-plugin@marketplace"]',
+  'enabled = true',
+  '',
+  '[hooks.state]',
+  'fixture_hook = "trusted"',
+  '',
+  '[desktop]',
+  'notification_mode = "always"',
+  '',
+  '[memories]',
+  'enabled = true',
+  '',
+  '[marketplaces.fixture_marketplace]',
+  'source = "https://example.invalid/marketplace"',
+  '',
+  '[windows]',
+  'sandbox = "unelevated"',
 ].join('\r\n')
+const protectedConfigFragments = [
+  '[features]\r\nfixture_marker = true',
+  '[projects."D:\\\\Fixture Workspace"]\r\ntrust_level = "trusted"',
+  '[mcp_servers.fixture_server]\r\ncommand = "fixture-mcp.exe"',
+  '[plugins."fixture-plugin@marketplace"]\r\nenabled = true',
+  '[hooks.state]\r\nfixture_hook = "trusted"',
+  '[desktop]\r\nnotification_mode = "always"',
+  '[memories]\r\nenabled = true',
+  '[marketplaces.fixture_marketplace]\r\nsource = "https://example.invalid/marketplace"',
+  '[windows]\r\nsandbox = "unelevated"',
+]
 const originalAuth = JSON.stringify({ OPENAI_API_KEY: 'baseline-key', preserved: 'yes' }, null, 2)
 await writeFile(configPath, originalConfig, 'utf8')
 await writeFile(authPath, originalAuth, 'utf8')
@@ -253,9 +336,16 @@ const backend = spawn(exePath, ['--port', String(backendPort)], {
 
 try {
   await waitForBackend()
+  assert(await requestStatus('/C:/Windows/win.ini') === 400, 'local fallback accepted a drive-qualified static path')
+  assert(await oversizedRequestStatus() === 413, 'local fallback did not reject an oversized request body')
   const initial = await api('/api/state')
   const initialActivityCount = initial.activity.length
   assert(initial.profiles.length === 0, 'a new product install must not include a preconfigured provider')
+  const initialBackup = initial.backups.find((item) => item.kind === 'initial_install')
+  assert(initialBackup, 'first application launch did not create an installation baseline backup')
+  assert(initialBackup.files >= 3, 'installation baseline backup did not include manifest and protected files')
+  const dailyBackup = initial.backups.find((item) => item.kind === 'daily')
+  assert(!dailyBackup, 'first application launch must not duplicate the baseline with a daily backup')
 
   await runProfileRecovery(legacyProfilesPath, runtimeEnv)
   const recovered = await api('/api/state')
@@ -345,33 +435,60 @@ try {
 
   const defaulted = await api('/api/profiles/default', { profileId: profile.id })
   assert(defaulted.profiles.find((item) => item.id === profile.id)?.isDefault, 'default provider was not updated')
+  const reorderedIds = [...defaulted.profiles].map((item) => item.id).reverse()
+  const reordered = await api('/api/profiles/reorder', { profileIds: reorderedIds })
+  assert(JSON.stringify(reordered.profiles.map((item) => item.id)) === JSON.stringify(reorderedIds), 'provider order did not persist')
 
   const responsesBeforeSwitch = responsesProbeRequestCount
-  const switched = await api('/api/profiles/switch', { profileId: profile.id })
+  const driftPreflight = await prepareSwitch(profile.id)
+  const externallyChangedConfig = originalConfig.replace('model = "baseline-model"', 'model = "external-drift-model"')
+  await writeFile(configPath, externallyChangedConfig, 'utf8')
+  const driftMessage = await expectApiFailure('/api/profiles/switch', {
+    profileId: profile.id,
+    operationId: driftPreflight.operationId,
+  })
+  assert(driftMessage.includes('发生变化'), 'switch confirmation did not reject configuration drift')
+  assert(await readFile(configPath, 'utf8') === externallyChangedConfig, 'rejected switch changed externally edited config.toml')
+  await writeFile(configPath, originalConfig, 'utf8')
+  const switchPreflight = await prepareSwitch(profile.id)
+  assert(switchPreflight.profileId === profile.id && switchPreflight.operationId, 'switch preflight did not return a usable confirmation token')
+  assert(switchPreflight.targetModel === profile.model, 'switch preflight did not return the target model')
+  const switched = await confirmSwitch(profile.id, switchPreflight.operationId)
   const switchedConfig = await readFile(configPath, 'utf8')
   const switchedAuth = JSON.parse(await readFile(authPath, 'utf8'))
   assert(switched.currentProfileId === profile.id, 'switch did not update current provider')
   assert(switchedConfig.includes('model = "reasoning-current"'), 'switch did not update model')
   assert(switchedConfig.includes(`base_url = "${providerUrl}"`), 'switch did not update provider URL')
   assert(switchedConfig.includes('wire_api = "responses"'), 'switch did not preserve Responses API')
-  assert(switchedConfig.includes('fixture_marker = true'), 'switch removed an unrelated config section')
+  for (const fragment of protectedConfigFragments) {
+    assert(switchedConfig.includes(fragment), `switch removed or changed protected configuration: ${fragment}`)
+  }
+  assert(switchedConfig.includes('user_owned_extension = "keep-me"'), 'switch removed an unknown custom-provider field')
   assert(switchedAuth.OPENAI_API_KEY === 'sk-fixture', 'switch did not update auth key')
   assert(switchedAuth.preserved === 'yes', 'switch removed unrelated auth data')
-  assert(switched.backups.length === 1, 'switch did not create exactly one backup')
-  assert(switched.backups[0].files >= 3, 'switch backup did not include a manifest')
+  const switchBackup = switched.backups.find((item) => item.kind === 'before_switch')
+  assert(switched.backups.length === 3, 'switch did not retain the installation and daily backups while creating one switch backup')
+  assert(switchBackup?.files >= 3, 'switch backup did not include a manifest')
   assert(
-    switched.backups[0].fileCategories?.includes('Codex 配置') && switched.backups[0].fileCategories?.includes('本机凭据'),
+    switchBackup?.fileCategories?.includes('Codex 设置') && switchBackup?.fileCategories?.includes('本机登录信息'),
     'switch backup did not expose the expected redacted file categories'
   )
-  const backupLabels = await readdir(join(localAppData, 'CodeX Provider Switcher', 'backups'))
-  const manifest = JSON.parse(await readFile(join(localAppData, 'CodeX Provider Switcher', 'backups', backupLabels[0], 'manifest.json'), 'utf8'))
+  const manifest = JSON.parse(await readFile(join(localAppData, 'CodeX Provider Switcher', 'backups', switchBackup.id, 'manifest.json'), 'utf8'))
   assert(manifest.reason === 'before_switch', 'backup manifest did not record its reason')
   assert(
     Array.isArray(manifest.files) && manifest.files.includes('config.toml.dpapi') && manifest.files.includes('auth.json.dpapi'),
     'backup manifest did not list protected files'
   )
-  const backupFiles = await readdir(join(localAppData, 'CodeX Provider Switcher', 'backups', backupLabels[0]))
+  const backupFiles = await readdir(join(localAppData, 'CodeX Provider Switcher', 'backups', switchBackup.id))
   assert(!backupFiles.includes('config.toml') && !backupFiles.includes('auth.json'), 'backup retained plaintext credential files')
+
+  const manualBackupState = await api('/api/backup/create', {})
+  const manualBackup = manualBackupState.backups.find((item) => item.kind === 'manual')
+  assert(manualBackup, 'manual backup did not create a recovery point')
+  assert(manualBackup.restoreReady, 'manual backup was not marked restorable')
+  assert(manualBackupState.activity[0]?.title === '已创建手动恢复点', 'manual backup did not update activity')
+  const manualManifest = JSON.parse(await readFile(join(localAppData, 'CodeX Provider Switcher', 'backups', manualBackup.id, 'manifest.json'), 'utf8'))
+  assert(manualManifest.reason === 'manual', 'manual backup manifest did not record its reason')
 
   const driftedConfig = switchedConfig.replace('model = "reasoning-current"', 'model = "reasoning-current-drift"')
   const authBeforeSync = await readFile(authPath, 'utf8')
@@ -387,13 +504,55 @@ try {
   assert(modelsProbeRequestCount >= 1, 'model refresh did not issue an authenticated /models request')
   assert(responsesProbeRequestCount === responsesBeforeSwitch, 'switch unexpectedly sent a remote compatibility probe')
 
-  await writeFile(configPath, 'model = "corrupted"', 'utf8')
-  await writeFile(authPath, JSON.stringify({ OPENAI_API_KEY: 'corrupted' }), 'utf8')
-  const restored = await api('/api/backup/restore-latest', {})
-  assert(await readFile(configPath, 'utf8') === originalConfig, 'restore did not restore config.toml')
-  assert(await readFile(authPath, 'utf8') === originalAuth, 'restore did not restore auth.json')
-  assert(restored.activity[0]?.title === '已恢复最近备份', 'restore did not update activity')
-  assert(restored.activity.length >= initialActivityCount + 6, 'timeline did not retain action history')
+  const restoreWithoutConfirmation = await expectApiFailure('/api/backup/restore', { backupId: manualBackup.id })
+  assert(restoreWithoutConfirmation.includes('缺少恢复确认'), 'restore without confirmation was not rejected')
+  const restoreWithWrongConfirmation = await expectApiFailure('/api/backup/restore', { backupId: manualBackup.id, confirmation: '取消' })
+  assert(restoreWithWrongConfirmation.includes('输入“恢复”'), 'restore with the wrong confirmation was not rejected')
+  assert(await readFile(configPath, 'utf8') === driftedConfig, 'rejected restore changed config.toml')
+
+  const userMcpAfterSwitch = `${driftedConfig}\r\n[mcp_servers.after_switch]\r\ncommand = "fixture-after-switch"\r\n`
+  await writeFile(configPath, userMcpAfterSwitch, 'utf8')
+  await writeFile(authPath, JSON.stringify({ ...switchedAuth, added_after_switch: 'keep-me' }), 'utf8')
+  const restoreConflict = await expectApiFailure('/api/backup/restore', { backupId: manualBackup.id, confirmation: '恢复' })
+  assert(restoreConflict.includes('已停止自动恢复'), 'restore did not refuse a provider-field conflict')
+  assert(await readFile(configPath, 'utf8') === userMcpAfterSwitch, 'conflict refusal changed config.toml')
+  await writeFile(configPath, userMcpAfterSwitch.replace('model = "reasoning-current-drift"', 'model = "reasoning-current"'), 'utf8')
+  const manualRestored = await api('/api/backup/restore', { backupId: manualBackup.id, confirmation: '恢复' })
+  const manualRestoredConfig = await readFile(configPath, 'utf8')
+  const manualRestoredAuth = JSON.parse(await readFile(authPath, 'utf8'))
+  assert(manualRestoredConfig.includes('[mcp_servers.after_switch]'), 'manual restore removed an MCP server added after the backup')
+  assert(manualRestoredConfig.includes('model = "reasoning-current"'), 'manual restore did not restore the saved provider model')
+  assert(manualRestoredAuth.OPENAI_API_KEY === 'sk-fixture', 'manual restore did not restore the saved provider credential')
+  assert(manualRestoredAuth.added_after_switch === 'keep-me', 'manual restore removed unrelated auth data')
+  assert(manualRestored.activity[0]?.title === '已恢复配置备份', 'manual restore did not update activity')
+
+  const restored = await api('/api/backup/restore', { backupId: switchBackup.id, confirmation: '恢复' })
+  const restoredConfig = await readFile(configPath, 'utf8')
+  const restoredAuth = JSON.parse(await readFile(authPath, 'utf8'))
+  assert(restoredConfig.includes('[mcp_servers.after_switch]'), 'safe restore removed an MCP server added after the switch')
+  assert(restoredConfig.includes('model = "baseline-model"'), 'safe restore did not restore the previous provider model')
+  assert(restoredAuth.OPENAI_API_KEY === JSON.parse(originalAuth).OPENAI_API_KEY, 'safe restore did not restore the previous provider credential')
+  assert(restoredAuth.added_after_switch === 'keep-me', 'safe restore removed unrelated auth data')
+  assert(restored.activity[0]?.title === '已恢复配置备份', 'restore did not update activity')
+  assert(restored.activity.length >= initialActivityCount + 8, 'timeline did not retain action history')
+
+  const pendingTransactionPath = join(localAppData, 'CodeX Provider Switcher', 'pending-config-transaction.json')
+  await writeFile(configPath, switchedConfig.replace('model = "reasoning-current"', 'model = "interrupted-write"'), 'utf8')
+  await writeFile(authPath, JSON.stringify({ OPENAI_API_KEY: 'interrupted-write' }), 'utf8')
+  await writeFile(pendingTransactionPath, JSON.stringify({ backup_id: initialBackup.id, reason: 'test-interruption' }), 'utf8')
+  await api('/api/state')
+  assert(await readFile(configPath, 'utf8') === originalConfig, 'startup did not recover an interrupted config write')
+  assert(JSON.parse(await readFile(authPath, 'utf8')).OPENAI_API_KEY === JSON.parse(originalAuth).OPENAI_API_KEY, 'startup did not recover the interrupted provider credential')
+  await assertMissingFile(pendingTransactionPath, 'startup recovery did not remove the completed transaction marker')
+
+  await api('/api/profiles/save', { profile })
+  await api('/api/profiles/verify', { profileId: profile.id })
+  await writeFile(authPath, '{not valid json', 'utf8')
+  const authWriteFailure = await expectApiFailure('/api/profiles/prepare-switch', { profileId: profile.id })
+  assert(authWriteFailure.includes('JSON'), 'invalid auth.json did not fail the auth write path')
+  assert(await readFile(configPath, 'utf8') === originalConfig, 'auth write failure left config.toml half-switched')
+  assert(await readFile(authPath, 'utf8') === '{not valid json', 'auth write failure changed auth.json unexpectedly')
+  await writeFile(authPath, originalAuth, 'utf8')
 
   const noCredit = {
     ...profile,
@@ -411,7 +570,7 @@ try {
   assert(failedProfile?.lastVerificationProviderCode === 'insufficient_quota', 'insufficient-credit provider did not record the provider code')
   assert(responsesProbeRequestCount >= 1, 'DasuAPI quota verification did not issue the real request probe')
   const responsesBeforeBlockedSwitch = responsesProbeRequestCount
-  const blockedSwitchMessage = await expectApiFailure('/api/profiles/switch', { profileId: noCredit.id })
+  const blockedSwitchMessage = await expectApiFailure('/api/profiles/prepare-switch', { profileId: noCredit.id })
   assert(blockedSwitchMessage.includes('服务商可用性测试'), 'billing failure did not explain the switch gate')
   assert(responsesProbeRequestCount === responsesBeforeBlockedSwitch, 'switch retried a remote compatibility probe')
   assert(await readFile(configPath, 'utf8') === originalConfig, 'blocked DasuAPI switch changed config.toml')
@@ -462,15 +621,19 @@ try {
       'save persisted provider and activity',
       'new product state starts with no provider, while the maintainer-only recovery binary fills only empty profiles, creates a protected pre-import backup, and never overwrites a protected credential',
       'profile keys and backup credential copies are DPAPI-protected at rest',
+      'local fallback rejects drive-qualified static paths and oversized request bodies',
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models and deduplicated results',
       'authenticated /v1/responses probes distinguish standard, compatible, and unconfirmed response shapes',
       'verified Responses probes are required before switching and insufficient-credit probes block config writes',
       'verification diagnostics classify endpoint, response shape, billing, and service errors without changing Codex config/auth',
       'default selection persisted',
-      'switch wrote config/auth, preserved unrelated data, and created a manifest-backed backup',
+      'provider list order persisted without changing the active Codex configuration',
+      'first launch created one protected baseline without a duplicate daily backup; switching preserved unrelated and unknown custom-provider data',
       'same-address profiles retain the selected current-provider identity after a safe switch',
-      'restore recovered both files and updated timeline',
+      'switch preflight rejects drift, while restore points require confirmation, reject provider-field conflicts, and preserve later MCP/auth additions',
+      'startup automatically recovered an interrupted two-file write from its transaction backup',
+      'a post-config auth write failure automatically rolled config.toml back instead of leaving a half-switch',
       'current configuration sync updates only the local profile directory and invalidates the previous model verification',
       'delete removed a non-current non-default provider',
     ],

@@ -1,8 +1,8 @@
 use codex_switcher_tauri_lib::{
-    check_for_update_core, delete_profile_core, load_state_core, refresh_models_core,
-    restore_latest_backup_core, save_profile_core, set_default_profile_core, switch_profile_core,
-    sync_current_configuration_core, toggle_auto_start_core, verify_profile_core, AppState,
-    EditableProfile, SwitcherError,
+    check_for_update_core, create_manual_backup_core, delete_profile_core, load_state_core, refresh_models_core,
+    reorder_profiles_core, restore_backup_core, restore_latest_backup_core, save_profile_core,
+    prepare_switch_core, set_default_profile_core, switch_profile_core, sync_current_configuration_core,
+    toggle_auto_start_core, verify_profile_core, AppState, EditableProfile, SwitcherError,
 };
 use serde_json::{json, Value};
 use std::{
@@ -15,6 +15,38 @@ use std::{
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 47832;
+const MAX_REQUEST_HEADER_BYTES: usize = 16 * 1024;
+const MAX_REQUEST_BODY_BYTES: usize = 256 * 1024;
+
+#[derive(Debug)]
+enum RequestReadError {
+    Io(std::io::Error),
+    Invalid(&'static str),
+    TooLarge(&'static str),
+}
+
+impl From<std::io::Error> for RequestReadError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<&'static str> for RequestReadError {
+    fn from(message: &'static str) -> Self {
+        Self::Invalid(message)
+    }
+}
+
+impl std::fmt::Display for RequestReadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => error.fmt(formatter),
+            Self::Invalid(message) | Self::TooLarge(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for RequestReadError {}
 
 fn main() {
     if let Err(err) = run() {
@@ -95,7 +127,13 @@ fn handle_connection(
     dist_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     stream.set_read_timeout(Some(Duration::from_secs(8)))?;
-    let request = read_request(&mut stream)?;
+    let request = match read_request(&mut stream) {
+        Ok(request) => request,
+        Err(RequestReadError::TooLarge(message)) => {
+            return write_json(&mut stream, 413, &json!({ "error": message }));
+        }
+        Err(error) => return write_json(&mut stream, 400, &json!({ "error": error.to_string() })),
+    };
     let (method, path, headers, body) = request;
 
     if method == "OPTIONS" {
@@ -113,7 +151,10 @@ fn handle_connection(
         return write_json(&mut stream, 405, &json!({ "error": "method not allowed" }));
     }
 
-    let (content_type, bytes) = static_asset(dist_dir, &path)?;
+    let (content_type, bytes) = match static_asset(dist_dir, &path) {
+        Ok(asset) => asset,
+        Err(error) => return write_json(&mut stream, 400, &json!({ "error": error.to_string() })),
+    };
     if method == "HEAD" {
         write_response(&mut stream, 200, content_type, b"")
     } else {
@@ -123,7 +164,7 @@ fn handle_connection(
 
 fn read_request(
     stream: &mut TcpStream,
-) -> Result<(String, String, Vec<(String, String)>, Vec<u8>), Box<dyn std::error::Error>> {
+) -> Result<(String, String, Vec<(String, String)>, Vec<u8>), RequestReadError> {
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 4096];
     let mut header_end = None;
@@ -137,6 +178,9 @@ fn read_request(
         buffer.extend_from_slice(&chunk[..read]);
 
         if header_end.is_none() {
+            if buffer.len() > MAX_REQUEST_HEADER_BYTES {
+                return Err(RequestReadError::TooLarge("request header too large"));
+            }
             header_end = find_header_end(&buffer);
             if let Some(end) = header_end {
                 let headers = String::from_utf8_lossy(&buffer[..end]);
@@ -151,6 +195,9 @@ fn read_request(
                         }
                     })
                     .unwrap_or(0);
+                if content_length > MAX_REQUEST_BODY_BYTES {
+                    return Err(RequestReadError::TooLarge("request body too large"));
+                }
             }
         }
 
@@ -249,7 +296,27 @@ fn handle_api(
             save_profile_core(profile).map(state_json)
         }
         ("POST", "/api/profiles/delete") => delete_profile_core(profile_id(body)?).map(state_json),
-        ("POST", "/api/profiles/switch") => switch_profile_core(profile_id(body)?).map(state_json),
+        ("POST", "/api/profiles/reorder") => profile_ids(body)
+            .and_then(reorder_profiles_core)
+            .map(state_json),
+        ("POST", "/api/profiles/prepare-switch") => prepare_switch_core(profile_id(body)?)
+            .and_then(|value| serde_json::to_value(value).map_err(SwitcherError::from)),
+        ("POST", "/api/profiles/switch") => {
+            let request = request_json(body)?;
+            let profile_id = request
+                .get("profileId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| SwitcherError::Message("缺少 profileId。".to_string()))?
+                .to_string();
+            let operation_id = request
+                .get("operationId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| SwitcherError::Message("缺少切换预览标识，请重新运行检查。".to_string()))?
+                .to_string();
+            switch_profile_core(profile_id, operation_id).map(state_json)
+        }
         ("POST", "/api/profiles/verify") => verify_profile_core(profile_id(body)?).map(state_json),
         ("POST", "/api/models/refresh") => refresh_models_core(profile_id(body)?).map(state_json),
         ("POST", "/api/profiles/default") => {
@@ -263,7 +330,13 @@ fn handle_api(
                 .unwrap_or(false);
             toggle_auto_start_core(enabled).map(state_json)
         }
-        ("POST", "/api/backup/restore-latest") => restore_latest_backup_core().map(state_json),
+        ("POST", "/api/backup/create") => create_manual_backup_core().map(state_json),
+        ("POST", "/api/backup/restore-latest") => {
+            confirmation(body).and_then(restore_latest_backup_core).map(state_json)
+        }
+        ("POST", "/api/backup/restore") => backup_id(body)
+            .and_then(|backup_id| confirmation(body).and_then(|value| restore_backup_core(backup_id, value)))
+            .map(state_json),
         _ => return write_json(stream, 404, &json!({ "error": "not found" })),
     };
 
@@ -289,6 +362,30 @@ fn profile_id(body: &[u8]) -> Result<String, SwitcherError> {
         .ok_or_else(|| SwitcherError::Message("缺少 profileId。".to_string()))
 }
 
+fn profile_ids(body: &[u8]) -> Result<Vec<String>, SwitcherError> {
+    request_json(body)?
+        .get("profileIds")
+        .cloned()
+        .ok_or_else(|| SwitcherError::Message("缺少 profileIds。".to_string()))
+        .and_then(|value| serde_json::from_value(value).map_err(SwitcherError::from))
+}
+
+fn backup_id(body: &[u8]) -> Result<String, SwitcherError> {
+    request_json(body)?
+        .get("backupId")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| SwitcherError::Message("缺少 backupId。".to_string()))
+}
+
+fn confirmation(body: &[u8]) -> Result<String, SwitcherError> {
+    request_json(body)?
+        .get("confirmation")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| SwitcherError::Message("缺少恢复确认。".to_string()))
+}
+
 fn state_json(mut state: AppState) -> Value {
     state.runtime_mode = "local_web_backend".to_string();
     serde_json::to_value(state).unwrap_or_else(|err| json!({ "error": err.to_string() }))
@@ -299,19 +396,24 @@ fn static_asset(
     request_path: &str,
 ) -> Result<(&'static str, Vec<u8>), Box<dyn std::error::Error>> {
     let path_without_query = request_path.split('?').next().unwrap_or(request_path);
+    if !path_without_query.starts_with('/')
+        || path_without_query.contains('\\')
+        || path_without_query.contains(':')
+        || path_without_query.contains("..")
+    {
+        return Err("invalid static asset path".into());
+    }
     let relative = path_without_query.trim_start_matches('/');
-    let candidate = if relative.is_empty() {
-        dist_dir.join("index.html")
-    } else if relative.contains("..") {
-        return Err("invalid path".into());
-    } else {
-        dist_dir.join(relative)
-    };
-
+    let canonical_dist = dist_dir.canonicalize()?;
+    let candidate = if relative.is_empty() { canonical_dist.join("index.html") } else { canonical_dist.join(relative) };
     let path = if candidate.is_file() {
-        candidate
+        let canonical_candidate = candidate.canonicalize()?;
+        if !canonical_candidate.starts_with(&canonical_dist) {
+            return Err("static asset escapes the application directory".into());
+        }
+        canonical_candidate
     } else {
-        dist_dir.join("index.html")
+        canonical_dist.join("index.html")
     };
     let content_type = match path
         .extension()
@@ -347,7 +449,9 @@ fn write_response(
     let reason = match status {
         200 => "OK",
         204 => "No Content",
+        400 => "Bad Request",
         403 => "Forbidden",
+        413 => "Payload Too Large",
         404 => "Not Found",
         405 => "Method Not Allowed",
         500 => "Internal Server Error",

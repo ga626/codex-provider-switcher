@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { initialState } from './mockData'
-import type { AppState, EditableProfile, ModelCatalog, ProviderProfile, UpdateInfo } from './types'
+import type { AppState, EditableProfile, ModelCatalog, ProviderProfile, SwitchPreflight, UpdateInfo } from './types'
 
 const isTauri = '__TAURI_INTERNALS__' in window
 const allowBrowserMock = import.meta.env.VITE_CODEX_PROVIDER_SWITCHER_ALLOW_MOCK === 'true'
@@ -119,6 +119,62 @@ export async function loadState(): Promise<AppState> {
     return webState
   }
   await mockDelay()
+  return structuredClone(mockState)
+}
+
+export async function createManualBackup(): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('create_manual_backup')
+  }
+  const webState = await tryWebBackend<AppState>('/api/backup/create', apiPost({}))
+  if (webState) {
+    return webState
+  }
+  await mockDelay()
+  const createdAt = new Date()
+  mockState.backups.unshift({
+    id: `manual-${createdAt.getTime()}`,
+    label: `manual-${createdAt.getTime()}`,
+    time: createdAt.toLocaleString('en-GB', { hour12: false }),
+    files: 3,
+    fileCategories: ['Codex 设置', '本机登录信息', '恢复说明'],
+    kind: 'manual',
+    restoreReady: true,
+    restoreDetail: '需输入“恢复”确认；开发预览不会写入真实 Codex 配置。',
+  })
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: createdAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: '已创建手动恢复点',
+    detail: '开发预览已模拟保存当前状态。',
+    tone: 'success',
+  })
+  return structuredClone(mockState)
+}
+
+export async function restoreBackup(backupId: string, confirmation: string): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('restore_backup', { backupId, confirmation })
+  }
+  const webState = await tryWebBackend<AppState>('/api/backup/restore', apiPost({ backupId, confirmation }))
+  if (webState) {
+    return webState
+  }
+  await mockDelay()
+  if (confirmation.trim() !== '恢复') {
+    throw new Error('请在恢复确认窗口中输入“恢复”后再继续。')
+  }
+  const backup = mockState.backups.find((item) => item.id === backupId)
+  if (!backup) {
+    throw new Error('未找到恢复点。')
+  }
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: backup.kind === 'initial_install' ? '已恢复首次启动基线备份' : '已恢复配置备份',
+    detail: '开发预览不会写入真实 Codex 配置。',
+    tone: 'success',
+  })
   return structuredClone(mockState)
 }
 
@@ -382,11 +438,22 @@ export async function restoreLatestBackup(): Promise<AppState> {
   return structuredClone(mockState)
 }
 
-export async function switchProfile(profileId: string): Promise<AppState> {
+export async function prepareSwitch(profileId: string): Promise<SwitchPreflight> {
   if (isTauri) {
-    return invoke<AppState>('switch_profile', { profileId })
+    return invoke<SwitchPreflight>('prepare_switch', { profileId })
   }
-  const webState = await tryWebBackend<AppState>('/api/profiles/switch', apiPost({ profileId }))
+  const preflight = await tryWebBackend<SwitchPreflight>('/api/profiles/prepare-switch', apiPost({ profileId }))
+  if (preflight) {
+    return preflight
+  }
+  throw new Error('开发预览不执行服务商切换。请使用桌面开发版或本机后端进行真实验证。')
+}
+
+export async function switchProfile(profileId: string, operationId: string): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('switch_profile', { profileId, operationId })
+  }
+  const webState = await tryWebBackend<AppState>('/api/profiles/switch', apiPost({ profileId, operationId }))
   if (webState) {
     return webState
   }
@@ -443,6 +510,30 @@ export async function setDefaultProfile(profileId: string): Promise<AppState> {
     time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
     title: `${target?.name ?? '服务商'} 已设为默认`,
     detail: '默认标记已更新；不会立即改写当前 Codex 服务商。',
+    tone: 'info',
+  })
+  return structuredClone(mockState)
+}
+
+export async function reorderProfiles(profileIds: string[]): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('reorder_profiles', { profileIds })
+  }
+  const webState = await tryWebBackend<AppState>('/api/profiles/reorder', apiPost({ profileIds }))
+  if (webState) {
+    return webState
+  }
+  await mockDelay()
+  const byId = new Map(mockState.profiles.map((profile) => [profile.id, profile]))
+  if (profileIds.length !== mockState.profiles.length || profileIds.some((id) => !byId.has(id))) {
+    throw new Error('服务商排序内容无效。')
+  }
+  mockState.profiles = profileIds.map((id) => byId.get(id)!)
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: '服务商顺序已更新',
+    detail: '此顺序只影响列表显示，不会切换或改写 Codex 配置。',
     tone: 'info',
   })
   return structuredClone(mockState)
