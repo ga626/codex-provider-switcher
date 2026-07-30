@@ -104,7 +104,7 @@ assert(libRs.includes('.timeout(Duration::from_secs(8))'), 'Compatibility probes
 assert(switchProfileCore.includes('profile.verification_status != "verified"'), 'Switching must require a successful provider availability test')
 assertNotIncludes(switchProfileCore, 'verify_provider_auth_probe', 'Switching must not trigger a remote compatibility probe')
 assertNotIncludes(libRs, 'uses_request_probe', 'src-tauri/src/lib.rs')
-assert(mockDataTs.includes('trayEnabled: false'), 'Browser preview mock must not imply a default tray')
+assertNotIncludes(mockDataTs, 'safeMode:', 'Browser preview mock must not display an unimplemented safety mode')
 assert(preflightScript.includes('Cutover preflight (read-only)'), 'Cutover preflight must remain read-only')
 assert(preflightScript.includes('New installation signature:'), 'Cutover preflight must report the installed app signature')
 assert(preflightScript.includes('Legacy process details:'), 'Cutover preflight must report legacy process ownership evidence')

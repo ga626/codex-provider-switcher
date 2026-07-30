@@ -83,6 +83,24 @@ export type BackupItem = {
   label: string
   files: number
   fileCategories: string[]
+  kind: 'initial_install' | 'daily' | 'manual' | 'before_switch' | 'before_restore' | 'legacy_backup'
+  restoreReady?: boolean
+  restoreDetail?: string
+}
+
+export type ConfigurationProtectionItem = {
+  id: string
+  label: string
+  count?: number
+  state: 'protected' | 'not_configured' | 'outside_write_scope'
+  detail: string
+}
+
+export type ConfigurationProtection = {
+  baselineReady: boolean
+  baselineDetail: string
+  items: ConfigurationProtectionItem[]
+  restoreDetail: string
 }
 
 export type UpdateInfo = {
@@ -99,15 +117,23 @@ export type AppState = {
   currentProfileId: string
   configPath: string
   authPath: string
-  autoStart: boolean
-  trayEnabled: boolean
-  safeMode: boolean
   configurationDrift?: ConfigurationDrift
   profiles: ProviderProfile[]
   modelCatalogs: ModelCatalog[]
   checks: ValidationCheck[]
   activity: ActivityItem[]
   backups: BackupItem[]
+  configurationProtection: ConfigurationProtection
+}
+
+export type SwitchPreflight = {
+  operationId: string
+  profileId: string
+  targetName: string
+  targetModel: string
+  backupDetail: string
+  protectedDetail: string
+  expiresAt: string
 }
 
 export type ConfigurationDrift = {

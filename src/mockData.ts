@@ -5,9 +5,19 @@ export const initialState: AppState = {
   currentProfileId: 'example-provider-a',
   configPath: String.raw`C:\Users\<user>\.codex\config.toml`,
   authPath: String.raw`C:\Users\<user>\.codex\auth.json`,
-  autoStart: false,
-  trayEnabled: false,
-  safeMode: true,
+  configurationProtection: {
+    baselineReady: true,
+    baselineDetail: '首次启动基线备份已创建，包含本工具可能写入的 Codex 设置和本机登录信息。',
+    restoreDetail: '只恢复服务商设置；其他内容保持不变。',
+    items: [
+      { id: 'mcp-servers', label: 'MCP 服务', count: 3, state: 'protected', detail: '已设置 3 项，切换时会保留。' },
+      { id: 'plugins', label: '插件设置', count: 2, state: 'protected', detail: '已设置 2 项，切换时会保留。' },
+      { id: 'projects', label: '项目设置', count: 4, state: 'protected', detail: '已设置 4 项，切换时会保留。' },
+      { id: 'hooks', label: '自动化规则', count: 5, state: 'protected', detail: '已设置 5 项，切换时会保留。' },
+      { id: 'features', label: '功能偏好', count: 3, state: 'protected', detail: '已设置 3 项，切换时会保留。' },
+      { id: 'history', label: '聊天与历史记录', state: 'outside_write_scope', detail: '不属于本工具读写范围，不会读取或改写。' },
+    ],
+  },
   profiles: [
     {
       id: 'example-provider-c',
@@ -167,8 +177,8 @@ export const initialState: AppState = {
     },
   ],
   backups: [
-    { id: 'b1', time: '2026-07-01 22:10', label: 'before-20260701-221054', files: 3, fileCategories: ['Codex 配置', '本机凭据', '恢复说明'] },
-    { id: 'b2', time: '2026-07-01 11:27', label: 'before-20260701-112724', files: 3, fileCategories: ['Codex 配置', '本机凭据', '恢复说明'] },
-    { id: 'b3', time: '2026-06-30 10:34', label: 'before-20260630-103413', files: 3, fileCategories: ['Codex 配置', '本机凭据', '恢复说明'] },
+    { id: 'b1', time: '2026-07-01 22:10', label: 'before-20260701-221054', files: 3, fileCategories: ['Codex 设置', '本机登录信息', '恢复说明'], kind: 'before_switch', restoreReady: true, restoreDetail: '可安全恢复：当前服务商设置仍与该次切换后的状态一致。' },
+    { id: 'b2', time: '2026-07-01 11:27', label: 'before-20260701-112724', files: 3, fileCategories: ['Codex 设置', '本机登录信息', '恢复说明'], kind: 'before_switch', restoreReady: false, restoreDetail: '这是较早的恢复点。请先恢复最近一次，再继续回退。' },
+    { id: 'b3', time: '2026-06-30 10:34', label: 'initial-install', files: 3, fileCategories: ['Codex 设置', '本机登录信息', '恢复说明'], kind: 'initial_install', restoreReady: false, restoreDetail: '首次启动基线备份会一直保留；为避免覆盖后续修改，请按时间从最近恢复点逐步回退。' },
   ],
 }
