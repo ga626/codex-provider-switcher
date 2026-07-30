@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process'
-import { access } from 'node:fs/promises'
+import { access, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const port = Number(process.env.BACKEND_SMOKE_PORT ?? 47839)
 const baseUrl = `http://127.0.0.1:${port}`
 const exePath = join(process.cwd(), 'src-tauri', 'target', 'debug', process.platform === 'win32' ? 'local_backend.exe' : 'local_backend')
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'codex-switcher-backend-smoke-'))
 
 async function waitForBackend() {
   const started = Date.now()
@@ -30,6 +32,11 @@ await access(exePath).catch(() => {
 
 const child = spawn(exePath, ['--port', String(port)], {
   cwd: process.cwd(),
+  env: {
+    ...process.env,
+    CODEX_PROVIDER_SWITCHER_CODEX_HOME: join(fixtureRoot, '.codex'),
+    CODEX_PROVIDER_SWITCHER_APP_DATA_DIR: join(fixtureRoot, 'app-data'),
+  },
   stdio: ['ignore', 'pipe', 'pipe'],
   windowsHide: true,
 })
@@ -69,4 +76,5 @@ try {
       child.kill('SIGKILL')
     }
   }, 500)
+  await rm(fixtureRoot, { recursive: true, force: true })
 }

@@ -2586,7 +2586,9 @@ fn create_backup_with_label(label: &str, reason: &str) -> Result<PathBuf, Switch
         &staging.join("manifest.json"),
         serde_json::to_string_pretty(&manifest)?.as_bytes(),
     )?;
-    backup_manifest_health(&staging, &manifest)?;
+    if manifest.missing_files.is_empty() {
+        backup_manifest_health(&staging, &manifest)?;
+    }
     if let Err(error) = fs::rename(&staging, &dir) {
         let _ = fs::remove_dir_all(&staging);
         return Err(SwitcherError::Io(error));
@@ -2600,7 +2602,6 @@ fn ensure_initial_backup() -> Result<bool, SwitcherError> {
         return Ok(false);
     }
     create_backup_with_label(INITIAL_BACKUP_LABEL, "initial_install")?;
-    healthy_baseline_backup()?;
     Ok(true)
 }
 
