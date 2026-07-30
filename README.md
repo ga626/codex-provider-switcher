@@ -1,101 +1,98 @@
 # Signalman AI
 
-Windows 上的 Codex provider 管理工具。它把手工修改 `config.toml` 和 `auth.json` 变成一个可检查、可恢复的桌面流程：首次启动先创建基线恢复点，验证目标服务商能完成真实请求后才允许切换。
+**安全切换 Codex provider，不悄悄覆盖你的工作环境。**
 
-![Signalman AI 桌面界面示意](docs/assets/desktop-preview.png)
+Signalman AI 是 Windows 上的本地桌面工具。它适合已经在 Codex 里配置了 MCP、插件、项目和个人工作习惯，却不想再手工编辑配置文件的用户。
 
-> 截图使用离线示例配置生成，不包含真实服务商、地址、密钥或本机资料。
+它不会把“切换服务商”做成一次看不见的整文件覆盖：先检查目标服务商、让你看清将发生的变更、再由你确认；每次需要写入前都会创建恢复点。无法确认安全时，它会停止，而不是猜测或覆盖。
 
-**交付状态：** 产品仍处于 alpha 阶段。GitHub 和 Store 是否已经交付、各自可下载的版本号，以对应渠道页面为准；`main`、PR 和 Git tag 出现更高版本并不等于安装用户已经拿到它。
+**当前为 alpha。** 适合知情的小范围试用；切换完成后，仍应在新的 Codex 会话里确认你的实际工作正常。
+
+[下载最新 GitHub 版](https://github.com/ga626/codex-provider-switcher/releases/latest) · [查看首次使用流程](#第一次使用只要四步) · [遇到问题先看排错指南](docs/user/troubleshooting.zh.md)
+
+![服务商工作区：使用离线示例服务商管理名称、接口地址、默认模型和本机保存的访问密钥状态。](docs/assets/readme/provider-workspace-v0.10.png)
+
+> 本页截图来自 `0.10.0-alpha` 的离线示例配置：不包含真实服务商、地址、密钥、本机路径或 Codex 内容，也不会连接任何服务商。
+
+## 你为什么会需要它
+
+换 provider 本身并不复杂；真正让人不放心的是，某些工具会把旧的 `config.toml` 或 `auth.json` 整份覆盖回来，连同自己长期积累的 MCP、插件、项目设置和其他工作环境一起改掉。
+
+Signalman AI 的目标不是替你更快地编辑文件，而是把这件高风险的小事变成一个能检查、能确认、也能安全回退的流程。
+
+| 你关心的事 | Signalman AI 怎么做 |
+| --- | --- |
+| **先确认能不能用** | 对当前服务商、模型、地址和访问密钥运行一次最小真实请求。没有通过，就不允许切换，也不会写入 Codex 配置。 |
+| **只改必要的部分** | 切换前显示检查结果和变更影响；确认时再次检查配置有没有被其他程序改动。不能安全确认时，直接停止。 |
+| **出问题能回去** | 首次启动建立基线恢复点；每天首次打开自动备份，也可以随时手动备份。恢复同样需要确认，不会整份覆盖你的现有工作环境。 |
+
+## 第一次使用只要四步
+
+1. **安装并打开。** 第一次启动只会创建“首次启动基线备份”，不会切换服务商或改写 Codex 配置。
+2. **添加服务商并选择模型。** 填写名称、接口地址、模型和访问密钥；资料保存在本机。
+3. **运行可用性测试。** 它会检查当前服务商是否能完成一次最小真实请求；未通过时不会进入写入路径。
+4. **查看检查结果后确认切换。** 完成后关闭当前 Codex 会话并重新打开，再确认你的实际工作；需要回退时，到“配置保护”选择恢复点。
+
+![切换前检查工作区：示例服务商通过可用性测试后，分别展示服务商信息和会继续生效的 Codex 运行设置。](docs/assets/readme/switch-preflight-v0.10.png)
+
+测试只验证“当前地址、密钥和模型能完成最小请求”。它不能代替你的长上下文、工具调用、配额或第三方服务稳定性的实际使用确认。
+
+## 它会改什么，又不会碰什么
+
+| 内容 | 行为 |
+| --- | --- |
+| Codex 的 provider、模型、接口地址和认证所需字段 | 只有你确认切换后才会更新；写入前会创建恢复点，并再次确认配置没有漂移。 |
+| `config.toml` 和 `auth.json` 的无关内容 | 保留。遇到未知或冲突的 provider 变化，产品会停止自动操作，而不是覆盖。 |
+| MCP、插件、项目、桌面设置、记忆、自动化规则和聊天/历史环境 | 不作为切换或恢复的覆盖目标。恢复只回退 Signalman AI 自己管理的 provider 字段。 |
+| API key、配置、恢复副本和活动记录 | 不上传。切换器保存的敏感资料和恢复副本使用当前 Windows 用户的 DPAPI 保护。 |
+| 你的最终使用结果 | 仍需要你在新的 Codex 会话里确认；任何工具都不能替第三方 provider 承诺余额、长期稳定性或所有高级能力。 |
+
+![配置保护工作区：显示首次启动基线、手动恢复点和恢复前必须输入“恢复”的二次确认。](docs/assets/readme/configuration-protection-v0.10.png)
+
+恢复不是“把一份旧文件整份写回去”。如果 Signalman AI 发现 provider 字段已经被你或其他程序改过、无法证明自动回退安全，就会拒绝自动恢复并保留当前内容，交由你决定下一步。
 
 ## 选择下载方式
 
-| 你想要什么 | 选择 | 更新节奏 | 第一次安装 |
-| --- | --- | --- | --- |
-| 尽快拿到已经公开交付的新功能 | [GitHub Releases](https://github.com/ga626/codex-provider-switcher/releases/latest) | 日常小版本优先在这里发布；应用内可检查签名更新 | 未购买 Windows 代码签名时，Windows 可能显示 SmartScreen 提示 |
-| 更省心、由微软管理更新 | [Microsoft Store](https://apps.microsoft.com/detail/9P7PGV62WKK6) | 只发布经过一段时间验证的稳定大版本，可能落后于 GitHub | Store 安装包由 Microsoft Store 管理签名和更新，正常情况下没有 SmartScreen 下载提示 |
+| 你想要什么 | 选择 | 更新方式 |
+| --- | --- | --- |
+| 尽快使用已经公开交付的新功能 | [GitHub Releases](https://github.com/ga626/codex-provider-switcher/releases/latest) | 日常小版本优先在这里发布；应用内可以检查带签名的更新。 |
+| 更省心、由微软管理更新 | [Microsoft Store](https://apps.microsoft.com/detail/9P7PGV62WKK6) | 只发布经过一段时间验证的稳定大版本，可能晚于 GitHub。 |
 
-这不是两个不同的软件。两条路径从已验证的版本 tag 构建，但交付节奏不同，版本号也可能不同；差别还包括 Windows 的安装信任方式。一台电脑请选择其中一个作为日常入口，不要把开发版、维护者候选版和两个安装版混在一起使用。
-
-## 你打开它后会做什么
-
-1. 首次启动自动创建“首次启动基线备份”：它只读取并 DPAPI 保护 `config.toml` 和 `auth.json`，不切换服务商、不改写 Codex 配置。
-2. 保存 provider 的名称、接口地址、模型和 API 密钥；切换器自己的敏感资料使用当前 Windows 用户的 DPAPI 保护。
-3. 运行“服务商可用性测试”，确认地址、密钥、模型和 Responses 协议能够完成一次真实短请求。
-4. 测试通过后执行切换；应用先创建新的恢复点，再只更新 provider、模型、接口地址和认证所需字段。
-5. 关闭并重新打开 Codex，在新会话里确认实际工作正常；需要回退时，从恢复中心恢复首次启动基线备份或某次切换前备份。恢复前会先创建新的受保护恢复点，并在写后核对文件内容。
-
-## 它适合谁
-
-- 你需要在多个兼容服务商之间切换，但不想手工编辑 Codex 配置文件。
-- 你希望切换前先确认地址、密钥和模型能完成一次真实的 Responses 请求。
-- 你希望每次写配置前都有恢复点，出问题时能回到上一次状态。
-
-## 你会得到什么
-
-| 能力 | 实际作用 |
-| --- | --- |
-| 服务商目录 | 新安装从空目录开始；每位用户只保存自己的 provider 配置，密钥不以明文留在本工具目录中。 |
-| 模型目录 | 从服务商读取可见模型，避免把某个固定模型名当作通用默认值。 |
-| 可用性测试 | 用当前模型发送短时 Responses 请求；认证、额度、模型、路径和网络问题会给出可理解的结果。 |
-| 安全切换 | 未通过测试不写 Codex 配置；首次启动先创建基线备份，通过后先预览变更、创建恢复点，再更新 `config.toml` 和 `auth.json`。 |
-| 恢复与时间线 | 可恢复首次启动基线备份或本工具创建的恢复点；恢复前再次备份，恢复后核对文件内容；活动记录不含凭据。 |
-| 更新 | GitHub 安装版可检查 Tauri 签名更新；Store 安装版由 Microsoft Store 管理更新。用户不需要私钥、口令或发布配置。 |
-
-可用性测试保证的是“当前地址、密钥和模型能完成最小真实请求”。它不能替代长上下文、工具调用或你自己的实际工作验收。
-
-## 安装与更新
+两条路径是同一个产品的不同交付节奏。一台电脑请选择其中一个作为日常入口，不要把开发版、维护者候选版、GitHub 安装版和 Store 安装版混在一起使用。
 
 ### GitHub 最新版
 
-1. 打开 [最新发布版](https://github.com/ga626/codex-provider-switcher/releases/latest)，确认页面标为 `Latest` 的版本，再下载名称带 `setup.exe` 的 Windows 安装包及同名 `.sha256` 文件。
-2. 只在确认下载页属于本仓库官方 Release、版本号与校验文件一致后运行安装包。未购买 Windows 代码签名时，SmartScreen 提示是已知边界；企业策略或 Smart App Control 可能不允许继续。
-3. 从开始菜单或桌面图标启动 `Signalman AI`。之后使用应用内“检查更新”获取 GitHub 签名更新。
+1. 打开[最新发布页](https://github.com/ga626/codex-provider-switcher/releases/latest)，确认页面标为 `Latest`，再下载名称带 `setup.exe` 的 Windows 安装包和同名 `.sha256` 文件。
+2. 确认下载页属于本仓库、版本号与校验文件一致后再运行安装包。GitHub 通道尚未购买 Windows Authenticode 签名，Windows 可能显示 SmartScreen 提示；企业策略或 Smart App Control 也可能不允许继续。
+3. 从开始菜单或桌面图标启动 `Signalman AI`。完整的安装、更新和卸载说明见[安装与更新](docs/user/installation.zh.md)。
 
 ### Microsoft Store 稳定版
 
 1. 打开 [Microsoft Store 产品页](https://apps.microsoft.com/detail/9P7PGV62WKK6)，安装 `Signalman AI`。
-2. 由 Microsoft Store 检查和交付后续稳定大版本；应用内按钮会打开 Store 对应页面。
-3. Store 版本可能晚于 GitHub，这是为了让日常 GitHub 更新和低频稳定交付互不阻塞。
+2. 后续稳定更新由 Microsoft Store 检查和交付；Store 版本可能晚于 GitHub，这是刻意保持的双渠道节奏。
 
-正常入口只打开一个应用窗口：不需要浏览器、不需要输入端口、不应留下 CMD 窗口。完整的安装、升级和卸载说明在 [安装与更新](docs/user/installation.zh.md)。从源码运行的开发版仅用于验收，不应替代已安装版本。
-
-## 数据和安全边界
-
-- 切换器保存的 provider profile API key 与本工具创建的敏感恢复副本使用当前 Windows 用户的 DPAPI 保护。执行切换时，Codex 所需的 custom provider `api_key` 与认证状态仍会写入 Codex 的 `config.toml` 和 `auth.json`；不要把这些受当前 Windows 用户账户保护的 Codex 文件误称为切换器的 DPAPI 加密副本。
-- 首次启动只创建基线备份，不写入 Codex 配置；切换前会先生成有效期十分钟的变更预览，并在确认时再次检查配置没有漂移。
-- 切换和恢复只修改服务商所需字段，保留 `config.toml` 中其他 section、custom provider 未知字段及 `auth.json` 无关内容；无法证明安全时会停止而不是覆盖。
-- 配置与认证文件的写入使用事务回执：若应用在两文件更新之间异常退出，下次启动只回退本工具拥有字段到一致状态，再允许继续使用。
-- 不要把本机应用数据目录中的 profiles、备份或日志发送到公开 Issue。
-- 删除切换器或其本机资料不会自动撤销最近一次 Codex 配置写入；如需回退，先在应用内恢复确认过的恢复点。
-- 应用不提供默认开机自启、托盘常驻或后台 daemon；关闭窗口即退出。
-- GitHub updater 的签名与 Windows 对首次下载的信任是两条独立安全链路。Store 安装版由 Microsoft Store 管理包签名和更新。每个版本是否已经完成完整交付，以对应渠道的版本说明为准。
+正常入口只打开一个应用窗口：不需要浏览器、不需要输入端口，也不应留下 CMD 窗口。源码运行的开发版只用于验收，不应替代已安装版本。
 
 ## 常见问题
 
-### 为什么测试通过了，仍要在新 Codex 会话里确认？
+### 测试通过了，为什么还要在新 Codex 会话里确认？
 
-测试只做最小真实请求，用来避免把明显不可用的配置写进去。实际工作还会受到上下文长度、工具调用、服务商策略和网络状态影响，所以最终确认必须在新会话完成。
+测试用于避免把明显不可用的配置写进去。实际工作还会受到上下文长度、工具调用、服务商策略、网络和额度的影响，因此最终确认必须在新的 Codex 会话完成。
 
-### 为什么服务商余额不足时不能切换？
+### 为什么切换或恢复会被停止？
 
-因为这代表当前密钥无法完成真实请求。继续写入该配置只会让 Codex 在切换后立即不可用。补足额度或配额后重新测试即可。
+可能是服务商测试没有通过、验证结束后配置被其他程序修改，或恢复时发现 provider 字段存在冲突。停止是保护措施：先查看界面中的原因，修正后重新测试或重新预览；不要手工把旧备份整份覆盖到当前文件。
 
-### 旧切换工具什么时候可以停？
+### 怎样安全地报告问题？
 
-本机旧候选的受限退役已在受控切换中完成；GitHub stable `Signalman AI` 是当前桌面入口。原有切换工具仍保留为受保护的回滚参考，除非有新的明确批准，不应删除或重复执行切换。历史条件见 [旧工具替换手册](docs/maintainers/legacy-cutover.zh.md)。
-
-### 遇到问题怎么办？
-
-先查看 [排错指南](docs/user/troubleshooting.zh.md)。提交 Issue 时只提供版本、操作步骤、脱敏错误摘要和时间，不要提交密钥、完整配置、profiles、备份或私有截图。
+先阅读[排错指南](docs/user/troubleshooting.zh.md)。提交 Issue 时只提供版本、操作步骤、脱敏错误摘要和时间；不要上传密钥、完整配置、profiles、备份、本机路径或私有截图。
 
 ## 继续了解
 
-- 使用软件：[安装、更新与卸载](docs/user/installation.zh.md) / [排错指南](docs/user/troubleshooting.zh.md)
-- 隐私与支持：[隐私政策](docs/user/privacy-policy.zh.md) / [获取帮助](SUPPORT.md)
-- 了解边界：[产品规格](docs/reference/product-spec.zh.md) / [安全说明](SECURITY.md)
-- 参与开发：[贡献说明](CONTRIBUTING.md) / [开发与 PR 指南](docs/contributing/development-and-prs.zh.md)
-- 维护发布：[发布与交付手册](docs/maintainers/release-and-delivery.zh.md) / [依赖与安全治理](docs/maintainers/dependency-security.zh.md)
-- 查看历史：[变更记录](CHANGELOG.md) / [Release 页面](https://github.com/ga626/codex-provider-switcher/releases)
+**使用软件：** [安装、更新与卸载](docs/user/installation.zh.md) · [排错指南](docs/user/troubleshooting.zh.md) · [隐私政策](docs/user/privacy-policy.zh.md) · [安全说明](SECURITY.md)
 
-维护者：本项目由仓库维护者和贡献者共同维护。安全问题请按 [SECURITY.md](SECURITY.md) 的私密路径报告。
+**了解产品边界：** [产品规格](docs/reference/product-spec.zh.md) · [获取帮助](SUPPORT.md) · [变更记录](CHANGELOG.md)
+
+**参与开发与维护：** [贡献说明](CONTRIBUTING.md) · [开发与 PR 指南](docs/contributing/development-and-prs.zh.md) · [发布与交付手册](docs/maintainers/release-and-delivery.zh.md) · [依赖与安全治理](docs/maintainers/dependency-security.zh.md)
+
+安全问题请按 [SECURITY.md](SECURITY.md) 的私密路径报告。
