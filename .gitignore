@@ -31,7 +31,7 @@ src-tauri/target
 # Local developer/agent instructions
 /AGENTS.md
 /.agents/
-/.codex/
+/.codex/worktrees/
 /.codex-praetor/
 
 # Local secrets and Codex/user state

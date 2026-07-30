@@ -18,6 +18,12 @@
 
 从最新 `main` 创建 `codex/<topic>` 分支。不要提交真实配置、凭据、日志、截图、构建物或本机状态。
 
+## 临时 worktree
+
+普通 Codex worktree 只能由 `npm run worktree:manage -- -Action Create -Name <topic> -Apply` 创建在 `.codex/worktrees/<topic>`；禁止写到项目父目录或其他项目。Codex Desktop 的受管目录与 Codex Praetor 的 `.codex-praetor/worktrees` 不由本脚本管理。
+
+提交前运行 `npm run worktree:manage -- -Action Audit`。退役前必须无进程、干净且已合并或已有 `archive/*` 引用；使用 `-Action Retire -WorktreePath <绝对路径> -Apply`，不得手删或使用 `--force`。
+
 ## 本地验证
 
 所有本地验证都在准备进入 GitHub 后执行，并须记录实际结果。文档或内部维护按表中最小验证执行；普通功能按受影响边界补检查；用户可见流程还要安排开发版验收。`npm run qa:dev-desktop` 只打开当前源码，不会安装、卸载或升级稳定版。
@@ -81,6 +87,7 @@ npm run qa:dev-desktop
 | provider、模型、配置写入、备份或恢复 | 产品规格、排错、风险边界、验证说明 |
 | GitHub/Store、更新、版本或 Release | 发布手册、release notes、脚本索引、PR 发布计划 |
 | CI、测试、脚本或依赖 | 脚本索引、维护手册、PR 验证段 |
+| worktree 或本机治理 | 本节、`.gitignore`、维护脚本、PR 验证段 |
 
 依赖兼容、CodeQL、Dependabot 与 GitHub Actions 固定策略见[依赖与安全治理](../maintainers/dependency-security.zh.md)。这类工程化 PR 不改变产品功能、版本、安装或 Store 路径时，不自动进入发布流程；但必须完整记录本地依赖和扫描验证结果。
 

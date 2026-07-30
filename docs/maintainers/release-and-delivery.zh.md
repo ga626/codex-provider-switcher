@@ -47,7 +47,7 @@ npm run release:readiness -- -Channel store
 
 ## 当前已交付基线
 
-- GitHub `v0.9.0-alpha` 已作为不可变 Release 交付；远端下载、SHA256、`latest.json`、安装和启动验收均已完成。
+- GitHub `v0.10.0-alpha` 已作为不可变 Release 交付；远端下载、SHA256、`latest.json`、安装和启动验收均已完成。
 - 该版本的 GitHub stable 本机安装位于 `D:\Software\Signalman AI`，并是当前维护者桌面入口。
 - Microsoft Store `0.8.0.0` 仍为独立、低频稳定渠道，未被 GitHub alpha 交付或本机 cutover 覆盖。
 - 这一基线不代表后续 PR 自动发布；任何新的用户可见版本仍必须从新的 tag 重新走本手册。

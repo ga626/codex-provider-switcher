@@ -27,6 +27,8 @@
     "tauri:desktop-boundary:smoke": "node scripts/tauri-desktop-boundary-smoke.mjs",
     "backend:dev": "cargo run --manifest-path src-tauri/Cargo.toml --bin local_backend --",
     "verify:doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/doctor-codex-provider-switcher.ps1 -PublicRelease",
+    "worktree:manage": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/maintenance/manage-project-worktrees.ps1",
+    "worktree:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/test-project-worktree-governance.ps1",
     "release:readiness": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/release-readiness.ps1",
     "release:readiness:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/release-readiness-behavior-smoke.ps1",
     "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/build-codex-provider-switcher-release.ps1",
