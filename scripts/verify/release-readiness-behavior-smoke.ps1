@@ -2,6 +2,8 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 $readinessScript = Join-Path $PSScriptRoot "release-readiness.ps1"
+$package = Get-Content -LiteralPath (Join-Path $projectRoot "package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+$tag = "v$($package.version)"
 $fakeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("signalman-release-readiness-" + [guid]::NewGuid().ToString("N"))
 $fakeGh = Join-Path $fakeRoot "gh.cmd"
 $originalPath = $env:PATH
@@ -27,13 +29,13 @@ exit /b 1
 
     $env:PATH = "$fakeRoot;$originalPath"
 
-    $runnerOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $readinessScript -Mode RunnerSafe -Channel github -Tag v0.9.0-alpha -SourceRef HEAD 2>&1 | Out-String
+    $runnerOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $readinessScript -Mode RunnerSafe -Channel github -Tag $tag -SourceRef HEAD 2>&1 | Out-String
     $runnerExitCode = $LASTEXITCODE
     Assert-Condition ($runnerExitCode -eq 0) "RunnerSafe readiness must pass when Secret and Dependabot APIs are denied. Output: $runnerOutput"
     Assert-Condition ($runnerOutput -match "\[PASS\] Release readiness checks passed") "RunnerSafe readiness did not report success. Output: $runnerOutput"
     Assert-Condition ($runnerOutput -match "Source:\s+HEAD") "RunnerSafe readiness did not inspect the requested source ref. Output: $runnerOutput"
 
-    $maintainerOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $readinessScript -Mode Maintainer -Channel github -Tag v0.9.0-alpha 2>&1 | Out-String
+    $maintainerOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $readinessScript -Mode Maintainer -Channel github -Tag $tag 2>&1 | Out-String
     $maintainerExitCode = $LASTEXITCODE
     Assert-Condition ($maintainerExitCode -ne 0) "Maintainer readiness must fail when required governance APIs are denied. Output: $maintainerOutput"
     Assert-Condition ($maintainerOutput -match "Unable to list GitHub Secret names") "Maintainer readiness did not check Secret metadata. Output: $maintainerOutput"
