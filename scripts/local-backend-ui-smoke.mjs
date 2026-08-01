@@ -125,7 +125,7 @@ try {
   if (!verified.profiles.find((profile) => profile.id === profileId)?.verified) {
     throw new Error('fixture provider was not verified')
   }
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   page.on('console', (message) => {
     if (['error', 'warning'].includes(message.type())) {
       consoleEvents.push(`${message.type()}: ${message.text()}`)
@@ -186,7 +186,12 @@ try {
     if (count !== 0) throw new Error('configuration protection must use product language')
   })
   await page.screenshot({ path: join(outputDir, 'configuration-protection.png'), fullPage: true })
-  await page.getByRole('button', { name: /应用设置/ }).click()
+  const applicationSettingsButton = page.getByRole('button', { name: /应用设置/ })
+  const applicationSettingsBounds = await applicationSettingsButton.boundingBox()
+  if (!applicationSettingsBounds || applicationSettingsBounds.y < 0 || applicationSettingsBounds.y + applicationSettingsBounds.height > 800) {
+    throw new Error('application settings must be directly reachable in the compact desktop viewport')
+  }
+  await applicationSettingsButton.click()
   await page.getByRole('heading', { name: '开机后自动打开' }).waitFor()
   const autoStartToggle = page.getByRole('checkbox', { name: '开启开机启动' })
   if (!await autoStartToggle.isDisabled()) throw new Error('Web diagnostic mode must not write Windows autostart state')
