@@ -63,6 +63,27 @@ function Remove-CandidateStartMenuShortcuts([string]$ExpectedExe) {
     }
 }
 
+function Restore-StableDesktopShortcut([string]$StableExe) {
+    if (-not (Test-Path -LiteralPath $StableExe -PathType Leaf)) {
+        throw "GitHub stable executable is missing; refusing to leave the desktop entry pointing at a candidate: $StableExe"
+    }
+    $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
+    $shortcutPath = Join-Path $desktop "Signalman AI.lnk"
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $StableExe
+    $shortcut.WorkingDirectory = Split-Path -Parent $StableExe
+    $shortcut.Description = "Signalman AI"
+    $shortcut.IconLocation = "$StableExe,0"
+    $shortcut.Arguments = ""
+    $shortcut.Save()
+
+    $target = $shell.CreateShortcut($shortcutPath).TargetPath
+    if ((Get-NormalizedPath $target) -ne (Get-NormalizedPath $StableExe)) {
+        throw "Stable desktop shortcut target verification failed: $shortcutPath"
+    }
+}
+
 function Remove-CandidateUninstallEntries([string]$ExpectedRoot) {
     $expected = Get-NormalizedPath $ExpectedRoot
     foreach ($registryRoot in @(
@@ -133,6 +154,7 @@ try {
     }
     Remove-CandidateStartMenuShortcuts -ExpectedExe $installedExe
     Remove-CandidateUninstallEntries -ExpectedRoot $InstallRoot
+    Restore-StableDesktopShortcut -StableExe "D:\Software\Signalman AI\codex-provider-switcher.exe"
 
     if ($LegacyProfilesPath) {
         $legacyFullPath = [System.IO.Path]::GetFullPath($LegacyProfilesPath)
@@ -152,7 +174,7 @@ try {
     }
     $state | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallRoot "candidate-install-state.json") -Encoding UTF8
     Write-Host "[PASS] Local candidate refreshed at $InstallRoot"
-    Write-Host "[PASS] Candidate-only Start-menu shortcuts and uninstall entries were removed; desktop shortcuts were preserved."
+    Write-Host "[PASS] Candidate-only Start-menu shortcuts and uninstall entries were removed; the desktop entry now targets GitHub stable."
 } finally {
     Pop-Location
     $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = $previousReleaseChannel
