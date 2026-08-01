@@ -48,12 +48,9 @@ function Stop-CandidateDesktopProcess([string]$ExpectedExe) {
     }
 }
 
-function Remove-CandidateShortcuts([string]$ExpectedExe) {
+function Remove-CandidateStartMenuShortcuts([string]$ExpectedExe) {
     $shell = New-Object -ComObject WScript.Shell
-    $roots = @(
-        [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop),
-        (Join-Path $env:APPDATA "Microsoft\\Windows\\Start Menu\\Programs")
-    )
+    $roots = @(Join-Path $env:APPDATA "Microsoft\\Windows\\Start Menu\\Programs")
     $expected = Get-NormalizedPath $ExpectedExe
     foreach ($root in $roots) {
         if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
@@ -134,7 +131,7 @@ try {
     if (-not (Test-Path -LiteralPath $installedExe -PathType Leaf)) {
         throw "Candidate installer did not create the expected executable: $installedExe"
     }
-    Remove-CandidateShortcuts -ExpectedExe $installedExe
+    Remove-CandidateStartMenuShortcuts -ExpectedExe $installedExe
     Remove-CandidateUninstallEntries -ExpectedRoot $InstallRoot
 
     if ($LegacyProfilesPath) {
@@ -155,7 +152,7 @@ try {
     }
     $state | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallRoot "candidate-install-state.json") -Encoding UTF8
     Write-Host "[PASS] Local candidate refreshed at $InstallRoot"
-    Write-Host "[PASS] Candidate-only shortcuts and uninstall entries were removed."
+    Write-Host "[PASS] Candidate-only Start-menu shortcuts and uninstall entries were removed; desktop shortcuts were preserved."
 } finally {
     Pop-Location
     $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = $previousReleaseChannel
