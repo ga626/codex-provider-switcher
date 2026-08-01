@@ -29,7 +29,12 @@ function Get-SetupPath {
 }
 
 function Get-NormalizedPath([string]$Path) {
-    return [System.IO.Path]::GetFullPath($Path).TrimEnd("\\")
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    try {
+        return [System.IO.Path]::GetFullPath($Path).TrimEnd("\\")
+    } catch {
+        return $null
+    }
 }
 
 function Stop-CandidateDesktopProcess([string]$ExpectedExe) {
