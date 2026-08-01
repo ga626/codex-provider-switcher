@@ -206,7 +206,8 @@ h2 {
 }
 
 .sidebar-workspaces {
-  grid-template-rows: auto auto;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .sidebar-connections {
@@ -233,6 +234,16 @@ h2 {
 .mini-check-list {
   display: grid;
   gap: 8px;
+}
+
+.nav-list {
+  min-height: 0;
+  align-content: start;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .nav-item,
