@@ -474,6 +474,43 @@ h2 {
   padding: 16px;
 }
 
+.application-settings-panel {
+  display: grid;
+  gap: 14px;
+  max-width: 720px;
+}
+
+.application-settings-panel > p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.setting-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.setting-toggle-row > span {
+  display: grid;
+  gap: 4px;
+}
+
+.setting-toggle-row small {
+  color: var(--muted);
+}
+
+.setting-toggle-row input {
+  width: 42px;
+  height: 22px;
+  accent-color: var(--accent);
+}
+
 .compact-surface {
   padding: 14px;
 }

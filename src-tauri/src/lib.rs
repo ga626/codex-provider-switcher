@@ -13,6 +13,7 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
+use tauri_plugin_autostart::ManagerExt;
 
 // Keep the existing data directory so installed users retain DPAPI-protected
 // credentials, backups, and history when the visible product brand changes.
@@ -24,6 +25,7 @@ const INITIAL_BACKUP_LABEL: &str = "initial-install";
 const PENDING_TRANSACTION_FILE: &str = "pending-config-transaction.json";
 const SWITCH_PREFLIGHT_FILE: &str = "pending-switch-preflight.json";
 const OPERATION_RECEIPTS_FILE: &str = "config-operation-receipts.json";
+const STARTUP_DIAGNOSTICS_FILE: &str = "startup-diagnostics.json";
 const CODEX_HOME_ENV: &str = "CODEX_PROVIDER_SWITCHER_CODEX_HOME";
 const APP_DATA_DIR_ENV: &str = "CODEX_PROVIDER_SWITCHER_APP_DATA_DIR";
 const RELEASES_API_ENV: &str = "CODEX_PROVIDER_SWITCHER_RELEASES_API";
@@ -241,6 +243,7 @@ pub struct AppState {
     pub config_path: String,
     pub auth_path: String,
     pub auto_start: bool,
+    pub startup_notice: Option<StartupNotice>,
     pub tray_enabled: bool,
     pub safe_mode: bool,
     pub configuration_drift: Option<ConfigurationDrift>,
@@ -250,6 +253,20 @@ pub struct AppState {
     pub activity: Vec<ActivityItem>,
     pub backups: Vec<BackupItem>,
     pub configuration_protection: ConfigurationProtection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupNotice {
+    pub code: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StartupDiagnostic {
+    created_at: String,
+    phase: String,
+    code: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -430,6 +447,10 @@ fn switch_preflight_path() -> Result<PathBuf, SwitcherError> {
 
 fn operation_receipts_path() -> Result<PathBuf, SwitcherError> {
     Ok(app_data_dir()?.join(OPERATION_RECEIPTS_FILE))
+}
+
+fn startup_diagnostics_path() -> Result<PathBuf, SwitcherError> {
+    Ok(app_data_dir()?.join(STARTUP_DIAGNOSTICS_FILE))
 }
 
 fn ensure_dirs() -> Result<(), SwitcherError> {
@@ -1497,6 +1518,10 @@ fn required_toml_bool(value: &toml::Value, key: &str) -> Result<bool, SwitcherEr
         .ok_or_else(|| SwitcherError::Message(format!("恢复点缺少必要的 {key} 设置，已拒绝恢复。")))
 }
 
+fn optional_toml_bool(value: &toml::Value, key: &str) -> Option<bool> {
+    value.get(key).and_then(toml::Value::as_bool)
+}
+
 fn restored_owned_files(
     backup_dir: &Path,
     manifest: &BackupManifest,
@@ -1562,13 +1587,15 @@ fn restored_owned_files(
             &required_toml_string(backup_custom, key)?,
         );
     }
-    upsert_section_bool(
-        &mut lines,
-        start,
-        &mut end,
-        "requires_openai_auth",
-        required_toml_bool(backup_custom, "requires_openai_auth")?,
-    );
+    if let Some(requires_openai_auth) = optional_toml_bool(backup_custom, "requires_openai_auth") {
+        upsert_section_bool(
+            &mut lines,
+            start,
+            &mut end,
+            "requires_openai_auth",
+            requires_openai_auth,
+        );
+    }
     let next_config = lines.join("\r\n");
     if !protected_sections_match(&current_config, &next_config)? {
         return Err(SwitcherError::Message(
@@ -1766,6 +1793,7 @@ fn app_state() -> Result<AppState, SwitcherError> {
         config_path: config_path()?.display().to_string(),
         auth_path: auth_path()?.display().to_string(),
         auto_start: catalog.auto_start,
+        startup_notice: None,
         tray_enabled: false,
         safe_mode: true,
         configuration_drift: configuration_drift(&catalog, &config),
@@ -1774,6 +1802,86 @@ fn app_state() -> Result<AppState, SwitcherError> {
         checks: validation_checks(&config),
         activity: load_activity()?,
         backups: list_backups()?,
+        configuration_protection: configuration_protection(&config),
+    })
+}
+
+fn startup_error_code(error: &SwitcherError) -> String {
+    match error {
+        SwitcherError::Io(io_error) => format!("backup-io-{:?}", io_error.kind()).to_ascii_lowercase(),
+        SwitcherError::Json(_) => "backup-auth-json".to_string(),
+        SwitcherError::Toml(_) => "backup-config-toml".to_string(),
+        SwitcherError::MissingHome => "backup-user-directory".to_string(),
+        SwitcherError::Message(_) => "backup-safety-check".to_string(),
+    }
+}
+
+fn record_startup_diagnostic(notice: &StartupNotice) {
+    let Ok(path) = startup_diagnostics_path() else {
+        return;
+    };
+    let mut diagnostics = fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Vec<StartupDiagnostic>>(&text).ok())
+        .unwrap_or_default();
+    diagnostics.insert(
+        0,
+        StartupDiagnostic {
+            created_at: now_label(),
+            phase: "daily_backup".to_string(),
+            code: notice.code.clone(),
+        },
+    );
+    diagnostics.truncate(20);
+    let Ok(bytes) = serde_json::to_vec_pretty(&diagnostics) else {
+        return;
+    };
+    let _ = write_bytes_atomically(&path, &bytes);
+}
+
+fn load_catalog_read_only() -> StoredCatalog {
+    let Ok(path) = profiles_path() else {
+        return seed_catalog_from_existing().unwrap_or_else(|_| StoredCatalog {
+            version: default_version(),
+            profiles: Map::new(),
+            model_catalogs: Map::new(),
+            profile_order: Vec::new(),
+            auto_start: false,
+            invariants: default_invariants(),
+        });
+    };
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|text| parse_json_document::<StoredCatalog>(&text).ok())
+        .unwrap_or_else(|| seed_catalog_from_existing().unwrap_or_else(|_| StoredCatalog {
+            version: default_version(),
+            profiles: Map::new(),
+            model_catalogs: Map::new(),
+            profile_order: Vec::new(),
+            auto_start: false,
+            invariants: default_invariants(),
+        }))
+}
+
+fn startup_safe_state(notice: StartupNotice) -> Result<AppState, SwitcherError> {
+    let catalog = load_catalog_read_only();
+    let config = read_config().unwrap_or_default();
+    let current_id = current_profile_id(&catalog, &config);
+    Ok(AppState {
+        runtime_mode: "tauri_native".to_string(),
+        current_profile_id: current_id.clone(),
+        config_path: config_path()?.display().to_string(),
+        auth_path: auth_path()?.display().to_string(),
+        auto_start: false,
+        startup_notice: Some(notice),
+        tray_enabled: false,
+        safe_mode: true,
+        configuration_drift: configuration_drift(&catalog, &config),
+        profiles: catalog_profiles(&catalog, &current_id),
+        model_catalogs: catalog_model_catalogs(&catalog),
+        checks: validation_checks(&config),
+        activity: load_activity().unwrap_or_else(|_| vec![activity_seed()]),
+        backups: list_backups().unwrap_or_default(),
         configuration_protection: configuration_protection(&config),
     })
 }
@@ -1963,6 +2071,97 @@ mod tests {
         let catalog: StoredCatalog = parse_json_document("\u{feff}{\"profiles\":{}}").unwrap();
 
         assert!(catalog.profiles.is_empty());
+    }
+
+    #[test]
+    fn switching_does_not_add_missing_requires_openai_auth() {
+        let original = r#"
+model = "gpt-test"
+model_provider = "custom"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "before"
+wire_api = "responses"
+base_url = "https://before.example/v1"
+api_key = "before-key"
+"#;
+        let profile = StoredProfile {
+            name: "after".to_string(),
+            base_url: "https://after.example/v1".to_string(),
+            api_key: "after-key".to_string(),
+            api_key_protected: String::new(),
+            model: "gpt-after".to_string(),
+            model_reasoning_effort: default_reasoning(),
+            verified: false,
+            verification_status: default_verification_status(),
+            verification_response_shape: None,
+            default: false,
+            note: String::new(),
+            last_switched_at: None,
+            last_verified_at: None,
+            last_verification_detail: None,
+            last_verification_stage: None,
+            last_verification_http_status: None,
+            last_verification_provider_code: None,
+        };
+
+        let next = build_next_config(original, &profile).unwrap();
+
+        assert!(!next.contains("requires_openai_auth"));
+    }
+
+    #[test]
+    fn switching_preserves_existing_requires_openai_auth_value() {
+        let original = r#"
+model = "gpt-test"
+model_provider = "custom"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "before"
+wire_api = "responses"
+requires_openai_auth = false
+base_url = "https://before.example/v1"
+api_key = "before-key"
+"#;
+        let profile = StoredProfile {
+            name: "after".to_string(),
+            base_url: "https://after.example/v1".to_string(),
+            api_key: "after-key".to_string(),
+            api_key_protected: String::new(),
+            model: "gpt-after".to_string(),
+            model_reasoning_effort: default_reasoning(),
+            verified: false,
+            verification_status: default_verification_status(),
+            verification_response_shape: None,
+            default: false,
+            note: String::new(),
+            last_switched_at: None,
+            last_verified_at: None,
+            last_verification_detail: None,
+            last_verification_stage: None,
+            last_verification_http_status: None,
+            last_verification_provider_code: None,
+        };
+
+        let next = build_next_config(original, &profile).unwrap();
+
+        assert!(next.contains("requires_openai_auth = false"));
+    }
+
+    #[test]
+    fn incomplete_backup_staging_is_removed() {
+        let path = env::temp_dir().join(format!(
+            "signalman-backup-staging-{}",
+            Local::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir(&path).unwrap();
+        {
+            let _staging = BackupStaging::new(path.clone());
+        }
+
+        assert!(!path.exists());
     }
 }
 
@@ -2543,12 +2742,12 @@ fn create_backup_with_label(label: &str, reason: &str) -> Result<PathBuf, Switch
             "恢复点标识已存在，已拒绝覆盖现有备份。".to_string(),
         ));
     }
-    let staging = backup_root.join(format!(
+    let mut staging = BackupStaging::new(backup_root.join(format!(
         ".{label}-{}-{}.staging",
         std::process::id(),
         Local::now().timestamp_nanos_opt().unwrap_or_default()
-    ));
-    fs::create_dir(&staging)?;
+    )));
+    fs::create_dir(&staging.path)?;
     let sources = [("config.toml", config_path()?), ("auth.json", auth_path()?)];
     let mut files = Vec::new();
     let mut missing_files = Vec::new();
@@ -2556,8 +2755,8 @@ fn create_backup_with_label(label: &str, reason: &str) -> Result<PathBuf, Switch
     for (name, source) in sources {
         if source.exists() {
             let protected_name = format!("{name}{PROTECTED_FILE_SUFFIX}");
-            protect_file(&source, &staging.join(&protected_name))?;
-            let protected = fs::read(staging.join(&protected_name))?;
+            protect_file(&source, &staging.path.join(&protected_name))?;
+            let protected = fs::read(staging.path.join(&protected_name))?;
             file_digests.insert(protected_name.clone(), bytes_digest(&protected));
             files.push(protected_name);
         } else {
@@ -2583,17 +2782,41 @@ fn create_backup_with_label(label: &str, reason: &str) -> Result<PathBuf, Switch
         file_digests,
     };
     write_bytes_atomically(
-        &staging.join("manifest.json"),
+        &staging.path.join("manifest.json"),
         serde_json::to_string_pretty(&manifest)?.as_bytes(),
     )?;
     if manifest.missing_files.is_empty() {
-        backup_manifest_health(&staging, &manifest)?;
+        backup_manifest_health(&staging.path, &manifest)?;
     }
-    if let Err(error) = fs::rename(&staging, &dir) {
-        let _ = fs::remove_dir_all(&staging);
-        return Err(SwitcherError::Io(error));
-    }
+    fs::rename(&staging.path, &dir)?;
+    staging.commit();
     Ok(dir)
+}
+
+struct BackupStaging {
+    path: PathBuf,
+    committed: bool,
+}
+
+impl BackupStaging {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            committed: false,
+        }
+    }
+
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for BackupStaging {
+    fn drop(&mut self) {
+        if !self.committed && self.path.exists() {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
 }
 
 fn ensure_initial_backup() -> Result<bool, SwitcherError> {
@@ -2718,6 +2941,11 @@ fn upsert_section_bool(
 
 fn build_next_config(original: &str, profile: &StoredProfile) -> Result<String, SwitcherError> {
     let mut lines: Vec<String> = original.lines().map(ToString::to_string).collect();
+    let original_value = toml::from_str::<toml::Value>(original)?;
+    let requires_openai_auth = original_value
+        .get("model_providers")
+        .and_then(|providers| providers.get("custom"))
+        .and_then(|custom| optional_toml_bool(custom, "requires_openai_auth"));
 
     upsert_root_string(&mut lines, "model", &profile.model);
     upsert_root_string(&mut lines, "model_provider", "custom");
@@ -2739,7 +2967,15 @@ fn build_next_config(original: &str, profile: &StoredProfile) -> Result<String, 
 
     upsert_section_string(&mut lines, start, &mut end, "name", &profile.name);
     upsert_section_string(&mut lines, start, &mut end, "wire_api", "responses");
-    upsert_section_bool(&mut lines, start, &mut end, "requires_openai_auth", true);
+    if let Some(requires_openai_auth) = requires_openai_auth {
+        upsert_section_bool(
+            &mut lines,
+            start,
+            &mut end,
+            "requires_openai_auth",
+            requires_openai_auth,
+        );
+    }
     upsert_section_string(&mut lines, start, &mut end, "base_url", &profile.base_url);
     upsert_section_string(&mut lines, start, &mut end, "api_key", &profile.api_key);
     let next_config = lines.join("\r\n");
@@ -2836,8 +3072,22 @@ fn write_auth_key(api_key: &str) -> Result<(), SwitcherError> {
 }
 
 #[tauri::command]
-fn load_state() -> Result<AppState, SwitcherError> {
-    load_state_core()
+fn load_state(app: tauri::AppHandle) -> Result<AppState, SwitcherError> {
+    let mut state = load_state_core()?;
+    match app.autolaunch().is_enabled() {
+        Ok(enabled) => state.auto_start = enabled,
+        Err(_) => {
+            let notice = StartupNotice {
+                code: "autostart-status".to_string(),
+                detail: "Windows 开机启动状态暂时无法读取；窗口和配置保护仍可正常使用。"
+                    .to_string(),
+            };
+            record_startup_diagnostic(&notice);
+            state.startup_notice = Some(notice);
+            state.auto_start = false;
+        }
+    }
+    Ok(state)
 }
 
 #[tauri::command]
@@ -2846,14 +3096,33 @@ fn check_for_update() -> Result<UpdateInfo, SwitcherError> {
 }
 
 pub fn load_state_core() -> Result<AppState, SwitcherError> {
-    if ensure_daily_backup()? {
-        return app_state_with_activity(
+    let state = match ensure_daily_backup() {
+        Ok(true) => app_state_with_activity(
             "已创建今日自动备份",
             "已保存当前服务商设置；每天首次打开应用时最多创建一次。",
             "success",
-        );
+        ),
+        Ok(false) => app_state(),
+        Err(error) => {
+            let notice = StartupNotice {
+                code: startup_error_code(&error),
+                detail: "本次自动备份未完成。窗口仍可打开；在首次基线备份完成前，切换和恢复等写入操作会保持受保护状态。".to_string(),
+            };
+            record_startup_diagnostic(&notice);
+            return startup_safe_state(notice);
+        }
+    };
+    match state {
+        Ok(state) => Ok(state),
+        Err(error) => {
+            let notice = StartupNotice {
+                code: startup_error_code(&error),
+                detail: "启动检查未完成。窗口仍可打开；请修复配置或备份问题后重新检查。".to_string(),
+            };
+            record_startup_diagnostic(&notice);
+            startup_safe_state(notice)
+        }
     }
-    app_state()
 }
 
 #[tauri::command]
@@ -3285,13 +3554,40 @@ pub fn sync_current_configuration_core() -> Result<AppState, SwitcherError> {
 }
 
 #[tauri::command]
-fn toggle_auto_start(enabled: bool) -> Result<AppState, SwitcherError> {
-    toggle_auto_start_core(enabled)
+fn toggle_auto_start(app: tauri::AppHandle, enabled: bool) -> Result<AppState, SwitcherError> {
+    if enabled {
+        app.autolaunch()
+            .enable()
+            .map_err(|error| SwitcherError::Message(format!("无法开启 Windows 开机启动：{error}")))?;
+    } else {
+        app.autolaunch()
+            .disable()
+            .map_err(|error| SwitcherError::Message(format!("无法关闭 Windows 开机启动：{error}")))?;
+    }
+    let mut state = app_state_with_activity(
+        if enabled { "已开启开机启动" } else { "已关闭开机启动" },
+        if enabled {
+            "下次登录 Windows 时会自动打开 Signalman AI。"
+        } else {
+            "下次登录 Windows 时不会自动打开 Signalman AI。"
+        },
+        "success",
+    )?;
+    state.auto_start = app
+        .autolaunch()
+        .is_enabled()
+        .map_err(|error| SwitcherError::Message(format!("无法确认 Windows 开机启动状态：{error}")))?;
+    if state.auto_start != enabled {
+        return Err(SwitcherError::Message(
+            "Windows 未确认开机启动状态变更；已停止继续操作。".to_string(),
+        ));
+    }
+    Ok(state)
 }
 
 pub fn toggle_auto_start_core(_enabled: bool) -> Result<AppState, SwitcherError> {
     Err(SwitcherError::Message(
-        "开机自启动尚未接入 Windows 启动项读写；当前版本不开放这个主功能。".to_string(),
+        "开机启动只在 Signalman AI 桌面应用中提供；本地 Web 诊断模式不会写入 Windows 启动项。".to_string(),
     ))
 }
 
@@ -3379,6 +3675,10 @@ pub fn restore_backup_core(backup_id: String, confirmation: String) -> Result<Ap
 
 pub fn run() {
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init());
     let builder = if is_store_release_channel() {

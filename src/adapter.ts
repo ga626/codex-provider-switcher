@@ -122,6 +122,13 @@ export async function loadState(): Promise<AppState> {
   return structuredClone(mockState)
 }
 
+export async function toggleAutoStart(enabled: boolean): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('toggle_auto_start', { enabled })
+  }
+  throw new Error('开机启动只在 Signalman AI 桌面应用中提供。')
+}
+
 export async function createManualBackup(): Promise<AppState> {
   if (isTauri) {
     return invoke<AppState>('create_manual_backup')

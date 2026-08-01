@@ -117,6 +117,11 @@ export type AppState = {
   currentProfileId: string
   configPath: string
   authPath: string
+  autoStart: boolean
+  startupNotice?: {
+    code: string
+    detail: string
+  }
   configurationDrift?: ConfigurationDrift
   profiles: ProviderProfile[]
   modelCatalogs: ModelCatalog[]
