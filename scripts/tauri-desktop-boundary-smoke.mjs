@@ -69,9 +69,11 @@ assert(tauriConfig.app.windows[0].minWidth >= 980, 'Tauri minimum width must pre
 assert(tauriConfig.app.windows[0].minHeight >= 700, 'Tauri minimum height must preserve the desktop layout floor')
 assert(!('trayIcon' in tauriConfig.app), 'Tauri config must not define a default tray icon')
 
-assertNotIncludes(cargoToml, 'tauri-plugin-autostart', 'src-tauri/Cargo.toml')
+assert(cargoToml.includes('tauri-plugin-autostart'), 'Cargo must include the desktop autostart integration')
 assertNotIncludes(cargoToml, 'tray-icon', 'src-tauri/Cargo.toml')
-assertNotIncludes(libRs, 'tauri_plugin_autostart', 'src-tauri/src/lib.rs')
+assert(libRs.includes('tauri_plugin_autostart::init'), 'Tauri desktop must initialize the Windows autostart integration')
+assert(libRs.includes('.autolaunch()') && libRs.includes('.is_enabled()'), 'Tauri desktop must read the real Windows autostart state')
+assert(libRs.includes('fn toggle_auto_start(app: tauri::AppHandle, enabled: bool)'), 'Tauri desktop must expose a real autostart toggle')
 assertNotIncludes(libRs, 'TrayIconBuilder', 'src-tauri/src/lib.rs')
 assertNotIncludes(libRs, 'install_tray', 'src-tauri/src/lib.rs')
 assert(capabilityText.includes('process:allow-restart'), 'Tauri capability must grant only process restart')

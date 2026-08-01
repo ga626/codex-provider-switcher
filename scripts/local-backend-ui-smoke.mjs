@@ -186,6 +186,11 @@ try {
     if (count !== 0) throw new Error('configuration protection must use product language')
   })
   await page.screenshot({ path: join(outputDir, 'configuration-protection.png'), fullPage: true })
+  await page.getByRole('button', { name: /应用设置/ }).click()
+  await page.getByRole('heading', { name: '开机后自动打开' }).waitFor()
+  const autoStartToggle = page.getByRole('checkbox', { name: '开启开机启动' })
+  if (!await autoStartToggle.isDisabled()) throw new Error('Web diagnostic mode must not write Windows autostart state')
+  await page.getByText('开发预览和 Web 诊断模式不会修改 Windows 启动项。').waitFor()
 
   const seriousConsoleEvents = consoleEvents.filter((event) => !event.includes('Download the React DevTools'))
   if (seriousConsoleEvents.length > 0) {
@@ -197,7 +202,7 @@ try {
     url: baseUrl,
     outputDir,
     screenshots: ['switch-check.png', 'configuration-protection.png'],
-    assertion: 'frontend rendered through the local Web backend with a verified fixture provider, kept switching conditions in one workspace, and separated backup protection from switching checks without duplicate inspectors or nested check-list scrolling',
+    assertion: 'frontend rendered through the local Web backend with a verified fixture provider, kept switching conditions in one workspace, separated backup protection from switching checks, and kept Windows autostart unavailable in Web diagnostic mode',
   }, null, 2))
 } finally {
   await browser.close()

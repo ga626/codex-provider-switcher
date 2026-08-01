@@ -5,6 +5,7 @@ export const initialState: AppState = {
   currentProfileId: 'example-provider-a',
   configPath: String.raw`C:\Users\<user>\.codex\config.toml`,
   authPath: String.raw`C:\Users\<user>\.codex\auth.json`,
+  autoStart: false,
   configurationProtection: {
     baselineReady: true,
     baselineDetail: '首次启动基线备份已创建，包含本工具可能写入的 Codex 设置和本机登录信息。',

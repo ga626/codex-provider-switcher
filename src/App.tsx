@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   PlugZap,
   Plus,
+  Power,
   RefreshCcw,
   RotateCcw,
   Save,
@@ -40,11 +41,12 @@ import {
   setDefaultProfile,
   syncCurrentConfiguration,
   switchProfile,
+  toggleAutoStart,
   verifyProfile,
 } from './adapter'
 import type { AppState, BackupItem, ConfigurationProtection, EditableProfile, ModelCatalog, ProviderProfile, SwitchPreflight, UpdateInfo, ValidationCheck } from './types'
 
-type ViewId = 'providers' | 'models' | 'switch-check' | 'protection' | 'timeline'
+type ViewId = 'providers' | 'models' | 'switch-check' | 'protection' | 'application' | 'timeline'
 
 const emptyProfile: EditableProfile = {
   id: '',
@@ -481,6 +483,7 @@ function App() {
     { id: 'models', label: '模型目录', note: selectedModelCatalog?.status === 'ok' ? '已同步' : '待刷新', icon: <Boxes size={17} /> },
     { id: 'switch-check', label: '切换前检查', note: !selectedProfile ? '先新增服务商' : hasUnsavedChanges ? '请先保存' : requiredFailures === 0 ? '可以切换' : `${requiredFailures} 项待处理`, icon: <ShieldCheck size={17} /> },
     { id: 'protection', label: '配置保护', note: state.configurationProtection.baselineReady ? '备份已就绪' : '需要处理', icon: <ShieldCheck size={17} /> },
+    { id: 'application', label: '应用设置', note: state.autoStart ? '开机启动已开启' : '开机启动未开启', icon: <Power size={17} /> },
     { id: 'timeline', label: '活动记录', note: latestActivity?.time ?? '暂无记录', icon: <Activity size={17} /> },
   ]
   const selectedIsCurrent = Boolean(selectedProfile?.active)
@@ -528,6 +531,13 @@ function App() {
         <section className="error-banner preview-banner">
           <AlertTriangle size={18} />
           <span>开发预览不读取本机配置，也不会连接、验证或切换真实服务商。</span>
+        </section>
+      )}
+
+      {state.startupNotice && (
+        <section className="error-banner">
+          <AlertTriangle size={18} />
+          <span>{state.startupNotice.detail} 诊断编号：{state.startupNotice.code}</span>
         </section>
       )}
 
@@ -714,6 +724,14 @@ function App() {
                 onBackupRequested={() => void runAction('create-manual-backup', createManualBackup)}
               />
             )}
+            {activeView === 'application' && (
+              <ApplicationSettingsWorkspace
+                autoStart={state.autoStart}
+                desktopAvailable={state.runtimeMode === 'tauri_native'}
+                busy={busy}
+                onToggle={(enabled) => void runAction('toggle-auto-start', () => toggleAutoStart(enabled))}
+              />
+            )}
             {activeView === 'timeline' && <TimelineWorkspace state={state} />}
           </div>
         </section>
@@ -774,6 +792,10 @@ function WorkspaceHeader({
     protection: {
       title: '配置保护',
       note: '查看备份、受保护内容和恢复入口。',
+    },
+    application: {
+      title: '应用设置',
+      note: '控制应用本身的启动方式，不会改动 Codex 配置。',
     },
     timeline: {
       title: '活动记录',
@@ -1247,6 +1269,47 @@ function ConfigurationProtectionWorkspace({
             </div>
           ))}
         </div> : <div className="empty-state recovery-empty"><RotateCcw size={26} /><strong>首次启动基线备份尚未完成</strong><span>完成前不会允许切换服务商。</span></div>}
+      </section>
+    </div>
+  )
+}
+
+function ApplicationSettingsWorkspace({
+  autoStart,
+  desktopAvailable,
+  busy,
+  onToggle,
+}: {
+  autoStart: boolean
+  desktopAvailable: boolean
+  busy: string | null
+  onToggle: (enabled: boolean) => void
+}) {
+  const disabled = !desktopAvailable || busy !== null
+  return (
+    <div className="workspace-stack">
+      <section className="surface-panel application-settings-panel">
+        <div className="section-heading-row">
+          <div>
+            <span className="eyebrow">启动方式</span>
+            <h3>开机后自动打开</h3>
+          </div>
+          <span className={`section-meta ${autoStart ? 'status-ok' : ''}`}>{autoStart ? '已开启' : '默认关闭'}</span>
+        </div>
+        <p>只在你主动开启后，Signalman AI 才会在下次登录 Windows 时自动打开。安装、升级和首次使用都不会自动开启。</p>
+        <label className="setting-toggle-row">
+          <span>
+            <strong>开启开机启动</strong>
+            <small>{desktopAvailable ? '关闭后，下次登录不会自动打开应用。' : '开发预览和 Web 诊断模式不会修改 Windows 启动项。'}</small>
+          </span>
+          <input
+            type="checkbox"
+            checked={autoStart}
+            disabled={disabled}
+            onChange={(event) => onToggle(event.target.checked)}
+            aria-label="开启开机启动"
+          />
+        </label>
       </section>
     </div>
   )
