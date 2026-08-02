@@ -498,6 +498,13 @@ function App() {
       : updateInfo
         ? '已是最新版'
         : '检查更新'
+  const buildChannelLabel = __CODEX_RELEASE_CHANNEL__ === 'stable'
+    ? '稳定版'
+    : __CODEX_RELEASE_CHANNEL__ === 'candidate'
+      ? '维护候选'
+      : __CODEX_RELEASE_CHANNEL__ === 'store'
+        ? '商店版'
+        : '开发版'
 
   return (
     <main className="app-shell" data-view={activeView}>
@@ -510,6 +517,9 @@ function App() {
           </div>
         </div>
         <div className="title-actions">
+          <span className="build-identity" title="用于确认当前运行的版本和构建来源">
+            {buildChannelLabel} v{__APP_VERSION__} · {__CODEX_BUILD_SHA__.slice(0, 7)}
+          </span>
           <button
             className="ghost-button update-button"
             type="button"
@@ -721,7 +731,7 @@ function App() {
                 backups={state.backups}
                 busy={busy}
                 onRestoreRequested={(backup) => setRestoreConfirm(backup)}
-                onBackupRequested={() => void runAction('create-manual-backup', createManualBackup)}
+                onBackupRequested={(confirmation) => void runAction('create-manual-backup', () => createManualBackup(confirmation))}
               />
             )}
             {activeView === 'application' && (
@@ -1192,7 +1202,7 @@ function ConfigurationProtectionWorkspace({
   backups: BackupItem[]
   busy: string | null
   onRestoreRequested: (backup: BackupItem) => void
-  onBackupRequested: () => void
+  onBackupRequested: (confirmation?: string) => void
 }) {
   const backupTitle: Record<BackupItem['kind'], string> = {
     initial_install: '首次启动基线备份',
@@ -1201,7 +1211,11 @@ function ConfigurationProtectionWorkspace({
     before_switch: '切换前备份',
     before_restore: '恢复前备份',
     legacy_backup: '旧版备份',
+    invalid_backup: '未完成的备份目录',
   }
+  const recoverableBackups = backups.filter((backup) => backup.restoreReady)
+  const invalidBackupCount = backups.length - recoverableBackups.length
+  const manualBackupLimitReached = backups.filter((backup) => backup.kind === 'manual').length >= 3
   return (
     <div className="workspace-stack">
       <section className="surface-panel protection-overview">
@@ -1216,7 +1230,7 @@ function ConfigurationProtectionWorkspace({
         <div className="protection-scope">
           <div>
             <span className="eyebrow">本工具管理</span>
-            <strong>服务商、模型、接口地址和本机登录信息</strong>
+            <strong>服务商、模型和接口地址</strong>
           </div>
           <div>
             <span className="eyebrow">保持不变</span>
@@ -1248,27 +1262,36 @@ function ConfigurationProtectionWorkspace({
           <div><span className="eyebrow">恢复中心</span><h3>已保护的恢复点</h3></div>
           <div className="recovery-actions">
             <span className="section-meta">每天首次打开会自动备份；也可以保存当前状态。</span>
-            <button className="primary-button" type="button" onClick={onBackupRequested} disabled={busy !== null}>
+            <button className="primary-button" type="button" onClick={() => {
+              if (!manualBackupLimitReached) {
+                onBackupRequested()
+                return
+              }
+              if (window.confirm('已保留 3 个手动恢复点。继续将替换最早的手动恢复点，是否继续？')) {
+                onBackupRequested('替换')
+              }
+            }} disabled={busy !== null}>
               <Save size={16} />
               立即备份当前状态
             </button>
           </div>
         </div>
-        {backups.length > 0 ? <div className="recovery-list">
-          {backups.map((backup) => (
+        {recoverableBackups.length > 0 ? <div className="recovery-list">
+          {recoverableBackups.map((backup) => (
             <div className="recovery-row" key={backup.id}>
               <div>
                 <strong>{backupTitle[backup.kind]}</strong>
                 <span>{backup.time} · {backup.files} 个文件</span>
                 <div className="recovery-categories">{backup.fileCategories.map((category) => <span key={category}>{category}</span>)}</div>
               </div>
-              <button className="danger-button" type="button" onClick={() => onRestoreRequested(backup)} disabled={busy !== null || !backup.restoreReady} title={backup.restoreDetail}>
+              <button className="danger-button" type="button" onClick={() => onRestoreRequested(backup)} disabled={busy !== null} title={backup.restoreDetail}>
                 <RotateCcw size={16} />
-                {backup.restoreReady ? '安全恢复' : '暂不可恢复'}
+                安全恢复
               </button>
             </div>
           ))}
         </div> : <div className="empty-state recovery-empty"><RotateCcw size={26} /><strong>首次启动基线备份尚未完成</strong><span>完成前不会允许切换服务商。</span></div>}
+        {invalidBackupCount > 0 && <p className="section-meta">检测到 {invalidBackupCount} 个未完成或损坏的备份目录，已从安全恢复列表隐藏，不会自动删除。</p>}
       </section>
     </div>
   )

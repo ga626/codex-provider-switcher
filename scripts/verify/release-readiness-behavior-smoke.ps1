@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 $readinessScript = Join-Path $PSScriptRoot "release-readiness.ps1"
-$package = Get-Content -LiteralPath (Join-Path $projectRoot "package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+$package = (& git -C $projectRoot show "HEAD:package.json" | Out-String) | ConvertFrom-Json
 $tag = "v$($package.version)"
 $fakeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("signalman-release-readiness-" + [guid]::NewGuid().ToString("N"))
 $fakeGh = Join-Path $fakeRoot "gh.cmd"
@@ -14,6 +14,7 @@ function Assert-Condition {
 }
 
 try {
+    Push-Location $projectRoot
     New-Item -ItemType Directory -Path $fakeRoot -Force | Out-Null
     @'
 @echo off
@@ -43,6 +44,7 @@ exit /b 1
 
     Write-Host "[PASS] Release readiness permission-boundary behavior verified."
 } finally {
+    Pop-Location
     $env:PATH = $originalPath
     if (Test-Path -LiteralPath $fakeRoot) { Remove-Item -LiteralPath $fakeRoot -Recurse -Force }
 }

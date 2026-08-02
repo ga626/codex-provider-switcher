@@ -330,7 +330,13 @@ fn handle_api(
                 .unwrap_or(false);
             toggle_auto_start_core(enabled).map(state_json)
         }
-        ("POST", "/api/backup/create") => create_manual_backup_core().map(state_json),
+        ("POST", "/api/backup/create") => {
+            let confirmation = request_json(body)?
+                .get("confirmation")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            create_manual_backup_core(confirmation.as_deref()).map(state_json)
+        }
         ("POST", "/api/backup/restore-latest") => {
             confirmation(body).and_then(restore_latest_backup_core).map(state_json)
         }

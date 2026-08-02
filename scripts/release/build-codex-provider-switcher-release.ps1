@@ -308,7 +308,10 @@ if (-not $SkipDesktopBundle) {
 
 Push-Location $projectRoot
 $previousReleaseChannel = $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL
+$previousBuildSha = $env:CODEX_PROVIDER_SWITCHER_BUILD_SHA
 try {
+    $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = "stable"
+    $env:CODEX_PROVIDER_SWITCHER_BUILD_SHA = (& git -C $projectRoot rev-parse --short HEAD).Trim()
     Invoke-ReleaseBuildPhase -Name "frontend build" -Action {
         npm run build
     }
@@ -324,6 +327,7 @@ try {
 } finally {
     Pop-Location
     $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = $previousReleaseChannel
+    $env:CODEX_PROVIDER_SWITCHER_BUILD_SHA = $previousBuildSha
     if ($loadedSigningKey) {
         Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
     }

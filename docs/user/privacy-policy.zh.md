@@ -8,7 +8,7 @@ Signalman AI 是一个面向 Windows 的本地工具。本政策说明应用处�
 
 当你主动添加或修改 provider 时，应用会在当前 Windows 用户的本地应用数据目录保存 provider 名称、接口地址、模型名称、备注和用于连接服务商的 API 密钥状态。切换器 profile 中保存的 API 密钥使用当前 Windows 用户的 DPAPI 保护；应用不会把密钥写入本项目仓库，也不会把它显示在普通界面或活动记录中。
 
-首次打开时，应用会只读创建基线恢复点。当你主动确认切换时，应用会读取并更新 Codex 的 `config.toml` 和 `auth.json`，并在写入前创建本地恢复点。它只写入 provider 所需字段，保留其他 TOML section 和认证文件无关内容；检测到预览后的外部改动时会停止而不覆盖。为让 Codex 使用 custom provider，`config.toml` 中的 custom provider `api_key` 与 `auth.json` 中所需认证状态会按 Codex 的文件格式保存；它们受当前 Windows 用户账户保护，但不是切换器额外 DPAPI 加密的副本。恢复点、活动记录和 provider 目录保留在本机应用数据目录中。卸载应用不会自动删除这些数据，以便重新安装后恢复；你可以在确认不再需要后自行删除该目录。
+首次打开时，应用会只读创建基线恢复点。当你主动确认切换时，应用会更新 Codex 的受管 provider 字段，并在写入前创建本地恢复点。未声明认证方式的 custom provider 不会要求或写入 `api_key`，也不会改写 `auth.json`；登录或环境变量认证尚未通过隔离 runtime 验证时，产品会停止自动切换。它保留其他 TOML section 和认证文件内容；检测到预览后的外部改动时会停止而不覆盖。恢复点、活动记录和 provider 目录保留在本机应用数据目录中。卸载应用不会自动删除这些数据，以便重新安装后恢复；你可以在确认不再需要后自行删除该目录。
 
 ## 网络请求
 

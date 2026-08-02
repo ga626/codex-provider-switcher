@@ -53,9 +53,7 @@ await writeFile(join(codexDir, 'config.toml'), [
   '[model_providers.custom]',
   'name = "Baseline"',
   'wire_api = "responses"',
-  'requires_openai_auth = true',
   'base_url = "https://baseline.example/v1"',
-  'api_key = "baseline-key"',
 ].join('\r\n'), 'utf8')
 await writeFile(join(codexDir, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'baseline-key' }), 'utf8')
 await access(exePath).catch(() => {
