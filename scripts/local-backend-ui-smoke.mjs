@@ -194,6 +194,11 @@ try {
   }
   await applicationSettingsButton.click()
   await page.getByRole('heading', { name: '使用方式与恢复点' }).waitFor()
+  const applicationSettingsDialog = page.getByRole('dialog', { name: '使用方式与恢复点' })
+  const applicationSettingsDialogBounds = await applicationSettingsDialog.boundingBox()
+  if (!applicationSettingsDialogBounds || applicationSettingsDialogBounds.width < 480 || applicationSettingsDialogBounds.height > 752) {
+    throw new Error('application settings dialog must use a readable single-column desktop layout')
+  }
   const autoStartToggle = page.getByRole('checkbox', { name: '开启开机启动' })
   if (!await autoStartToggle.isDisabled()) throw new Error('Web diagnostic mode must not write Windows autostart state')
   await page.getByText('开发预览和 Web 诊断模式不会修改 Windows 启动项。').waitFor()
@@ -201,6 +206,7 @@ try {
   await page.locator('.application-settings-dialog select').count().then((count) => {
     if (count !== 2) throw new Error('settings must expose automatic and manual recovery-point limits')
   })
+  await page.screenshot({ path: join(outputDir, 'application-settings.png'), fullPage: true })
 
   const seriousConsoleEvents = consoleEvents.filter((event) => !event.includes('Download the React DevTools'))
   if (seriousConsoleEvents.length > 0) {
@@ -211,7 +217,7 @@ try {
     ok: true,
     url: baseUrl,
     outputDir,
-    screenshots: ['switch-check.png', 'configuration-protection.png'],
+    screenshots: ['switch-check.png', 'configuration-protection.png', 'application-settings.png'],
     assertion: 'frontend rendered through the local Web backend with a verified fixture provider, kept switching conditions in one workspace, separated baseline/automatic/manual recovery points, exposed application settings from the title bar, and kept Windows autostart unavailable in Web diagnostic mode',
   }, null, 2))
 } finally {

@@ -545,10 +545,17 @@ h2 {
   accent-color: var(--accent);
 }
 
-.application-settings-dialog {
+.confirm-dialog.application-settings-dialog {
   width: min(620px, calc(100vw - 32px));
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+
+.confirm-dialog.application-settings-dialog .section-heading-row {
+  margin-bottom: 0;
 }
 
 .settings-option-group {
