@@ -124,10 +124,10 @@ function profileConfigurationChecks(profile: ProviderProfile | undefined, draft:
     },
     {
       id: 'profile-api-key',
-      label: '访问密钥',
+      label: '切换器访问密钥',
       ok: hasKey,
-      detail: hasKey ? '已保存访问密钥。' : '切换前需要保存访问密钥。',
-      severity: 'required',
+      detail: hasKey ? '已保存，可运行切换器的真实连接测试。' : '未保存；仍可安全切换，但本工具无法代替 Codex 验证服务商可用性。',
+      severity: 'warning',
     },
   ]
 
@@ -145,7 +145,7 @@ function providerAvailabilityChecks(
     label: '服务商可用性测试',
     ok: profile.verified && profile.verificationStatus === 'verified',
     detail: verificationDetail(profile),
-    severity: 'required',
+    severity: 'warning',
   }]
 
   if (profile.model.length > 0 && modelCatalog?.status === 'ok') {
@@ -1393,11 +1393,12 @@ function SwitchConfirmDialog({
         <div>
           <span className="eyebrow">切换影响确认</span>
           <h2 id="switch-dialog-title">确认切换到 {preflight.targetName}？</h2>
-          <p>该服务商最近一次连接测试已通过。确认时会再次核对当前配置没有变化，再创建新的恢复点；不会显示访问密钥或完整配置内容。</p>
+          <p>{preflight.riskDetail ? '本次可以安全写入配置，但仍有使用风险。确认时会再次核对当前配置没有变化，再创建新的恢复点；不会显示访问密钥或完整配置内容。' : '该服务商最近一次连接测试已通过。确认时会再次核对当前配置没有变化，再创建新的恢复点；不会显示访问密钥或完整配置内容。'}</p>
           <dl className="switch-confirm-facts">
             <div><dt>目标模型</dt><dd>{preflight.targetModel}</dd></div>
             <div><dt>恢复点</dt><dd>{preflight.backupDetail}</dd></div>
             <div><dt>保护检查</dt><dd>{preflight.protectedDetail}</dd></div>
+            {preflight.riskDetail && <div><dt>使用风险</dt><dd>{preflight.riskDetail}</dd></div>}
           </dl>
           <p>此预览有效至 {preflight.expiresAt}。完成后请关闭当前 Codex 会话，并在新的会话中确认实际 provider 使用情况。</p>
         </div>

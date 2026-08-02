@@ -575,12 +575,31 @@ try {
   assert(failedProfile?.lastVerificationStage === 'billing', 'insufficient-credit provider did not record the diagnostic stage')
   assert(failedProfile?.lastVerificationProviderCode === 'insufficient_quota', 'insufficient-credit provider did not record the provider code')
   assert(responsesProbeRequestCount >= 1, 'DasuAPI quota verification did not issue the real request probe')
-  const responsesBeforeBlockedSwitch = responsesProbeRequestCount
-  const blockedSwitchMessage = await expectApiFailure('/api/profiles/prepare-switch', { profileId: noCredit.id })
-  assert(blockedSwitchMessage.includes('服务商可用性测试'), 'billing failure did not explain the switch gate')
-  assert(responsesProbeRequestCount === responsesBeforeBlockedSwitch, 'switch retried a remote compatibility probe')
-  assert(await readFile(configPath, 'utf8') === originalConfig, 'blocked DasuAPI switch changed config.toml')
-  assert(await readFile(authPath, 'utf8') === originalAuth, 'blocked DasuAPI switch changed auth.json')
+  const responsesBeforeRiskPreflight = responsesProbeRequestCount
+  const riskPreflight = await prepareSwitch(noCredit.id)
+  assert(riskPreflight.riskDetail?.includes('尚未由切换器确认可用'), 'billing failure was not surfaced as a switch risk')
+  assert(responsesProbeRequestCount === responsesBeforeRiskPreflight, 'risk preflight retried a remote compatibility probe')
+  assert(await readFile(configPath, 'utf8') === originalConfig, 'risk preflight changed config.toml')
+  assert(await readFile(authPath, 'utf8') === originalAuth, 'risk preflight changed auth.json')
+
+  const externalAuthentication = { ...profile, id: 'external-auth', name: 'External Authentication', apiKey: '' }
+  await api('/api/profiles/save', { profile: externalAuthentication })
+  const loginManagedConfig = originalConfig.replace('base_url = "https://baseline.example/v1"', 'requires_openai_auth = true\r\nbase_url = "https://baseline.example/v1"')
+  await writeFile(configPath, loginManagedConfig, 'utf8')
+  const externalAuthPreflight = await prepareSwitch(externalAuthentication.id)
+  assert(externalAuthPreflight.riskDetail?.includes('Codex 登录管理'), 'Codex login authentication was not surfaced as a risk')
+  assert(externalAuthPreflight.riskDetail?.includes('未保存应用访问密钥'), 'missing application key was not surfaced as a risk')
+  assert(await readFile(configPath, 'utf8') === loginManagedConfig, 'external authentication preflight changed config.toml')
+  assert(await readFile(authPath, 'utf8') === originalAuth, 'external authentication preflight changed auth.json')
+  await writeFile(configPath, originalConfig, 'utf8')
+
+  await writeFile(join(codexDir, 'friend.config.toml'), 'model = "profile-model"\r\n', 'utf8')
+  const profileLayerState = await api('/api/state')
+  const profileLayerCheck = profileLayerState.checks.find((item) => item.id === 'configuration-layer')
+  assert(profileLayerCheck && !profileLayerCheck.ok && profileLayerCheck.severity === 'required', 'profile configuration was not reported as a write-target blocker')
+  const profileLayerMessage = await expectApiFailure('/api/profiles/prepare-switch', { profileId: profile.id })
+  assert(profileLayerMessage.includes('无法确认当前实际生效的写入目标'), 'profile configuration did not block an ambiguous write target')
+  await rm(join(codexDir, 'friend.config.toml'))
 
   const endpointMismatch = { ...profile, id: 'endpoint-mismatch', name: 'Endpoint mismatch', apiKey: 'sk-endpoint-mismatch' }
   await api('/api/profiles/save', { profile: endpointMismatch })
@@ -631,7 +650,7 @@ try {
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models and deduplicated results',
       'authenticated /v1/responses probes distinguish standard, compatible, and unconfirmed response shapes',
-      'verified Responses probes are required before switching and insufficient-credit probes block config writes',
+      'unverified provider availability and external authentication are shown as risks, while unsafe configuration writes remain blocked',
       'verification diagnostics classify endpoint, response shape, billing, and service errors without changing Codex config/auth',
       'default selection persisted',
       'provider list order persisted without changing the active Codex configuration',

@@ -138,6 +138,7 @@ export type SwitchPreflight = {
   targetModel: string
   backupDetail: string
   protectedDetail: string
+  riskDetail?: string
   expiresAt: string
 }
 

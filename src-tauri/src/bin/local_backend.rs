@@ -1,8 +1,9 @@
 use codex_switcher_tauri_lib::{
-    check_for_update_core, create_manual_backup_core, delete_profile_core, load_state_core, refresh_models_core,
-    reorder_profiles_core, restore_backup_core, restore_latest_backup_core, save_profile_core,
-    prepare_switch_core, set_default_profile_core, switch_profile_core, sync_current_configuration_core,
-    toggle_auto_start_core, verify_profile_core, AppState, EditableProfile, SwitcherError,
+    check_for_update_core, create_manual_backup_core, delete_profile_core, load_state_core,
+    prepare_switch_core, refresh_models_core, reorder_profiles_core, restore_backup_core,
+    restore_latest_backup_core, save_profile_core, set_default_profile_core, switch_profile_core,
+    sync_current_configuration_core, toggle_auto_start_core, verify_profile_core, AppState,
+    EditableProfile, SwitcherError,
 };
 use serde_json::{json, Value};
 use std::{
@@ -313,7 +314,9 @@ fn handle_api(
                 .get("operationId")
                 .and_then(Value::as_str)
                 .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| SwitcherError::Message("缺少切换预览标识，请重新运行检查。".to_string()))?
+                .ok_or_else(|| {
+                    SwitcherError::Message("缺少切换预览标识，请重新运行检查。".to_string())
+                })?
                 .to_string();
             switch_profile_core(profile_id, operation_id).map(state_json)
         }
@@ -337,11 +340,13 @@ fn handle_api(
                 .map(str::to_string);
             create_manual_backup_core(confirmation.as_deref()).map(state_json)
         }
-        ("POST", "/api/backup/restore-latest") => {
-            confirmation(body).and_then(restore_latest_backup_core).map(state_json)
-        }
+        ("POST", "/api/backup/restore-latest") => confirmation(body)
+            .and_then(restore_latest_backup_core)
+            .map(state_json),
         ("POST", "/api/backup/restore") => backup_id(body)
-            .and_then(|backup_id| confirmation(body).and_then(|value| restore_backup_core(backup_id, value)))
+            .and_then(|backup_id| {
+                confirmation(body).and_then(|value| restore_backup_core(backup_id, value))
+            })
             .map(state_json),
         _ => return write_json(stream, 404, &json!({ "error": "not found" })),
     };
@@ -411,7 +416,11 @@ fn static_asset(
     }
     let relative = path_without_query.trim_start_matches('/');
     let canonical_dist = dist_dir.canonicalize()?;
-    let candidate = if relative.is_empty() { canonical_dist.join("index.html") } else { canonical_dist.join(relative) };
+    let candidate = if relative.is_empty() {
+        canonical_dist.join("index.html")
+    } else {
+        canonical_dist.join(relative)
+    };
     let path = if candidate.is_file() {
         let canonical_candidate = candidate.canonicalize()?;
         if !canonical_candidate.starts_with(&canonical_dist) {
