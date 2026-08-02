@@ -83,7 +83,7 @@ export type BackupItem = {
   label: string
   files: number
   fileCategories: string[]
-  kind: 'initial_install' | 'daily' | 'manual' | 'before_switch' | 'before_restore' | 'legacy_backup'
+  kind: 'initial_install' | 'daily' | 'manual' | 'before_switch' | 'before_restore' | 'legacy_backup' | 'invalid_backup'
   restoreReady?: boolean
   restoreDetail?: string
 }
@@ -138,6 +138,7 @@ export type SwitchPreflight = {
   targetModel: string
   backupDetail: string
   protectedDetail: string
+  riskDetail?: string
   expiresAt: string
 }
 

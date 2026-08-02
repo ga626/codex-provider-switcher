@@ -124,6 +124,12 @@ h2 {
   justify-content: flex-end;
 }
 
+.build-identity {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .error-banner {
   grid-row: 2;
   min-height: 38px;

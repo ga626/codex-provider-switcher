@@ -14,13 +14,13 @@
 
 ## 安全不变量
 
-- 写 `config.toml` 或 `auth.json` 前先备份。
+- 写受管的 Codex 配置前先备份；当前“无需认证” custom provider 不读写 `auth.json`。
 - 自动备份失败必须清理未完成 staging 并写入不含配置内容或凭据的启动诊断；首次基线备份未完成时，不允许进入配置写入路径。
 - 首次启动的基线备份只覆盖本工具可能写入的 `config.toml` 与 `auth.json`；不会把 Codex 会话历史、插件缓存或其他用户目录当作切换器数据改写。
 - 保留 `model_provider = "custom"`、Responses wire API、response storage 设置及用户既有 Codex 功能配置。
-- 切换先生成短时预览、确认时再次校验未漂移，只更新 provider 所需字段并保留其他 TOML section 和 `[model_providers.custom]` 内未知字段；`requires_openai_auth` 只在已有配置或恢复点明确存在时保留其值，不能凭空新增；恢复前再次创建恢复点，只回退本工具拥有字段。
-- 两文件写入有本地事务回执；异常中断后，下次启动先恢复未完成操作的切换前状态，避免继续使用半完成的 config/auth 组合。
-- 切换器 profile 中保存的 API key 与应用创建的敏感恢复副本使用 DPAPI 保护；执行切换时，Codex 所需的 custom provider `api_key` 与认证状态按其文件格式写入 `config.toml` 和 `auth.json`，不应被误称为切换器的 DPAPI 加密副本。
+- 切换先生成短时预览、确认时再次校验未漂移，只更新 provider 所需字段并保留其他 TOML section 和 `[model_providers.custom]` 内未知字段；`requires_openai_auth` 只在已有配置中保留其值，不能凭空新增；未声明认证方式时不得写入 `api_key` 或 `auth.json`，登录/环境变量认证未经隔离 runtime 验证时停止自动切换；恢复前再次创建恢复点，只回退本工具拥有字段。
+- 受管配置写入有本地事务回执；异常中断后，下次启动先恢复未完成操作的切换前状态，避免继续使用半完成的 provider 配置。
+- 切换器 profile 中保存的 API key 与应用创建的敏感恢复副本使用 DPAPI 保护；API key 仅用于服务商目录与真实可用性测试，不会被写回未声明认证方式的 Codex custom provider 配置。
 - 模型目录表示服务商列出模型，不等于模型已被 Codex 完整验证。
 - 只有当前保存的地址、模型和密钥已通过一次已认证的 Responses 请求，才允许写入 Codex 配置。
 - 修改 provider 或从 Codex 同步新的模型后，旧测试结果立即失效，必须重新测试。

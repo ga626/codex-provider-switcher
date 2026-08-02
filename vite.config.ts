@@ -7,6 +7,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.0.0-dev'),
     __CODEX_RELEASE_CHANNEL__: JSON.stringify(process.env.CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL ?? 'stable'),
+    __CODEX_BUILD_SHA__: JSON.stringify(process.env.CODEX_PROVIDER_SWITCHER_BUILD_SHA ?? 'local'),
   },
   build: {
     minify: 'esbuild',

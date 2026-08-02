@@ -1,7 +1,7 @@
 {
   "name": "codex-provider-switcher",
   "private": true,
-  "version": "0.10.0-alpha",
+  "version": "0.10.1-alpha",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -53,6 +53,8 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@emnapi/core": "^2.0.0-alpha.3",
+    "@emnapi/runtime": "^2.0.0-alpha.3",
     "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^26.1.2",
     "@types/react": "^19.2.17",

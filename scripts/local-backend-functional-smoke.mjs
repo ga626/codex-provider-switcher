@@ -153,9 +153,7 @@ const originalConfig = [
   '[model_providers.custom]',
   'name = "Baseline"',
   'wire_api = "responses"',
-  'requires_openai_auth = true',
   'base_url = "https://baseline.example/v1"',
-  'api_key = "baseline-key"',
   '# This user-owned custom field must survive provider switching.',
   'user_owned_extension = "keep-me"',
   '',
@@ -464,7 +462,7 @@ try {
     assert(switchedConfig.includes(fragment), `switch removed or changed protected configuration: ${fragment}`)
   }
   assert(switchedConfig.includes('user_owned_extension = "keep-me"'), 'switch removed an unknown custom-provider field')
-  assert(switchedAuth.OPENAI_API_KEY === 'sk-fixture', 'switch did not update auth key')
+  assert(switchedAuth.OPENAI_API_KEY === JSON.parse(originalAuth).OPENAI_API_KEY, 'switch changed the existing Codex login state')
   assert(switchedAuth.preserved === 'yes', 'switch removed unrelated auth data')
   const switchBackup = switched.backups.find((item) => item.kind === 'before_switch')
   assert(switched.backups.length === 3, 'switch did not retain the installation and daily backups while creating one switch backup')
@@ -522,7 +520,7 @@ try {
   const manualRestoredAuth = JSON.parse(await readFile(authPath, 'utf8'))
   assert(manualRestoredConfig.includes('[mcp_servers.after_switch]'), 'manual restore removed an MCP server added after the backup')
   assert(manualRestoredConfig.includes('model = "reasoning-current"'), 'manual restore did not restore the saved provider model')
-  assert(manualRestoredAuth.OPENAI_API_KEY === 'sk-fixture', 'manual restore did not restore the saved provider credential')
+  assert(manualRestoredAuth.OPENAI_API_KEY === JSON.parse(originalAuth).OPENAI_API_KEY, 'manual restore changed the existing Codex login state')
   assert(manualRestoredAuth.added_after_switch === 'keep-me', 'manual restore removed unrelated auth data')
   assert(manualRestored.activity[0]?.title === '已恢复配置备份', 'manual restore did not update activity')
 
@@ -531,10 +529,18 @@ try {
   const restoredAuth = JSON.parse(await readFile(authPath, 'utf8'))
   assert(restoredConfig.includes('[mcp_servers.after_switch]'), 'safe restore removed an MCP server added after the switch')
   assert(restoredConfig.includes('model = "baseline-model"'), 'safe restore did not restore the previous provider model')
-  assert(restoredAuth.OPENAI_API_KEY === JSON.parse(originalAuth).OPENAI_API_KEY, 'safe restore did not restore the previous provider credential')
+  assert(restoredAuth.OPENAI_API_KEY === JSON.parse(originalAuth).OPENAI_API_KEY, 'safe restore changed the existing Codex login state')
   assert(restoredAuth.added_after_switch === 'keep-me', 'safe restore removed unrelated auth data')
   assert(restored.activity[0]?.title === '已恢复配置备份', 'restore did not update activity')
   assert(restored.activity.length >= initialActivityCount + 8, 'timeline did not retain action history')
+
+  await api('/api/backup/create', {})
+  const threeManualBackups = await api('/api/backup/create', {})
+  assert(threeManualBackups.backups.filter((item) => item.kind === 'manual').length === 3, 'manual backup retention did not keep three recovery points')
+  const fourthManualWithoutConfirmation = await expectApiFailure('/api/backup/create', {})
+  assert(fourthManualWithoutConfirmation.includes('已保留 3 个手动恢复点'), 'fourth manual backup did not require replacement confirmation')
+  const fourthManualWithConfirmation = await api('/api/backup/create', { confirmation: '替换' })
+  assert(fourthManualWithConfirmation.backups.filter((item) => item.kind === 'manual').length === 3, 'confirmed manual backup did not prune the oldest managed recovery point')
 
   const pendingTransactionPath = join(localAppData, 'CodeX Provider Switcher', 'pending-config-transaction.json')
   await writeFile(configPath, switchedConfig.replace('model = "reasoning-current"', 'model = "interrupted-write"'), 'utf8')
@@ -542,7 +548,7 @@ try {
   await writeFile(pendingTransactionPath, JSON.stringify({ backup_id: initialBackup.id, reason: 'test-interruption' }), 'utf8')
   await api('/api/state')
   assert(await readFile(configPath, 'utf8') === originalConfig, 'startup did not recover an interrupted config write')
-  assert(JSON.parse(await readFile(authPath, 'utf8')).OPENAI_API_KEY === JSON.parse(originalAuth).OPENAI_API_KEY, 'startup did not recover the interrupted provider credential')
+  assert(JSON.parse(await readFile(authPath, 'utf8')).OPENAI_API_KEY === 'interrupted-write', 'startup recovery unexpectedly changed the current Codex login state')
   await assertMissingFile(pendingTransactionPath, 'startup recovery did not remove the completed transaction marker')
 
   await api('/api/profiles/save', { profile })
@@ -569,12 +575,31 @@ try {
   assert(failedProfile?.lastVerificationStage === 'billing', 'insufficient-credit provider did not record the diagnostic stage')
   assert(failedProfile?.lastVerificationProviderCode === 'insufficient_quota', 'insufficient-credit provider did not record the provider code')
   assert(responsesProbeRequestCount >= 1, 'DasuAPI quota verification did not issue the real request probe')
-  const responsesBeforeBlockedSwitch = responsesProbeRequestCount
-  const blockedSwitchMessage = await expectApiFailure('/api/profiles/prepare-switch', { profileId: noCredit.id })
-  assert(blockedSwitchMessage.includes('服务商可用性测试'), 'billing failure did not explain the switch gate')
-  assert(responsesProbeRequestCount === responsesBeforeBlockedSwitch, 'switch retried a remote compatibility probe')
-  assert(await readFile(configPath, 'utf8') === originalConfig, 'blocked DasuAPI switch changed config.toml')
-  assert(await readFile(authPath, 'utf8') === originalAuth, 'blocked DasuAPI switch changed auth.json')
+  const responsesBeforeRiskPreflight = responsesProbeRequestCount
+  const riskPreflight = await prepareSwitch(noCredit.id)
+  assert(riskPreflight.riskDetail?.includes('尚未由切换器确认可用'), 'billing failure was not surfaced as a switch risk')
+  assert(responsesProbeRequestCount === responsesBeforeRiskPreflight, 'risk preflight retried a remote compatibility probe')
+  assert(await readFile(configPath, 'utf8') === originalConfig, 'risk preflight changed config.toml')
+  assert(await readFile(authPath, 'utf8') === originalAuth, 'risk preflight changed auth.json')
+
+  const externalAuthentication = { ...profile, id: 'external-auth', name: 'External Authentication', apiKey: '' }
+  await api('/api/profiles/save', { profile: externalAuthentication })
+  const loginManagedConfig = originalConfig.replace('base_url = "https://baseline.example/v1"', 'requires_openai_auth = true\r\nbase_url = "https://baseline.example/v1"')
+  await writeFile(configPath, loginManagedConfig, 'utf8')
+  const externalAuthPreflight = await prepareSwitch(externalAuthentication.id)
+  assert(externalAuthPreflight.riskDetail?.includes('Codex 登录管理'), 'Codex login authentication was not surfaced as a risk')
+  assert(externalAuthPreflight.riskDetail?.includes('未保存应用访问密钥'), 'missing application key was not surfaced as a risk')
+  assert(await readFile(configPath, 'utf8') === loginManagedConfig, 'external authentication preflight changed config.toml')
+  assert(await readFile(authPath, 'utf8') === originalAuth, 'external authentication preflight changed auth.json')
+  await writeFile(configPath, originalConfig, 'utf8')
+
+  await writeFile(join(codexDir, 'friend.config.toml'), 'model = "profile-model"\r\n', 'utf8')
+  const profileLayerState = await api('/api/state')
+  const profileLayerCheck = profileLayerState.checks.find((item) => item.id === 'configuration-layer')
+  assert(profileLayerCheck && !profileLayerCheck.ok && profileLayerCheck.severity === 'required', 'profile configuration was not reported as a write-target blocker')
+  const profileLayerMessage = await expectApiFailure('/api/profiles/prepare-switch', { profileId: profile.id })
+  assert(profileLayerMessage.includes('无法确认当前实际生效的写入目标'), 'profile configuration did not block an ambiguous write target')
+  await rm(join(codexDir, 'friend.config.toml'))
 
   const endpointMismatch = { ...profile, id: 'endpoint-mismatch', name: 'Endpoint mismatch', apiKey: 'sk-endpoint-mismatch' }
   await api('/api/profiles/save', { profile: endpointMismatch })
@@ -625,15 +650,16 @@ try {
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models and deduplicated results',
       'authenticated /v1/responses probes distinguish standard, compatible, and unconfirmed response shapes',
-      'verified Responses probes are required before switching and insufficient-credit probes block config writes',
+      'unverified provider availability and external authentication are shown as risks, while unsafe configuration writes remain blocked',
       'verification diagnostics classify endpoint, response shape, billing, and service errors without changing Codex config/auth',
       'default selection persisted',
       'provider list order persisted without changing the active Codex configuration',
-      'first launch created one protected baseline without a duplicate daily backup; switching preserved unrelated and unknown custom-provider data',
+      'first launch created one protected baseline without a duplicate daily backup; switching removed legacy api_key while preserving unrelated custom-provider data and existing auth state',
       'same-address profiles retain the selected current-provider identity after a safe switch',
       'switch preflight rejects drift, while restore points require confirmation, reject provider-field conflicts, and preserve later MCP/auth additions',
-      'startup automatically recovered an interrupted two-file write from its transaction backup',
-      'a post-config auth write failure automatically rolled config.toml back instead of leaving a half-switch',
+      'manual recovery points require confirmation before replacing the oldest managed point and remain capped at three',
+      'startup automatically recovered an interrupted provider-config write without changing the current auth state',
+      'malformed existing auth state blocked the preflight without leaving a half-switch',
       'current configuration sync updates only the local profile directory and invalidates the previous model verification',
       'delete removed a non-current non-default provider',
     ],

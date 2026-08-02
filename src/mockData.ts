@@ -147,10 +147,10 @@ export const initialState: AppState = {
       severity: 'required',
     },
     {
-      id: 'custom-api-key',
-      label: '当前认证密钥',
+      id: 'custom-authentication-mode',
+      label: '当前认证方式',
       ok: true,
-      detail: 'custom 服务商已配置 api_key。',
+      detail: '当前服务商未声明认证方式；开发预览不会要求或写入 api_key。',
       severity: 'required',
     },
   ],

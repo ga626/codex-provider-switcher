@@ -126,6 +126,7 @@ if (-not $Apply) {
 
 Push-Location $projectRoot
 $previousReleaseChannel = $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL
+$previousBuildSha = $env:CODEX_PROVIDER_SWITCHER_BUILD_SHA
 try {
     # Only stop the prior candidate executable. Store and GitHub installations must not be touched.
     $candidateExe = Join-Path $InstallRoot "codex-provider-switcher.exe"
@@ -139,6 +140,7 @@ try {
         throw "Candidate build config is missing: $candidateConfigPath"
     }
     $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = "candidate"
+    $env:CODEX_PROVIDER_SWITCHER_BUILD_SHA = $head.Substring(0, 7)
     npx tauri build --bundles nsis --config $candidateConfigPath
     if ($LASTEXITCODE -ne 0) { throw "Desktop candidate build failed." }
 
@@ -178,4 +180,5 @@ try {
 } finally {
     Pop-Location
     $env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = $previousReleaseChannel
+    $env:CODEX_PROVIDER_SWITCHER_BUILD_SHA = $previousBuildSha
 }

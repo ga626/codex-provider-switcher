@@ -129,11 +129,11 @@ export async function toggleAutoStart(enabled: boolean): Promise<AppState> {
   throw new Error('开机启动只在 Signalman AI 桌面应用中提供。')
 }
 
-export async function createManualBackup(): Promise<AppState> {
+export async function createManualBackup(confirmation?: string): Promise<AppState> {
   if (isTauri) {
-    return invoke<AppState>('create_manual_backup')
+    return invoke<AppState>('create_manual_backup', { confirmation })
   }
-  const webState = await tryWebBackend<AppState>('/api/backup/create', apiPost({}))
+  const webState = await tryWebBackend<AppState>('/api/backup/create', apiPost({ confirmation }))
   if (webState) {
     return webState
   }
