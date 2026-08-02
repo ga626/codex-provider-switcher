@@ -124,6 +124,23 @@ h2 {
   justify-content: flex-end;
 }
 
+.icon-button {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  color: var(--text);
+  background: var(--panel-soft);
+}
+
 .build-identity {
   color: var(--text-muted);
   font-size: 12px;
@@ -526,6 +543,42 @@ h2 {
   width: 42px;
   height: 22px;
   accent-color: var(--accent);
+}
+
+.application-settings-dialog {
+  width: min(620px, calc(100vw - 32px));
+  display: grid;
+  gap: 14px;
+}
+
+.settings-option-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px 120px;
+  gap: 12px;
+  align-items: end;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.settings-option-group p,
+.historical-backups p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-option-group label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.settings-option-group select {
+  min-height: 34px;
 }
 
 .compact-surface {
@@ -1016,6 +1069,64 @@ textarea {
 .recovery-list {
   display: grid;
   gap: 8px;
+}
+
+.recovery-group {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.recovery-group + .recovery-group {
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.recovery-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recovery-group-heading strong,
+.recovery-group-heading span {
+  display: block;
+}
+
+.recovery-group-heading span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.historical-backups {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.historical-backups summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.risk-confirmation {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  color: var(--amber);
+  background: var(--amber-soft);
+  border: 1px solid rgba(161, 98, 7, 0.25);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.risk-confirmation input {
+  margin-top: 2px;
 }
 
 .recovery-row {

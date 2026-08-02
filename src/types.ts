@@ -84,8 +84,14 @@ export type BackupItem = {
   files: number
   fileCategories: string[]
   kind: 'initial_install' | 'daily' | 'manual' | 'before_switch' | 'before_restore' | 'legacy_backup' | 'invalid_backup'
+  retentionManaged: boolean
   restoreReady?: boolean
   restoreDetail?: string
+}
+
+export type BackupPolicy = {
+  automaticLimit: number
+  manualLimit: number
 }
 
 export type ConfigurationProtectionItem = {
@@ -118,6 +124,7 @@ export type AppState = {
   configPath: string
   authPath: string
   autoStart: boolean
+  backupPolicy: BackupPolicy
   startupNotice?: {
     code: string
     detail: string
