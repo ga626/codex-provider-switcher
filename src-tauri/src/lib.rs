@@ -4058,6 +4058,7 @@ mod legacy_profile_import_tests {
             model_catalogs: Map::new(),
             profile_order: vec![profile_id.to_string()],
             auto_start: false,
+            backup_policy: default_backup_policy(),
             invariants: default_invariants(),
         }
     }
