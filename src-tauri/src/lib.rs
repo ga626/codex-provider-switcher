@@ -147,8 +147,27 @@ pub struct BackupItem {
     pub files: usize,
     pub file_categories: Vec<String>,
     pub kind: String,
+    pub retention_managed: bool,
     pub restore_ready: bool,
     pub restore_detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupPolicy {
+    pub automatic_limit: usize,
+    pub manual_limit: usize,
+}
+
+fn default_backup_policy() -> BackupPolicy {
+    BackupPolicy {
+        automatic_limit: 3,
+        manual_limit: 3,
+    }
+}
+
+fn normalized_backup_limit(value: usize) -> usize {
+    value.clamp(1, 10)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,6 +265,7 @@ pub struct AppState {
     pub config_path: String,
     pub auth_path: String,
     pub auto_start: bool,
+    pub backup_policy: BackupPolicy,
     pub startup_notice: Option<StartupNotice>,
     pub tray_enabled: bool,
     pub safe_mode: bool,
@@ -376,6 +396,8 @@ struct StoredCatalog {
     profile_order: Vec<String>,
     #[serde(default)]
     auto_start: bool,
+    #[serde(default = "default_backup_policy")]
+    backup_policy: BackupPolicy,
     #[serde(default)]
     invariants: Value,
 }
@@ -891,6 +913,7 @@ fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
         model_catalogs: Map::new(),
         profile_order: Vec::new(),
         auto_start: false,
+        backup_policy: default_backup_policy(),
         invariants: default_invariants(),
     })
 }
@@ -1788,22 +1811,31 @@ fn list_backups() -> Result<Vec<BackupItem>, SwitcherError> {
         let manifest = fs::read_to_string(path.join("manifest.json"))
             .ok()
             .and_then(|text| serde_json::from_str::<BackupManifest>(&text).ok());
-        let (kind, restore_ready, restore_detail) = match manifest.as_ref() {
+        let (kind, retention_managed, restore_ready, restore_detail) = match manifest.as_ref() {
+            Some(manifest) if !manifest.retention_managed && manifest.reason != "initial_install" => (
+                "legacy_backup".to_string(),
+                false,
+                false,
+                "这是旧版恢复目录，未纳入当前保留规则。不会自动删除；请先核对创建时间和文件数，再决定是否整理。".to_string(),
+            ),
             Some(manifest) => match backup_manifest_health(&path, manifest) {
                 Ok(()) => (
                     manifest.reason.clone(),
+                    manifest.retention_managed,
                     true,
                     "需输入“恢复”确认；检测到外部修改时会停止，不会覆盖 MCP、插件和项目设置。"
                         .to_string(),
                 ),
                 Err(error) => (
                     manifest.reason.clone(),
+                    manifest.retention_managed,
                     false,
                     format!("这个恢复点未通过完整性检查，无法自动恢复：{error}"),
                 ),
             },
             None => (
                 "invalid_backup".to_string(),
+                false,
                 false,
                 "这是未完成或旧格式的备份目录，不是可恢复点；请在恢复中心的整理流程中查看。"
                     .to_string(),
@@ -1819,6 +1851,7 @@ fn list_backups() -> Result<Vec<BackupItem>, SwitcherError> {
             files,
             file_categories,
             kind,
+            retention_managed,
             restore_ready,
             restore_detail,
         });
@@ -1917,6 +1950,7 @@ fn app_state() -> Result<AppState, SwitcherError> {
         config_path: config_path()?.display().to_string(),
         auth_path: auth_path()?.display().to_string(),
         auto_start: catalog.auto_start,
+        backup_policy: catalog.backup_policy.clone(),
         startup_notice: None,
         tray_enabled: false,
         safe_mode: true,
@@ -1973,6 +2007,7 @@ fn load_catalog_read_only() -> StoredCatalog {
             model_catalogs: Map::new(),
             profile_order: Vec::new(),
             auto_start: false,
+            backup_policy: default_backup_policy(),
             invariants: default_invariants(),
         });
     };
@@ -1986,6 +2021,7 @@ fn load_catalog_read_only() -> StoredCatalog {
                 model_catalogs: Map::new(),
                 profile_order: Vec::new(),
                 auto_start: false,
+                backup_policy: default_backup_policy(),
                 invariants: default_invariants(),
             })
         })
@@ -2001,6 +2037,7 @@ fn startup_safe_state(notice: StartupNotice) -> Result<AppState, SwitcherError> 
         config_path: config_path()?.display().to_string(),
         auth_path: auth_path()?.display().to_string(),
         auto_start: false,
+        backup_policy: catalog.backup_policy.clone(),
         startup_notice: Some(notice),
         tray_enabled: false,
         safe_mode: true,
@@ -2972,11 +3009,10 @@ fn pending_backup_id() -> Option<String> {
         .map(|transaction| transaction.backup_id)
 }
 
-fn backup_retention_bucket(reason: &str) -> Option<(&'static str, usize)> {
+fn backup_retention_bucket(reason: &str, policy: &BackupPolicy) -> Option<(&'static str, usize)> {
     match reason {
-        "daily" | "before_switch" => Some(("automatic", 3)),
-        "manual" => Some(("manual", 3)),
-        "before_restore" => Some(("before_restore", 1)),
+        "daily" | "before_switch" | "before_restore" => Some(("automatic", normalized_backup_limit(policy.automatic_limit))),
+        "manual" => Some(("manual", normalized_backup_limit(policy.manual_limit))),
         _ => None,
     }
 }
@@ -2985,7 +3021,8 @@ fn prune_managed_backups(
     created_reason: &str,
     protected_label: &str,
 ) -> Result<usize, SwitcherError> {
-    let Some((bucket, limit)) = backup_retention_bucket(created_reason) else {
+    let policy = load_catalog()?.backup_policy;
+    let Some((bucket, limit)) = backup_retention_bucket(created_reason, &policy) else {
         return Ok(0);
     };
     let pending = pending_backup_id();
@@ -3002,7 +3039,7 @@ fn prune_managed_backups(
         let Ok(manifest) = serde_json::from_str::<BackupManifest>(&text) else {
             continue;
         };
-        let Some((candidate_bucket, _)) = backup_retention_bucket(&manifest.reason) else {
+        let Some((candidate_bucket, _)) = backup_retention_bucket(&manifest.reason, &policy) else {
             continue;
         };
         if manifest.retention_managed && candidate_bucket == bucket {
@@ -3370,9 +3407,10 @@ fn create_manual_backup(confirmation: Option<String>) -> Result<AppState, Switch
 
 pub fn create_manual_backup_core(confirmation: Option<&str>) -> Result<AppState, SwitcherError> {
     ensure_initial_backup()?;
-    if managed_manual_backup_count()? >= 3 && confirmation.map(str::trim) != Some("替换") {
+    let limit = load_catalog()?.backup_policy.manual_limit;
+    if managed_manual_backup_count()? >= limit && confirmation.map(str::trim) != Some("替换") {
         return Err(SwitcherError::Message(
-            "已保留 3 个手动恢复点。确认替换最早的手动恢复点前，请在确认窗口中继续。".to_string(),
+            format!("已保留 {limit} 个手动恢复点。确认替换最早的手动恢复点前，请在确认窗口中继续。"),
         ));
     }
     let label = unique_backup_label("manual");
@@ -3381,6 +3419,26 @@ pub fn create_manual_backup_core(confirmation: Option<&str>) -> Result<AppState,
         "已创建手动恢复点",
         "已保存当前服务商设置；恢复时只会还原本工具管理的字段。",
         "success",
+    )
+}
+
+#[tauri::command]
+fn set_backup_policy(automatic_limit: usize, manual_limit: usize) -> Result<AppState, SwitcherError> {
+    set_backup_policy_core(automatic_limit, manual_limit)
+}
+
+pub fn set_backup_policy_core(automatic_limit: usize, manual_limit: usize) -> Result<AppState, SwitcherError> {
+    let mut catalog = load_catalog()?;
+    let next = BackupPolicy {
+        automatic_limit: normalized_backup_limit(automatic_limit),
+        manual_limit: normalized_backup_limit(manual_limit),
+    };
+    catalog.backup_policy = next.clone();
+    save_catalog(&catalog)?;
+    app_state_with_activity(
+        "恢复点保留数量已更新",
+        &format!("自动保护保留 {} 个，手动保存保留 {} 个；旧版历史目录不会自动删除。", next.automatic_limit, next.manual_limit),
+        "info",
     )
 }
 
@@ -3597,13 +3655,14 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
 }
 
 #[tauri::command]
-fn switch_profile(profile_id: String, operation_id: String) -> Result<AppState, SwitcherError> {
-    switch_profile_core(profile_id, operation_id)
+fn switch_profile(profile_id: String, operation_id: String, risk_acknowledged: bool) -> Result<AppState, SwitcherError> {
+    switch_profile_core(profile_id, operation_id, risk_acknowledged)
 }
 
 pub fn switch_profile_core(
     profile_id: String,
     operation_id: String,
+    risk_acknowledged: bool,
 ) -> Result<AppState, SwitcherError> {
     let preflight: StoredSwitchPreflight =
         serde_json::from_str(&fs::read_to_string(switch_preflight_path()?)?)
@@ -3626,14 +3685,17 @@ pub fn switch_profile_core(
         .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
     let mut profile: StoredProfile = serde_json::from_value(value)?;
     let display_name = profile.name.clone();
-    if profile.api_key.trim().is_empty() || profile.model.trim().is_empty() {
+    if profile.model.trim().is_empty() {
         return Err(SwitcherError::Message(
-            "切换预览已失效：服务商的密钥或模型发生变化，请重新检查。".to_string(),
+            "切换预览已失效：服务商模型发生变化，请重新检查。".to_string(),
         ));
     }
-    if !profile.verified || profile.verification_status != "verified" {
+    let has_risk = profile.api_key.trim().is_empty()
+        || !profile.verified
+        || profile.verification_status != "verified";
+    if has_risk && !risk_acknowledged {
         return Err(SwitcherError::Message(
-            "切换预览已失效：目标服务商尚未通过服务商可用性测试。".to_string(),
+            "本次切换存在使用风险。请在确认窗口勾选“我已了解风险”后继续。".to_string(),
         ));
     }
     switch_config(&profile, &preflight.fingerprint)?;
@@ -3645,8 +3707,12 @@ pub fn switch_profile_core(
     save_catalog(&catalog)?;
     app_state_with_activity(
         &format!("已切换到 {display_name}"),
-        "已写入 Codex 服务商配置并生成回滚备份；当前认证模式不会改写登录信息，切换前的真实服务商可用性测试已通过。",
-        "success",
+        if has_risk {
+            "已写入 Codex 服务商配置并生成回滚备份；保留现有登录信息。切换前检查提示的使用风险已由用户确认。"
+        } else {
+            "已写入 Codex 服务商配置并生成回滚备份；当前认证模式不会改写登录信息，切换前的真实服务商可用性测试已通过。"
+        },
+        if has_risk { "warning" } else { "success" },
     )
 }
 
@@ -3959,6 +4025,7 @@ pub fn run() {
             sync_current_configuration,
             toggle_auto_start,
             create_manual_backup,
+            set_backup_policy,
             restore_latest_backup,
             restore_backup
         ])
@@ -3991,6 +4058,7 @@ mod legacy_profile_import_tests {
             model_catalogs: Map::new(),
             profile_order: vec![profile_id.to_string()],
             auto_start: false,
+            backup_policy: default_backup_policy(),
             invariants: default_invariants(),
         }
     }

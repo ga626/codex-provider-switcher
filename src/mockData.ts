@@ -6,6 +6,10 @@ export const initialState: AppState = {
   configPath: String.raw`C:\Users\<user>\.codex\config.toml`,
   authPath: String.raw`C:\Users\<user>\.codex\auth.json`,
   autoStart: false,
+  backupPolicy: {
+    automaticLimit: 3,
+    manualLimit: 3,
+  },
   configurationProtection: {
     baselineReady: true,
     baselineDetail: '首次启动基线备份已创建，包含本工具可能写入的 Codex 设置和本机登录信息。',
@@ -178,8 +182,8 @@ export const initialState: AppState = {
     },
   ],
   backups: [
-    { id: 'b1', time: '2026-07-01 22:10', label: 'before-20260701-221054', files: 3, fileCategories: ['Codex 设置', '本机登录信息', '恢复说明'], kind: 'before_switch', restoreReady: true, restoreDetail: '可安全恢复：当前服务商设置仍与该次切换后的状态一致。' },
-    { id: 'b2', time: '2026-07-01 11:27', label: 'before-20260701-112724', files: 3, fileCategories: ['Codex 设置', '本机登录信息', '恢复说明'], kind: 'before_switch', restoreReady: false, restoreDetail: '这是较早的恢复点。请先恢复最近一次，再继续回退。' },
-    { id: 'b3', time: '2026-06-30 10:34', label: 'initial-install', files: 3, fileCategories: ['Codex 设置', '本机登录信息', '恢复说明'], kind: 'initial_install', restoreReady: false, restoreDetail: '首次启动基线备份会一直保留；为避免覆盖后续修改，请按时间从最近恢复点逐步回退。' },
+    { id: 'b1', time: '2026-07-01 22:10', label: 'before-20260701-221054', files: 3, fileCategories: ['Codex 设置', '本机登录信息', '恢复说明'], kind: 'before_switch', retentionManaged: true, restoreReady: true, restoreDetail: '可安全恢复：当前服务商设置仍与该次切换后的状态一致。' },
+    { id: 'b2', time: '2026-07-01 11:27', label: 'before-20260701-112724', files: 3, fileCategories: ['Codex 设置', '本机登录信息', '恢复说明'], kind: 'before_switch', retentionManaged: true, restoreReady: false, restoreDetail: '这是较早的恢复点。请先恢复最近一次，再继续回退。' },
+    { id: 'b3', time: '2026-06-30 10:34', label: 'initial-install', files: 3, fileCategories: ['Codex 设置', '本机登录信息', '恢复说明'], kind: 'initial_install', retentionManaged: false, restoreReady: false, restoreDetail: '首次启动基线备份会一直保留；为避免覆盖后续修改，请按时间从最近恢复点逐步回退。' },
   ],
 }

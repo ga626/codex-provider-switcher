@@ -146,6 +146,7 @@ export async function createManualBackup(confirmation?: string): Promise<AppStat
     files: 3,
     fileCategories: ['Codex 设置', '本机登录信息', '恢复说明'],
     kind: 'manual',
+    retentionManaged: true,
     restoreReady: true,
     restoreDetail: '需输入“恢复”确认；开发预览不会写入真实 Codex 配置。',
   })
@@ -182,6 +183,22 @@ export async function restoreBackup(backupId: string, confirmation: string): Pro
     detail: '开发预览不会写入真实 Codex 配置。',
     tone: 'success',
   })
+  return structuredClone(mockState)
+}
+
+export async function setBackupPolicy(automaticLimit: number, manualLimit: number): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('set_backup_policy', { automaticLimit, manualLimit })
+  }
+  const webState = await tryWebBackend<AppState>('/api/backup/policy', apiPost({ automaticLimit, manualLimit }))
+  if (webState) {
+    return webState
+  }
+  await mockDelay()
+  mockState.backupPolicy = {
+    automaticLimit: Math.min(10, Math.max(1, automaticLimit)),
+    manualLimit: Math.min(10, Math.max(1, manualLimit)),
+  }
   return structuredClone(mockState)
 }
 
@@ -456,11 +473,11 @@ export async function prepareSwitch(profileId: string): Promise<SwitchPreflight>
   throw new Error('开发预览不执行服务商切换。请使用桌面开发版或本机后端进行真实验证。')
 }
 
-export async function switchProfile(profileId: string, operationId: string): Promise<AppState> {
+export async function switchProfile(profileId: string, operationId: string, riskAcknowledged = false): Promise<AppState> {
   if (isTauri) {
-    return invoke<AppState>('switch_profile', { profileId, operationId })
+    return invoke<AppState>('switch_profile', { profileId, operationId, riskAcknowledged })
   }
-  const webState = await tryWebBackend<AppState>('/api/profiles/switch', apiPost({ profileId, operationId }))
+  const webState = await tryWebBackend<AppState>('/api/profiles/switch', apiPost({ profileId, operationId, riskAcknowledged }))
   if (webState) {
     return webState
   }

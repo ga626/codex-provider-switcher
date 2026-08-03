@@ -11,12 +11,12 @@ import {
   LayoutDashboard,
   PlugZap,
   Plus,
-  Power,
   RefreshCcw,
   RotateCcw,
   Save,
   Search,
   Server,
+  Settings,
   ShieldCheck,
   Star,
   Trash2,
@@ -41,12 +41,13 @@ import {
   setDefaultProfile,
   syncCurrentConfiguration,
   switchProfile,
+  setBackupPolicy,
   toggleAutoStart,
   verifyProfile,
 } from './adapter'
 import type { AppState, BackupItem, ConfigurationProtection, EditableProfile, ModelCatalog, ProviderProfile, SwitchPreflight, UpdateInfo, ValidationCheck } from './types'
 
-type ViewId = 'providers' | 'models' | 'switch-check' | 'protection' | 'application' | 'timeline'
+type ViewId = 'providers' | 'models' | 'switch-check' | 'protection' | 'timeline'
 
 const emptyProfile: EditableProfile = {
   id: '',
@@ -210,6 +211,7 @@ function App() {
   const [manualModelConfirm, setManualModelConfirm] = useState<string | null>(null)
   const [syncConfirm, setSyncConfirm] = useState(false)
   const [restartNotice, setRestartNotice] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [draggedProviderId, setDraggedProviderId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -275,6 +277,7 @@ function App() {
   const configChecks = state?.checks ?? []
   const switchGateChecks = [...configChecks, ...profileConfigChecks, ...availabilityChecks]
   const requiredFailures = switchGateChecks.filter((check) => !check.ok && check.severity === 'required').length
+  const riskCount = switchGateChecks.filter((check) => !check.ok && check.severity !== 'required').length
   const hasUnsavedChanges = !draftMatchesProfile(draft, selectedProfile)
   const latestActivity = state?.activity[0]
   const canSwitch = Boolean(
@@ -388,6 +391,9 @@ function App() {
   }
 
   async function handleUpdate() {
+    if (state?.runtimeMode !== 'tauri_native') {
+      return
+    }
     if (isStoreManagedBuild) {
       setUpdateBusy(true)
       try {
@@ -446,11 +452,11 @@ function App() {
     }
   }
 
-  async function confirmSwitch() {
+  async function confirmSwitch(riskAcknowledged: boolean) {
     if (!switchConfirm) return
     const { profileId, operationId } = switchConfirm
     setSwitchConfirm(null)
-    await runAction('switch', () => switchProfile(profileId, operationId))
+    await runAction('switch', () => switchProfile(profileId, operationId, riskAcknowledged))
   }
 
   if (!state && error) {
@@ -480,31 +486,21 @@ function App() {
 
   const navItems: Array<{ id: ViewId; label: string; note: string; icon: React.ReactNode }> = [
     { id: 'providers', label: '服务商', note: `${state.profiles.length} 个配置`, icon: <LayoutDashboard size={17} /> },
-    { id: 'application', label: '应用设置', note: state.autoStart ? '开机启动已开启' : '开机启动未开启', icon: <Power size={17} /> },
     { id: 'models', label: '模型目录', note: selectedModelCatalog?.status === 'ok' ? '已同步' : '待刷新', icon: <Boxes size={17} /> },
-    { id: 'switch-check', label: '切换前检查', note: !selectedProfile ? '先新增服务商' : hasUnsavedChanges ? '请先保存' : requiredFailures === 0 ? '可以切换' : `${requiredFailures} 项待处理`, icon: <ShieldCheck size={17} /> },
+    { id: 'switch-check', label: '切换前检查', note: !selectedProfile ? '先新增服务商' : hasUnsavedChanges ? '请先保存' : requiredFailures > 0 ? `${requiredFailures} 项待处理` : riskCount > 0 ? `${riskCount} 项风险可继续` : '可以切换', icon: <ShieldCheck size={17} /> },
     { id: 'protection', label: '配置保护', note: state.configurationProtection.baselineReady ? '备份已就绪' : '需要处理', icon: <ShieldCheck size={17} /> },
     { id: 'timeline', label: '活动记录', note: latestActivity?.time ?? '暂无记录', icon: <Activity size={17} /> },
   ]
   const selectedIsCurrent = Boolean(selectedProfile?.active)
-  const updateLabel = updateBusy
-    ? '正在检查'
-    : isStoreManagedBuild
-      ? '在 Store 检查更新'
-      : !isGitHubReleaseBuild
-        ? '开发版不检查更新'
-      : updateInfo?.available
-      ? `下载 v${updateInfo.latestVersion}`
-      : updateInfo
-        ? '已是最新版'
-        : '检查更新'
-  const buildChannelLabel = __CODEX_RELEASE_CHANNEL__ === 'stable'
-    ? '稳定版'
-    : __CODEX_RELEASE_CHANNEL__ === 'candidate'
-      ? '维护候选'
-      : __CODEX_RELEASE_CHANNEL__ === 'store'
-        ? '商店版'
-        : '开发版'
+  const buildChannelLabel = state.runtimeMode !== 'tauri_native'
+    ? '本地预览'
+    : __CODEX_RELEASE_CHANNEL__ === 'stable'
+      ? '稳定版'
+      : __CODEX_RELEASE_CHANNEL__ === 'candidate'
+        ? '维护候选'
+        : __CODEX_RELEASE_CHANNEL__ === 'store'
+          ? '商店版'
+          : '开发版'
 
   return (
     <main className="app-shell" data-view={activeView}>
@@ -520,19 +516,8 @@ function App() {
           <span className="build-identity" title="用于确认当前运行的版本和构建来源">
             {buildChannelLabel} v{__APP_VERSION__} · {__CODEX_BUILD_SHA__.slice(0, 7)}
           </span>
-          <button
-            className="ghost-button update-button"
-            type="button"
-            onClick={handleUpdate}
-            disabled={updateBusy || (!isStoreManagedBuild && !isGitHubReleaseBuild)}
-            title={isStoreManagedBuild ? '在 Microsoft Store 中检查更新' : isGitHubReleaseBuild ? (updateInfo?.available ? `下载 ${updateInfo.latestVersion} 安装包` : '检查 GitHub Release 更新') : '开发版和维护者候选版不检查公开更新'}
-          >
-            {updateBusy
-              ? <RefreshCcw className="spin" size={15} />
-              : updateInfo && !updateInfo.available && !isStoreManagedBuild
-                ? <CheckCircle2 size={15} />
-                : <Download size={15} />}
-            {updateLabel}
+          <button className="icon-button" type="button" onClick={() => setSettingsOpen(true)} title="应用设置" aria-label="应用设置">
+            <Settings size={17} />
           </button>
         </div>
       </header>
@@ -583,7 +568,7 @@ function App() {
           preflight={switchConfirm}
           busy={busy !== null}
           onCancel={() => setSwitchConfirm(null)}
-          onConfirm={() => void confirmSwitch()}
+          onConfirm={(riskAcknowledged) => void confirmSwitch(riskAcknowledged)}
         />
       )}
 
@@ -687,6 +672,7 @@ function App() {
             activeView={activeView}
             selectedProfile={selectedProfile}
             requiredFailures={requiredFailures}
+            riskCount={riskCount}
             selectedModelCatalog={selectedModelCatalog}
             canSwitch={canSwitch}
             selectedIsCurrent={selectedIsCurrent}
@@ -729,17 +715,10 @@ function App() {
               <ConfigurationProtectionWorkspace
                 protection={state.configurationProtection}
                 backups={state.backups}
+                backupPolicy={state.backupPolicy}
                 busy={busy}
                 onRestoreRequested={(backup) => setRestoreConfirm(backup)}
                 onBackupRequested={(confirmation) => void runAction('create-manual-backup', () => createManualBackup(confirmation))}
-              />
-            )}
-            {activeView === 'application' && (
-              <ApplicationSettingsWorkspace
-                autoStart={state.autoStart}
-                desktopAvailable={state.runtimeMode === 'tauri_native'}
-                busy={busy}
-                onToggle={(enabled) => void runAction('toggle-auto-start', () => toggleAutoStart(enabled))}
               />
             )}
             {activeView === 'timeline' && <TimelineWorkspace state={state} />}
@@ -764,6 +743,23 @@ function App() {
         />
       )}
       {restartNotice && <RestartCodexNoticeDialog onClose={() => setRestartNotice(false)} />}
+      {settingsOpen && (
+        <ApplicationSettingsDialog
+          autoStart={state.autoStart}
+          backupPolicy={state.backupPolicy}
+          desktopAvailable={state.runtimeMode === 'tauri_native'}
+          busy={busy}
+          buildChannelLabel={buildChannelLabel}
+          updateInfo={updateInfo}
+          updateBusy={updateBusy}
+          updateSupported={state.runtimeMode === 'tauri_native' && (isStoreManagedBuild || isGitHubReleaseBuild)}
+          storeManaged={isStoreManagedBuild}
+          onClose={() => setSettingsOpen(false)}
+          onToggle={(enabled) => void runAction('toggle-auto-start', () => toggleAutoStart(enabled))}
+          onBackupPolicyChange={(automaticLimit, manualLimit) => void runAction('set-backup-policy', () => setBackupPolicy(automaticLimit, manualLimit))}
+          onUpdate={() => void handleUpdate()}
+        />
+      )}
     </main>
   )
 }
@@ -772,6 +768,7 @@ function WorkspaceHeader({
   activeView,
   selectedProfile,
   requiredFailures,
+  riskCount,
   selectedModelCatalog,
   canSwitch,
   selectedIsCurrent,
@@ -780,6 +777,7 @@ function WorkspaceHeader({
   activeView: ViewId
   selectedProfile: ProviderProfile | undefined
   requiredFailures: number
+  riskCount: number
   selectedModelCatalog: ModelCatalog | undefined
   canSwitch: boolean
   selectedIsCurrent: boolean
@@ -797,15 +795,11 @@ function WorkspaceHeader({
     },
     'switch-check': {
       title: '切换前检查',
-      note: !selectedProfile ? '先新增并保存服务商。' : requiredFailures === 0 ? '已满足切换条件。' : '请先处理未通过的项目。',
+      note: !selectedProfile ? '先新增并保存服务商。' : requiredFailures > 0 ? '请先处理会阻止安全写入的项目。' : riskCount > 0 ? '可以切换，但请先了解使用风险。' : '已满足切换条件。',
     },
     protection: {
       title: '配置保护',
       note: '查看备份、受保护内容和恢复入口。',
-    },
-    application: {
-      title: '应用设置',
-      note: '控制应用本身的启动方式，不会改动 Codex 配置。',
     },
     timeline: {
       title: '活动记录',
@@ -821,8 +815,8 @@ function WorkspaceHeader({
       </div>
       {showSwitchAction && (
         <div className="workspace-header-actions">
-          <span className={`workspace-badge ${selectedProfile && requiredFailures === 0 ? 'ok' : 'warning'}`}>
-            {!selectedProfile ? '未选择服务商' : requiredFailures === 0 ? '可以切换' : `${requiredFailures} 项待处理`}
+          <span className={`workspace-badge ${selectedProfile && requiredFailures === 0 ? (riskCount > 0 ? 'warning' : 'ok') : 'warning'}`}>
+            {!selectedProfile ? '未选择服务商' : requiredFailures > 0 ? `${requiredFailures} 项阻止切换` : riskCount > 0 ? `可切换，但有 ${riskCount} 项风险` : '可以切换'}
           </span>
           <button className="primary-button header-switch-button" type="button" onClick={onSwitchRequested} disabled={!canSwitch}>
             <PlugZap size={16} />
@@ -1194,12 +1188,14 @@ function SafetyWorkspace({
 function ConfigurationProtectionWorkspace({
   protection,
   backups,
+  backupPolicy,
   busy,
   onRestoreRequested,
   onBackupRequested,
 }: {
   protection: ConfigurationProtection
   backups: BackupItem[]
+  backupPolicy: AppState['backupPolicy']
   busy: string | null
   onRestoreRequested: (backup: BackupItem) => void
   onBackupRequested: (confirmation?: string) => void
@@ -1213,9 +1209,22 @@ function ConfigurationProtectionWorkspace({
     legacy_backup: '旧版备份',
     invalid_backup: '未完成的备份目录',
   }
-  const recoverableBackups = backups.filter((backup) => backup.restoreReady)
-  const invalidBackupCount = backups.length - recoverableBackups.length
-  const manualBackupLimitReached = backups.filter((backup) => backup.kind === 'manual').length >= 3
+  const baselineBackups = backups.filter((backup) => backup.kind === 'initial_install')
+  const automaticBackups = backups.filter((backup) => backup.restoreReady && ['daily', 'before_switch', 'before_restore'].includes(backup.kind))
+  const manualBackups = backups.filter((backup) => backup.restoreReady && backup.kind === 'manual')
+  const historicalBackups = backups.filter((backup) => !backup.retentionManaged && backup.kind !== 'initial_install')
+  const manualBackupLimitReached = manualBackups.length >= backupPolicy.manualLimit
+  const RecoveryGroup = ({ title, note, items, permanent }: { title: string; note: string; items: BackupItem[]; permanent?: boolean }) => (
+    <section className="recovery-group">
+      <div className="recovery-group-heading"><div><strong>{title}</strong><span>{note}</span></div>{permanent && <span className="section-meta">永久保留</span>}</div>
+      {items.length > 0 ? <div className="recovery-list">{items.map((backup) => (
+        <div className="recovery-row" key={backup.id}>
+          <div><strong>{backupTitle[backup.kind]}</strong><span>{backup.time} · {backup.files} 个文件</span><div className="recovery-categories">{backup.fileCategories.map((category) => <span key={category}>{category}</span>)}</div></div>
+          <button className="danger-button" type="button" onClick={() => onRestoreRequested(backup)} disabled={busy !== null} title={backup.restoreDetail}><RotateCcw size={16} />安全恢复</button>
+        </div>
+      ))}</div> : <p className="section-meta">暂时没有恢复点。</p>}
+    </section>
+  )
   return (
     <div className="workspace-stack">
       <section className="surface-panel protection-overview">
@@ -1261,13 +1270,13 @@ function ConfigurationProtectionWorkspace({
         <div className="section-heading-row">
           <div><span className="eyebrow">恢复中心</span><h3>已保护的恢复点</h3></div>
           <div className="recovery-actions">
-            <span className="section-meta">每天首次打开会自动备份；也可以保存当前状态。</span>
+            <span className="section-meta">自动保护保留 {backupPolicy.automaticLimit} 个；手动保存保留 {backupPolicy.manualLimit} 个。</span>
             <button className="primary-button" type="button" onClick={() => {
               if (!manualBackupLimitReached) {
                 onBackupRequested()
                 return
               }
-              if (window.confirm('已保留 3 个手动恢复点。继续将替换最早的手动恢复点，是否继续？')) {
+              if (window.confirm(`已保留 ${backupPolicy.manualLimit} 个手动恢复点。继续将替换最早的手动恢复点，是否继续？`)) {
                 onBackupRequested('替换')
               }
             }} disabled={busy !== null}>
@@ -1276,63 +1285,127 @@ function ConfigurationProtectionWorkspace({
             </button>
           </div>
         </div>
-        {recoverableBackups.length > 0 ? <div className="recovery-list">
-          {recoverableBackups.map((backup) => (
-            <div className="recovery-row" key={backup.id}>
-              <div>
-                <strong>{backupTitle[backup.kind]}</strong>
-                <span>{backup.time} · {backup.files} 个文件</span>
-                <div className="recovery-categories">{backup.fileCategories.map((category) => <span key={category}>{category}</span>)}</div>
-              </div>
-              <button className="danger-button" type="button" onClick={() => onRestoreRequested(backup)} disabled={busy !== null} title={backup.restoreDetail}>
-                <RotateCcw size={16} />
-                安全恢复
-              </button>
-            </div>
-          ))}
-        </div> : <div className="empty-state recovery-empty"><RotateCcw size={26} /><strong>首次启动基线备份尚未完成</strong><span>完成前不会允许切换服务商。</span></div>}
-        {invalidBackupCount > 0 && <p className="section-meta">检测到 {invalidBackupCount} 个未完成或损坏的备份目录，已从安全恢复列表隐藏，不会自动删除。</p>}
+        <RecoveryGroup title="首次基线" note="首次运行前的原始状态，只保留一份。" items={baselineBackups} permanent />
+        <RecoveryGroup title="自动保护" note="每天首次打开、切换前和恢复前自动保存。" items={automaticBackups} />
+        <RecoveryGroup title="手动保存" note="由你主动保存当前可用状态。" items={manualBackups} />
+        {historicalBackups.length > 0 && <details className="historical-backups"><summary>历史项目（{historicalBackups.length}）</summary><p>这些旧目录不会参与恢复或自动清理；它们保留在本机，等待你确认后再整理。</p></details>}
       </section>
     </div>
   )
 }
 
-function ApplicationSettingsWorkspace({
+function ApplicationSettingsDialog({
   autoStart,
+  backupPolicy,
   desktopAvailable,
   busy,
+  buildChannelLabel,
+  updateInfo,
+  updateBusy,
+  updateSupported,
+  storeManaged,
+  onClose,
   onToggle,
+  onBackupPolicyChange,
+  onUpdate,
 }: {
   autoStart: boolean
+  backupPolicy: AppState['backupPolicy']
   desktopAvailable: boolean
   busy: string | null
+  buildChannelLabel: string
+  updateInfo: UpdateInfo | null
+  updateBusy: boolean
+  updateSupported: boolean
+  storeManaged: boolean
+  onClose: () => void
   onToggle: (enabled: boolean) => void
+  onBackupPolicyChange: (automaticLimit: number, manualLimit: number) => void
+  onUpdate: () => void
 }) {
   const disabled = !desktopAvailable || busy !== null
+  const updateStatus = updateBusy
+    ? '正在检查更新…'
+    : !updateSupported
+      ? desktopAvailable ? '当前版本不检查公开更新' : '本地预览不检查公开更新'
+      : storeManaged
+        ? '在 Microsoft Store 获取更新'
+        : updateInfo?.available
+          ? `发现新版本 v${updateInfo.latestVersion}`
+          : updateInfo
+            ? '已是最新版本'
+            : '尚未检查更新'
+  const updateAction = storeManaged
+    ? '前往 Microsoft Store'
+    : updateInfo?.available
+      ? `下载 v${updateInfo.latestVersion}`
+      : '检查更新'
   return (
-    <div className="workspace-stack">
-      <section className="surface-panel application-settings-panel">
+    <div className="confirm-backdrop" role="presentation">
+      <section className="confirm-dialog application-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="application-settings-title">
         <div className="section-heading-row">
           <div>
-            <span className="eyebrow">启动方式</span>
-            <h3>开机后自动打开</h3>
+            <span className="eyebrow">应用设置</span>
+            <h2 id="application-settings-title">应用偏好</h2>
           </div>
-          <span className={`section-meta ${autoStart ? 'status-ok' : ''}`}>{autoStart ? '已开启' : '默认关闭'}</span>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="关闭设置"><X size={16} /></button>
         </div>
-        <p>只在你主动开启后，Signalman AI 才会在下次登录 Windows 时自动打开。安装、升级和首次使用都不会自动开启。</p>
-        <label className="setting-toggle-row">
-          <span>
-            <strong>开启开机启动</strong>
-            <small>{desktopAvailable ? '关闭后，下次登录不会自动打开应用。' : '开发预览和 Web 诊断模式不会修改 Windows 启动项。'}</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={autoStart}
-            disabled={disabled}
-            onChange={(event) => onToggle(event.target.checked)}
-            aria-label="开启开机启动"
-          />
-        </label>
+        <section className="settings-section" aria-labelledby="settings-startup-title">
+          <div className="settings-section-heading">
+            <h3 id="settings-startup-title">启动</h3>
+            <p>控制应用何时打开，不会改变 Codex 的启动方式。</p>
+          </div>
+          <label className="setting-toggle-row">
+            <span>
+              <strong>开机后自动打开</strong>
+              <small>{desktopAvailable ? '关闭后，下次登录 Windows 不会自动打开应用。' : '开发预览和 Web 诊断模式不会修改 Windows 启动项。'}</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={autoStart}
+              disabled={disabled}
+              onChange={(event) => onToggle(event.target.checked)}
+              aria-label="开机后自动打开"
+            />
+          </label>
+        </section>
+        <section className="settings-section" aria-labelledby="settings-protection-title">
+          <div className="settings-section-heading">
+            <h3 id="settings-protection-title">恢复保护</h3>
+            <p>首次启动基线永久保留。恢复和手动保存请前往“配置保护”。</p>
+          </div>
+          <div className="settings-option-group">
+            <label>
+              自动保护
+              <select value={backupPolicy.automaticLimit} disabled={busy !== null} onChange={(event) => onBackupPolicyChange(Number(event.target.value), backupPolicy.manualLimit)}>
+                {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} 个</option>)}
+              </select>
+            </label>
+            <label>
+              手动保存
+              <select value={backupPolicy.manualLimit} disabled={busy !== null} onChange={(event) => onBackupPolicyChange(backupPolicy.automaticLimit, Number(event.target.value))}>
+                {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} 个</option>)}
+              </select>
+            </label>
+          </div>
+        </section>
+        <section className="settings-section" aria-labelledby="settings-update-title">
+          <div className="settings-section-heading">
+            <h3 id="settings-update-title">更新</h3>
+            <p>只从受信任的发布渠道获取新版本。</p>
+          </div>
+          <div className="settings-update-row">
+            <div>
+              <strong>v{__APP_VERSION__}</strong>
+              <span>{buildChannelLabel}</span>
+              <small>{updateStatus}</small>
+            </div>
+            <button className="ghost-button settings-update-button" type="button" onClick={onUpdate} disabled={updateBusy || !updateSupported}>
+              {updateBusy ? <RefreshCcw className="spin" size={15} /> : updateInfo?.available && !storeManaged ? <Download size={15} /> : updateInfo && !updateInfo.available && !storeManaged ? <CheckCircle2 size={15} /> : <RefreshCcw size={15} />}
+              {updateAction}
+            </button>
+          </div>
+        </section>
       </section>
     </div>
   )
@@ -1384,8 +1457,10 @@ function SwitchConfirmDialog({
   preflight: SwitchPreflight
   busy: boolean
   onCancel: () => void
-  onConfirm: () => void
+  onConfirm: (riskAcknowledged: boolean) => void
 }) {
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false)
+  const hasRisk = Boolean(preflight.riskDetail)
   return (
     <div className="confirm-backdrop" role="presentation">
       <section className="confirm-dialog switch-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="switch-dialog-title">
@@ -1400,11 +1475,17 @@ function SwitchConfirmDialog({
             <div><dt>保护检查</dt><dd>{preflight.protectedDetail}</dd></div>
             {preflight.riskDetail && <div><dt>使用风险</dt><dd>{preflight.riskDetail}</dd></div>}
           </dl>
+          {hasRisk && (
+            <label className="risk-confirmation">
+              <input type="checkbox" checked={riskAcknowledged} onChange={(event) => setRiskAcknowledged(event.target.checked)} />
+              <span>我已了解：这不会影响安全写入检查，但目标服务商的实际可用性尚未由本工具确认。</span>
+            </label>
+          )}
           <p>此预览有效至 {preflight.expiresAt}。完成后请关闭当前 Codex 会话，并在新的会话中确认实际 provider 使用情况。</p>
         </div>
         <div className="command-row">
           <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
-          <button className="primary-button" type="button" onClick={onConfirm} disabled={busy}>
+          <button className="primary-button" type="button" onClick={() => onConfirm(riskAcknowledged)} disabled={busy || (hasRisk && !riskAcknowledged)}>
             <PlugZap size={16} />
             确认切换
           </button>

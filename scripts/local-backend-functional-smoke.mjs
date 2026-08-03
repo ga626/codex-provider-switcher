@@ -81,8 +81,8 @@ async function prepareSwitch(profileId) {
   return api('/api/profiles/prepare-switch', { profileId })
 }
 
-async function confirmSwitch(profileId, operationId) {
-  return api('/api/profiles/switch', { profileId, operationId })
+async function confirmSwitch(profileId, operationId, riskAcknowledged = false) {
+  return api('/api/profiles/switch', { profileId, operationId, riskAcknowledged })
 }
 
 async function assertMissingFile(path, message) {
@@ -541,6 +541,10 @@ try {
   assert(fourthManualWithoutConfirmation.includes('已保留 3 个手动恢复点'), 'fourth manual backup did not require replacement confirmation')
   const fourthManualWithConfirmation = await api('/api/backup/create', { confirmation: '替换' })
   assert(fourthManualWithConfirmation.backups.filter((item) => item.kind === 'manual').length === 3, 'confirmed manual backup did not prune the oldest managed recovery point')
+  const updatedPolicy = await api('/api/backup/policy', { automaticLimit: 2, manualLimit: 2 })
+  assert(updatedPolicy.backupPolicy.automaticLimit === 2 && updatedPolicy.backupPolicy.manualLimit === 2, 'backup policy was not persisted')
+  const reducedManualBackups = await api('/api/backup/create', { confirmation: '替换' })
+  assert(reducedManualBackups.backups.filter((item) => item.kind === 'manual').length === 2, 'updated manual retention policy was not applied')
 
   const pendingTransactionPath = join(localAppData, 'CodeX Provider Switcher', 'pending-config-transaction.json')
   await writeFile(configPath, switchedConfig.replace('model = "reasoning-current"', 'model = "interrupted-write"'), 'utf8')
@@ -581,6 +585,16 @@ try {
   assert(responsesProbeRequestCount === responsesBeforeRiskPreflight, 'risk preflight retried a remote compatibility probe')
   assert(await readFile(configPath, 'utf8') === originalConfig, 'risk preflight changed config.toml')
   assert(await readFile(authPath, 'utf8') === originalAuth, 'risk preflight changed auth.json')
+  const unacknowledgedRisk = await expectApiFailure('/api/profiles/switch', {
+    profileId: noCredit.id,
+    operationId: riskPreflight.operationId,
+  })
+  assert(unacknowledgedRisk.includes('勾选'), 'warning-only switch did not require an explicit risk acknowledgement')
+  assert(await readFile(configPath, 'utf8') === originalConfig, 'unacknowledged risk switch changed config.toml')
+  const riskSwitched = await confirmSwitch(noCredit.id, riskPreflight.operationId, true)
+  assert(riskSwitched.currentProfileId === noCredit.id, 'acknowledged risk switch did not complete')
+  assert(riskSwitched.activity[0]?.tone === 'warning', 'acknowledged risk switch was not recorded as a warning')
+  await writeFile(configPath, originalConfig, 'utf8')
 
   const externalAuthentication = { ...profile, id: 'external-auth', name: 'External Authentication', apiKey: '' }
   await api('/api/profiles/save', { profile: externalAuthentication })
@@ -650,14 +664,14 @@ try {
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models and deduplicated results',
       'authenticated /v1/responses probes distinguish standard, compatible, and unconfirmed response shapes',
-      'unverified provider availability and external authentication are shown as risks, while unsafe configuration writes remain blocked',
+      'unverified provider availability and external authentication are shown as risks, require an explicit acknowledgement to continue, while unsafe configuration writes remain blocked',
       'verification diagnostics classify endpoint, response shape, billing, and service errors without changing Codex config/auth',
       'default selection persisted',
       'provider list order persisted without changing the active Codex configuration',
       'first launch created one protected baseline without a duplicate daily backup; switching removed legacy api_key while preserving unrelated custom-provider data and existing auth state',
       'same-address profiles retain the selected current-provider identity after a safe switch',
       'switch preflight rejects drift, while restore points require confirmation, reject provider-field conflicts, and preserve later MCP/auth additions',
-      'manual recovery points require confirmation before replacing the oldest managed point and remain capped at three',
+      'manual recovery points require confirmation before replacement and follow the persisted retention limit',
       'startup automatically recovered an interrupted provider-config write without changing the current auth state',
       'malformed existing auth state blocked the preflight without leaving a half-switch',
       'current configuration sync updates only the local profile directory and invalidates the previous model verification',

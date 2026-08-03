@@ -1,7 +1,7 @@
 use codex_switcher_tauri_lib::{
     check_for_update_core, create_manual_backup_core, delete_profile_core, load_state_core,
     prepare_switch_core, refresh_models_core, reorder_profiles_core, restore_backup_core,
-    restore_latest_backup_core, save_profile_core, set_default_profile_core, switch_profile_core,
+    restore_latest_backup_core, save_profile_core, set_backup_policy_core, set_default_profile_core, switch_profile_core,
     sync_current_configuration_core, toggle_auto_start_core, verify_profile_core, AppState,
     EditableProfile, SwitcherError,
 };
@@ -318,7 +318,11 @@ fn handle_api(
                     SwitcherError::Message("缺少切换预览标识，请重新运行检查。".to_string())
                 })?
                 .to_string();
-            switch_profile_core(profile_id, operation_id).map(state_json)
+            let risk_acknowledged = request
+                .get("riskAcknowledged")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            switch_profile_core(profile_id, operation_id, risk_acknowledged).map(state_json)
         }
         ("POST", "/api/profiles/verify") => verify_profile_core(profile_id(body)?).map(state_json),
         ("POST", "/api/models/refresh") => refresh_models_core(profile_id(body)?).map(state_json),
@@ -339,6 +343,18 @@ fn handle_api(
                 .and_then(Value::as_str)
                 .map(str::to_string);
             create_manual_backup_core(confirmation.as_deref()).map(state_json)
+        }
+        ("POST", "/api/backup/policy") => {
+            let request = request_json(body)?;
+            let automatic_limit = request
+                .get("automaticLimit")
+                .and_then(Value::as_u64)
+                .unwrap_or(3) as usize;
+            let manual_limit = request
+                .get("manualLimit")
+                .and_then(Value::as_u64)
+                .unwrap_or(3) as usize;
+            set_backup_policy_core(automatic_limit, manual_limit).map(state_json)
         }
         ("POST", "/api/backup/restore-latest") => confirmation(body)
             .and_then(restore_latest_backup_core)

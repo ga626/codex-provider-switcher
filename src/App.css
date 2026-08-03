@@ -124,6 +124,23 @@ h2 {
   justify-content: flex-end;
 }
 
+.icon-button {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  color: var(--text);
+  background: var(--panel-soft);
+}
+
 .build-identity {
   color: var(--text-muted);
   font-size: 12px;
@@ -526,6 +543,104 @@ h2 {
   width: 42px;
   height: 22px;
   accent-color: var(--accent);
+}
+
+.confirm-dialog.application-settings-dialog {
+  width: min(660px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+
+.confirm-dialog.application-settings-dialog .section-heading-row {
+  margin-bottom: 0;
+}
+
+.settings-section {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.settings-section-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-section-heading h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 780;
+}
+
+.settings-section-heading p,
+.historical-backups p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-option-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-option-group label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.settings-option-group select {
+  min-height: 34px;
+}
+
+.settings-update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 2px;
+}
+
+.settings-update-row > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+
+.settings-update-row strong {
+  font-size: 14px;
+}
+
+.settings-update-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-update-row small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-update-button {
+  flex: 0 0 auto;
+  min-width: 132px;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .compact-surface {
@@ -1016,6 +1131,64 @@ textarea {
 .recovery-list {
   display: grid;
   gap: 8px;
+}
+
+.recovery-group {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.recovery-group + .recovery-group {
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.recovery-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recovery-group-heading strong,
+.recovery-group-heading span {
+  display: block;
+}
+
+.recovery-group-heading span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.historical-backups {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.historical-backups summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.risk-confirmation {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  color: var(--amber);
+  background: var(--amber-soft);
+  border: 1px solid rgba(161, 98, 7, 0.25);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.risk-confirmation input {
+  margin-top: 2px;
 }
 
 .recovery-row {
@@ -1584,7 +1757,22 @@ textarea {
 
 }
 
-.update-button {
-  min-width: 104px;
-  white-space: nowrap;
+@media (max-width: 640px) {
+  .confirm-dialog.application-settings-dialog {
+    width: min(100vw - 20px, 660px);
+    max-height: calc(100vh - 20px);
+  }
+
+  .settings-option-group {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-update-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-update-button {
+    width: 100%;
+  }
 }
