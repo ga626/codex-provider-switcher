@@ -391,6 +391,9 @@ function App() {
   }
 
   async function handleUpdate() {
+    if (state?.runtimeMode !== 'tauri_native') {
+      return
+    }
     if (isStoreManagedBuild) {
       setUpdateBusy(true)
       try {
@@ -489,24 +492,15 @@ function App() {
     { id: 'timeline', label: '活动记录', note: latestActivity?.time ?? '暂无记录', icon: <Activity size={17} /> },
   ]
   const selectedIsCurrent = Boolean(selectedProfile?.active)
-  const updateLabel = updateBusy
-    ? '正在检查'
-    : isStoreManagedBuild
-      ? '在 Store 检查更新'
-      : !isGitHubReleaseBuild
-        ? '开发版不检查更新'
-      : updateInfo?.available
-      ? `下载 v${updateInfo.latestVersion}`
-      : updateInfo
-        ? '已是最新版'
-        : '检查更新'
-  const buildChannelLabel = __CODEX_RELEASE_CHANNEL__ === 'stable'
-    ? '稳定版'
-    : __CODEX_RELEASE_CHANNEL__ === 'candidate'
-      ? '维护候选'
-      : __CODEX_RELEASE_CHANNEL__ === 'store'
-        ? '商店版'
-        : '开发版'
+  const buildChannelLabel = state.runtimeMode !== 'tauri_native'
+    ? '本地预览'
+    : __CODEX_RELEASE_CHANNEL__ === 'stable'
+      ? '稳定版'
+      : __CODEX_RELEASE_CHANNEL__ === 'candidate'
+        ? '维护候选'
+        : __CODEX_RELEASE_CHANNEL__ === 'store'
+          ? '商店版'
+          : '开发版'
 
   return (
     <main className="app-shell" data-view={activeView}>
@@ -522,20 +516,6 @@ function App() {
           <span className="build-identity" title="用于确认当前运行的版本和构建来源">
             {buildChannelLabel} v{__APP_VERSION__} · {__CODEX_BUILD_SHA__.slice(0, 7)}
           </span>
-          <button
-            className="ghost-button update-button"
-            type="button"
-            onClick={handleUpdate}
-            disabled={updateBusy || (!isStoreManagedBuild && !isGitHubReleaseBuild)}
-            title={isStoreManagedBuild ? '在 Microsoft Store 中检查更新' : isGitHubReleaseBuild ? (updateInfo?.available ? `下载 ${updateInfo.latestVersion} 安装包` : '检查 GitHub Release 更新') : '开发版和维护者候选版不检查公开更新'}
-          >
-            {updateBusy
-              ? <RefreshCcw className="spin" size={15} />
-              : updateInfo && !updateInfo.available && !isStoreManagedBuild
-                ? <CheckCircle2 size={15} />
-                : <Download size={15} />}
-            {updateLabel}
-          </button>
           <button className="icon-button" type="button" onClick={() => setSettingsOpen(true)} title="应用设置" aria-label="应用设置">
             <Settings size={17} />
           </button>
@@ -769,9 +749,15 @@ function App() {
           backupPolicy={state.backupPolicy}
           desktopAvailable={state.runtimeMode === 'tauri_native'}
           busy={busy}
+          buildChannelLabel={buildChannelLabel}
+          updateInfo={updateInfo}
+          updateBusy={updateBusy}
+          updateSupported={state.runtimeMode === 'tauri_native' && (isStoreManagedBuild || isGitHubReleaseBuild)}
+          storeManaged={isStoreManagedBuild}
           onClose={() => setSettingsOpen(false)}
           onToggle={(enabled) => void runAction('toggle-auto-start', () => toggleAutoStart(enabled))}
           onBackupPolicyChange={(automaticLimit, manualLimit) => void runAction('set-backup-policy', () => setBackupPolicy(automaticLimit, manualLimit))}
+          onUpdate={() => void handleUpdate()}
         />
       )}
     </main>
@@ -1313,60 +1299,113 @@ function ApplicationSettingsDialog({
   backupPolicy,
   desktopAvailable,
   busy,
+  buildChannelLabel,
+  updateInfo,
+  updateBusy,
+  updateSupported,
+  storeManaged,
   onClose,
   onToggle,
   onBackupPolicyChange,
+  onUpdate,
 }: {
   autoStart: boolean
   backupPolicy: AppState['backupPolicy']
   desktopAvailable: boolean
   busy: string | null
+  buildChannelLabel: string
+  updateInfo: UpdateInfo | null
+  updateBusy: boolean
+  updateSupported: boolean
+  storeManaged: boolean
   onClose: () => void
   onToggle: (enabled: boolean) => void
   onBackupPolicyChange: (automaticLimit: number, manualLimit: number) => void
+  onUpdate: () => void
 }) {
   const disabled = !desktopAvailable || busy !== null
+  const updateStatus = updateBusy
+    ? '正在检查更新…'
+    : !updateSupported
+      ? desktopAvailable ? '当前版本不检查公开更新' : '本地预览不检查公开更新'
+      : storeManaged
+        ? '在 Microsoft Store 获取更新'
+        : updateInfo?.available
+          ? `发现新版本 v${updateInfo.latestVersion}`
+          : updateInfo
+            ? '已是最新版本'
+            : '尚未检查更新'
+  const updateAction = storeManaged
+    ? '前往 Microsoft Store'
+    : updateInfo?.available
+      ? `下载 v${updateInfo.latestVersion}`
+      : '检查更新'
   return (
     <div className="confirm-backdrop" role="presentation">
       <section className="confirm-dialog application-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="application-settings-title">
         <div className="section-heading-row">
           <div>
             <span className="eyebrow">应用设置</span>
-            <h2 id="application-settings-title">使用方式与恢复点</h2>
+            <h2 id="application-settings-title">应用偏好</h2>
           </div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="关闭设置"><X size={16} /></button>
         </div>
-        <label className="setting-toggle-row">
-          <span>
-            <strong>开启开机启动</strong>
-            <small>{desktopAvailable ? '关闭后，下次登录不会自动打开应用。' : '开发预览和 Web 诊断模式不会修改 Windows 启动项。'}</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={autoStart}
-            disabled={disabled}
-            onChange={(event) => onToggle(event.target.checked)}
-            aria-label="开启开机启动"
-          />
-        </label>
-        <div className="settings-option-group">
-          <div>
-            <strong>恢复点保留数量</strong>
-            <p>首次启动基线会永久保留。自动保护和手动保存分别按数量替换最早的受管理恢复点；旧版历史目录不会自动删除。</p>
+        <section className="settings-section" aria-labelledby="settings-startup-title">
+          <div className="settings-section-heading">
+            <h3 id="settings-startup-title">启动</h3>
+            <p>控制应用何时打开，不会改变 Codex 的启动方式。</p>
           </div>
-          <label>
-            自动保护
-            <select value={backupPolicy.automaticLimit} disabled={busy !== null} onChange={(event) => onBackupPolicyChange(Number(event.target.value), backupPolicy.manualLimit)}>
-              {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} 个</option>)}
-            </select>
+          <label className="setting-toggle-row">
+            <span>
+              <strong>开机后自动打开</strong>
+              <small>{desktopAvailable ? '关闭后，下次登录 Windows 不会自动打开应用。' : '开发预览和 Web 诊断模式不会修改 Windows 启动项。'}</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={autoStart}
+              disabled={disabled}
+              onChange={(event) => onToggle(event.target.checked)}
+              aria-label="开机后自动打开"
+            />
           </label>
-          <label>
-            手动保存
-            <select value={backupPolicy.manualLimit} disabled={busy !== null} onChange={(event) => onBackupPolicyChange(backupPolicy.automaticLimit, Number(event.target.value))}>
-              {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} 个</option>)}
-            </select>
-          </label>
-        </div>
+        </section>
+        <section className="settings-section" aria-labelledby="settings-protection-title">
+          <div className="settings-section-heading">
+            <h3 id="settings-protection-title">恢复保护</h3>
+            <p>首次启动基线永久保留。恢复和手动保存请前往“配置保护”。</p>
+          </div>
+          <div className="settings-option-group">
+            <label>
+              自动保护
+              <select value={backupPolicy.automaticLimit} disabled={busy !== null} onChange={(event) => onBackupPolicyChange(Number(event.target.value), backupPolicy.manualLimit)}>
+                {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} 个</option>)}
+              </select>
+            </label>
+            <label>
+              手动保存
+              <select value={backupPolicy.manualLimit} disabled={busy !== null} onChange={(event) => onBackupPolicyChange(backupPolicy.automaticLimit, Number(event.target.value))}>
+                {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} 个</option>)}
+              </select>
+            </label>
+          </div>
+        </section>
+        <section className="settings-section" aria-labelledby="settings-update-title">
+          <div className="settings-section-heading">
+            <h3 id="settings-update-title">更新</h3>
+            <p>只从受信任的发布渠道获取新版本。</p>
+          </div>
+          <div className="settings-update-row">
+            <div>
+              <strong>v{__APP_VERSION__}</strong>
+              <span>{buildChannelLabel}</span>
+              <small>{updateStatus}</small>
+            </div>
+            <button className="ghost-button settings-update-button" type="button" onClick={onUpdate} disabled={updateBusy || !updateSupported}>
+              {updateBusy ? <RefreshCcw className="spin" size={15} /> : updateInfo?.available && !storeManaged ? <Download size={15} /> : updateInfo && !updateInfo.available && !storeManaged ? <CheckCircle2 size={15} /> : <RefreshCcw size={15} />}
+              {updateAction}
+            </button>
+          </div>
+        </section>
       </section>
     </div>
   )

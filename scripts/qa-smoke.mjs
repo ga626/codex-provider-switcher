@@ -74,9 +74,19 @@ try {
   await desktop.locator('.workspace-panel').waitFor()
   await desktop.locator('.statusbar').waitFor()
 
-  const updateButton = desktop.locator('header').getByRole('button', { name: '检查更新' })
-  await updateButton.click()
-  await desktop.locator('header').getByRole('button', { name: '已是最新版' }).waitFor()
+  if (await desktop.locator('header').getByRole('button', { name: '检查更新' }).count() !== 0) {
+    throw new Error('update action must only appear inside application settings')
+  }
+  await desktop.getByRole('button', { name: '应用设置' }).click()
+  const settingsDialog = desktop.getByRole('dialog', { name: '应用偏好' })
+  await settingsDialog.waitFor()
+  await settingsDialog.getByRole('heading', { name: '更新' }).waitFor()
+  const updateButton = settingsDialog.getByRole('button', { name: '检查更新' })
+  if (!await updateButton.isDisabled()) {
+    throw new Error('Web preview must not expose a public update action')
+  }
+  await settingsDialog.getByText('本地预览不检查公开更新').waitFor()
+  await settingsDialog.getByRole('button', { name: '关闭设置' }).click()
   await desktop.screenshot({ path: join(outputDir, 'desktop.png'), fullPage: true })
 
   const desktopMetrics = await desktop.evaluate(() => {
@@ -287,7 +297,7 @@ try {
       sidebar: { desktop: desktopSidebarMetrics, compact: compactSidebarMetrics, wide: wideSidebarMetrics },
       safety: { desktop: safetyLayout, compact: compactSafetyLayout },
     },
-    interaction: '检查更新 -> 模型目录 -> 刷新并选择模型 -> 新增服务商 -> 保存 -> 完整切换检查 -> 手动备份 -> 双重确认恢复 -> 复制 -> 删除 -> 设为默认 -> 活动记录',
+    interaction: '应用设置中的更新检查 -> 模型目录 -> 刷新并选择模型 -> 新增服务商 -> 保存 -> 完整切换检查 -> 手动备份 -> 双重确认恢复 -> 复制 -> 删除 -> 设为默认 -> 活动记录',
   }, null, 2))
 } finally {
   await browser.close()

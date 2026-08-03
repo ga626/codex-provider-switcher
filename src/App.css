@@ -546,10 +546,10 @@ h2 {
 }
 
 .confirm-dialog.application-settings-dialog {
-  width: min(620px, calc(100vw - 32px));
+  width: min(660px, calc(100vw - 32px));
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
+  gap: 16px;
   max-height: calc(100vh - 48px);
   overflow: auto;
 }
@@ -558,22 +558,38 @@ h2 {
   margin-bottom: 0;
 }
 
-.settings-option-group {
+.settings-section {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px 120px;
   gap: 12px;
-  align-items: end;
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: 6px;
+  background: #fff;
 }
 
-.settings-option-group p,
+.settings-section-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-section-heading h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 780;
+}
+
+.settings-section-heading p,
 .historical-backups p {
-  margin: 5px 0 0;
+  margin: 0;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.settings-option-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .settings-option-group label {
@@ -586,6 +602,45 @@ h2 {
 
 .settings-option-group select {
   min-height: 34px;
+}
+
+.settings-update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 2px;
+}
+
+.settings-update-row > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+
+.settings-update-row strong {
+  font-size: 14px;
+}
+
+.settings-update-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-update-row small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-update-button {
+  flex: 0 0 auto;
+  min-width: 132px;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .compact-surface {
@@ -1702,7 +1757,22 @@ textarea {
 
 }
 
-.update-button {
-  min-width: 104px;
-  white-space: nowrap;
+@media (max-width: 640px) {
+  .confirm-dialog.application-settings-dialog {
+    width: min(100vw - 20px, 660px);
+    max-height: calc(100vh - 20px);
+  }
+
+  .settings-option-group {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-update-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-update-button {
+    width: 100%;
+  }
 }

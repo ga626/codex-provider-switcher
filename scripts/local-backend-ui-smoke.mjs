@@ -193,16 +193,20 @@ try {
     throw new Error('application settings must be directly reachable in the compact desktop viewport')
   }
   await applicationSettingsButton.click()
-  await page.getByRole('heading', { name: '使用方式与恢复点' }).waitFor()
-  const applicationSettingsDialog = page.getByRole('dialog', { name: '使用方式与恢复点' })
+  await page.getByRole('heading', { name: '应用偏好' }).waitFor()
+  const applicationSettingsDialog = page.getByRole('dialog', { name: '应用偏好' })
   const applicationSettingsDialogBounds = await applicationSettingsDialog.boundingBox()
   if (!applicationSettingsDialogBounds || applicationSettingsDialogBounds.width < 480 || applicationSettingsDialogBounds.height > 752) {
     throw new Error('application settings dialog must use a readable single-column desktop layout')
   }
-  const autoStartToggle = page.getByRole('checkbox', { name: '开启开机启动' })
+  const autoStartToggle = page.getByRole('checkbox', { name: '开机后自动打开' })
   if (!await autoStartToggle.isDisabled()) throw new Error('Web diagnostic mode must not write Windows autostart state')
   await page.getByText('开发预览和 Web 诊断模式不会修改 Windows 启动项。').waitFor()
-  await page.getByText('恢复点保留数量').waitFor()
+  await page.getByRole('heading', { name: '恢复保护' }).waitFor()
+  await page.getByRole('heading', { name: '更新' }).waitFor()
+  const settingsUpdateButton = applicationSettingsDialog.getByRole('button', { name: '检查更新' })
+  if (!await settingsUpdateButton.isDisabled()) throw new Error('Web diagnostic mode must not expose a public update action')
+  await page.getByText('本地预览不检查公开更新').waitFor()
   await page.locator('.application-settings-dialog select').count().then((count) => {
     if (count !== 2) throw new Error('settings must expose automatic and manual recovery-point limits')
   })
