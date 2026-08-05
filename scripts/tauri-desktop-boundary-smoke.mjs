@@ -103,7 +103,7 @@ assert(libRs.includes('has_compatible_response_output(&body)'), 'Provider verifi
 assert(libRs.includes('"response_shape_unconfirmed"'), 'Provider verification must distinguish an unconfirmed response shape from a provider failure')
 assert(libRs.includes('mark_catalog_model_verified'), 'Successful inference verification must update the matching catalog model')
 assert(libRs.includes('.timeout(Duration::from_secs(8))'), 'Compatibility probes must use the short timeout budget')
-assert(libRs.includes('custom_authentication_risk(&config)?'), 'Switch preparation must surface external authentication as a risk before confirmation')
+assert(libRs.includes('custom_authentication_risk(&candidate_config)?'), 'Switch preparation must surface the candidate external-authentication mode as a risk before confirmation')
 assertNotIncludes(switchProfileCore, '切换已阻止：缺少 API 密钥', 'Switching must not treat a missing TOML or profile API key as an unconditional blocker')
 assertNotIncludes(switchProfileCore, 'verify_provider_auth_probe', 'Switching must not trigger a remote compatibility probe')
 assertNotIncludes(libRs, 'uses_request_probe', 'src-tauri/src/lib.rs')

@@ -268,6 +268,16 @@ const providerServer = createServer((request, response) => {
       response.end('not-json')
       return
     }
+    if (authorization === 'Bearer sk-models-shape') {
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ models: [{ id: 'catalog-shape-model' }] }))
+      return
+    }
+    if (authorization === 'Bearer sk-empty-catalog') {
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ models: [] }))
+      return
+    }
     if (authorization === 'Bearer sk-service-error') {
       response.writeHead(503, { 'Content-Type': 'application/json' })
       response.end(JSON.stringify({ error: { code: 'service_unavailable', message: 'upstream unavailable' } }))
@@ -424,6 +434,20 @@ try {
     'refresh discarded the verified status for an unchanged catalog model'
   )
 
+  const modelsShape = { ...profile, id: 'models-shape', name: 'Catalog Shape Provider', apiKey: 'sk-models-shape' }
+  await api('/api/profiles/save', { profile: modelsShape })
+  const modelsShapeRefreshed = await api('/api/models/refresh', { profileId: modelsShape.id })
+  const modelsShapeCatalog = modelsShapeRefreshed.modelCatalogs.find((item) => item.providerId === modelsShape.id)
+  assert(modelsShapeCatalog?.status === 'ok', 'models-array catalog shape did not report ok')
+  assert(modelsShapeCatalog.models[0]?.id === 'catalog-shape-model', 'models-array catalog shape was not parsed')
+
+  const emptyCatalog = { ...profile, id: 'empty-catalog', name: 'Empty Catalog Provider', apiKey: 'sk-empty-catalog' }
+  await api('/api/profiles/save', { profile: emptyCatalog })
+  const emptyCatalogRefreshed = await api('/api/models/refresh', { profileId: emptyCatalog.id })
+  const emptyCatalogResult = emptyCatalogRefreshed.modelCatalogs.find((item) => item.providerId === emptyCatalog.id)
+  assert(emptyCatalogResult?.status === 'empty_models', 'empty models-array catalog was not classified')
+  assert(emptyCatalogResult.statusDetail.includes('形状: models'), 'empty catalog detail omitted the safe response shape diagnosis')
+
   const modelless = { ...profile, id: 'model-less', name: 'Model-less Probe', model: '' }
   await api('/api/profiles/save', { profile: modelless })
   const modelLessVerification = await api('/api/profiles/verify', { profileId: modelless.id })
@@ -462,7 +486,7 @@ try {
     assert(switchedConfig.includes(fragment), `switch removed or changed protected configuration: ${fragment}`)
   }
   assert(switchedConfig.includes('user_owned_extension = "keep-me"'), 'switch removed an unknown custom-provider field')
-  assert(switchedAuth.OPENAI_API_KEY === JSON.parse(originalAuth).OPENAI_API_KEY, 'switch changed the existing Codex login state')
+  assert(switchedAuth.OPENAI_API_KEY === profile.apiKey, 'switch did not bind the profile key to the candidate Codex auth target')
   assert(switchedAuth.preserved === 'yes', 'switch removed unrelated auth data')
   const switchBackup = switched.backups.find((item) => item.kind === 'before_switch')
   assert(switched.backups.length === 3, 'switch did not retain the installation and daily backups while creating one switch backup')
@@ -500,7 +524,7 @@ try {
   assert(syncedProfile?.verificationStatus === 'not_checked', 'current configuration sync did not invalidate the old verification status')
   assert(switched.activity[0]?.title === '已切换到 Fixture Provider', 'switch did not update activity')
   assert(modelsProbeRequestCount >= 1, 'model refresh did not issue an authenticated /models request')
-  assert(responsesProbeRequestCount === responsesBeforeSwitch, 'switch unexpectedly sent a remote compatibility probe')
+  assert(responsesProbeRequestCount >= responsesBeforeSwitch + 2, 'every switch preflight did not send a fresh remote compatibility probe')
 
   const restoreWithoutConfirmation = await expectApiFailure('/api/backup/restore', { backupId: manualBackup.id })
   assert(restoreWithoutConfirmation.includes('缺少恢复确认'), 'restore without confirmation was not rejected')
@@ -520,7 +544,7 @@ try {
   const manualRestoredAuth = JSON.parse(await readFile(authPath, 'utf8'))
   assert(manualRestoredConfig.includes('[mcp_servers.after_switch]'), 'manual restore removed an MCP server added after the backup')
   assert(manualRestoredConfig.includes('model = "reasoning-current"'), 'manual restore did not restore the saved provider model')
-  assert(manualRestoredAuth.OPENAI_API_KEY === JSON.parse(originalAuth).OPENAI_API_KEY, 'manual restore changed the existing Codex login state')
+  assert(manualRestoredAuth.OPENAI_API_KEY === profile.apiKey, 'manual restore did not restore the saved provider credential contract')
   assert(manualRestoredAuth.added_after_switch === 'keep-me', 'manual restore removed unrelated auth data')
   assert(manualRestored.activity[0]?.title === '已恢复配置备份', 'manual restore did not update activity')
 
@@ -552,7 +576,7 @@ try {
   await writeFile(pendingTransactionPath, JSON.stringify({ backup_id: initialBackup.id, reason: 'test-interruption' }), 'utf8')
   await api('/api/state')
   assert(await readFile(configPath, 'utf8') === originalConfig, 'startup did not recover an interrupted config write')
-  assert(JSON.parse(await readFile(authPath, 'utf8')).OPENAI_API_KEY === 'interrupted-write', 'startup recovery unexpectedly changed the current Codex login state')
+  assert(JSON.parse(await readFile(authPath, 'utf8')).OPENAI_API_KEY === JSON.parse(originalAuth).OPENAI_API_KEY, 'startup recovery did not restore the interrupted provider credential write')
   await assertMissingFile(pendingTransactionPath, 'startup recovery did not remove the completed transaction marker')
 
   await api('/api/profiles/save', { profile })
@@ -581,8 +605,8 @@ try {
   assert(responsesProbeRequestCount >= 1, 'DasuAPI quota verification did not issue the real request probe')
   const responsesBeforeRiskPreflight = responsesProbeRequestCount
   const riskPreflight = await prepareSwitch(noCredit.id)
-  assert(riskPreflight.riskDetail?.includes('尚未由切换器确认可用'), 'billing failure was not surfaced as a switch risk')
-  assert(responsesProbeRequestCount === responsesBeforeRiskPreflight, 'risk preflight retried a remote compatibility probe')
+  assert(riskPreflight.riskDetail?.includes('本次自动检查未确认可用'), 'billing failure was not surfaced as a switch risk')
+  assert(responsesProbeRequestCount === responsesBeforeRiskPreflight + 1, 'risk preflight did not run its required fresh remote compatibility probe')
   assert(await readFile(configPath, 'utf8') === originalConfig, 'risk preflight changed config.toml')
   assert(await readFile(authPath, 'utf8') === originalAuth, 'risk preflight changed auth.json')
   const unacknowledgedRisk = await expectApiFailure('/api/profiles/switch', {
@@ -594,6 +618,7 @@ try {
   const riskSwitched = await confirmSwitch(noCredit.id, riskPreflight.operationId, true)
   assert(riskSwitched.currentProfileId === noCredit.id, 'acknowledged risk switch did not complete')
   assert(riskSwitched.activity[0]?.tone === 'warning', 'acknowledged risk switch was not recorded as a warning')
+  const authAfterRiskSwitch = await readFile(authPath, 'utf8')
   await writeFile(configPath, originalConfig, 'utf8')
 
   const externalAuthentication = { ...profile, id: 'external-auth', name: 'External Authentication', apiKey: '' }
@@ -604,7 +629,7 @@ try {
   assert(externalAuthPreflight.riskDetail?.includes('Codex 登录管理'), 'Codex login authentication was not surfaced as a risk')
   assert(externalAuthPreflight.riskDetail?.includes('未保存应用访问密钥'), 'missing application key was not surfaced as a risk')
   assert(await readFile(configPath, 'utf8') === loginManagedConfig, 'external authentication preflight changed config.toml')
-  assert(await readFile(authPath, 'utf8') === originalAuth, 'external authentication preflight changed auth.json')
+  assert(await readFile(authPath, 'utf8') === authAfterRiskSwitch, 'external authentication preflight changed auth.json')
   await writeFile(configPath, originalConfig, 'utf8')
 
   await writeFile(join(codexDir, 'friend.config.toml'), 'model = "profile-model"\r\n', 'utf8')
@@ -644,7 +669,7 @@ try {
   const serviceProfile = serviceVerification.profiles.find((item) => item.id === serviceError.id)
   assert(serviceProfile?.verificationStatus === 'service_error', '5xx response was not classified as service error')
   assert(await readFile(configPath, 'utf8') === originalConfig, 'failed verifications changed config.toml')
-  assert(await readFile(authPath, 'utf8') === originalAuth, 'failed verifications changed auth.json')
+  assert(await readFile(authPath, 'utf8') === authAfterRiskSwitch, 'failed verifications changed auth.json')
 
   const disposable = { ...profile, id: 'delete-me', name: 'Delete Me' }
   await api('/api/profiles/save', { profile: disposable })
@@ -662,17 +687,17 @@ try {
       'profile keys and backup credential copies are DPAPI-protected at rest',
       'local fallback rejects drive-qualified static paths and oversized request bodies',
       'update check compared semantic versions and selected the Windows installer',
-      'model refresh called /v1/models and deduplicated results',
+      'model refresh called /v1/models, deduplicated results, and accepted the common models-array catalog shape',
       'authenticated /v1/responses probes distinguish standard, compatible, and unconfirmed response shapes',
-      'unverified provider availability and external authentication are shown as risks, require an explicit acknowledgement to continue, while unsafe configuration writes remain blocked',
+      'every switch preflight performs a fresh provider probe; use risks require acknowledgement while unsafe configuration writes remain blocked',
       'verification diagnostics classify endpoint, response shape, billing, and service errors without changing Codex config/auth',
       'default selection persisted',
       'provider list order persisted without changing the active Codex configuration',
-      'first launch created one protected baseline without a duplicate daily backup; switching removed legacy api_key while preserving unrelated custom-provider data and existing auth state',
+      'first launch created one protected baseline without a duplicate daily backup; switching bound the selected profile key to auth.json while preserving unrelated custom-provider and auth data',
       'same-address profiles retain the selected current-provider identity after a safe switch',
       'switch preflight rejects drift, while restore points require confirmation, reject provider-field conflicts, and preserve later MCP/auth additions',
       'manual recovery points require confirmation before replacement and follow the persisted retention limit',
-      'startup automatically recovered an interrupted provider-config write without changing the current auth state',
+      'startup automatically recovered an interrupted provider-config and provider-auth write',
       'malformed existing auth state blocked the preflight without leaving a half-switch',
       'current configuration sync updates only the local profile directory and invalidates the previous model verification',
       'delete removed a non-current non-default provider',

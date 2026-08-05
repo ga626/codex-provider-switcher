@@ -1,9 +1,9 @@
 use codex_switcher_tauri_lib::{
     check_for_update_core, create_manual_backup_core, delete_profile_core, load_state_core,
     prepare_switch_core, refresh_models_core, reorder_profiles_core, restore_backup_core,
-    restore_latest_backup_core, save_profile_core, set_backup_policy_core, set_default_profile_core, switch_profile_core,
-    sync_current_configuration_core, toggle_auto_start_core, verify_profile_core, AppState,
-    EditableProfile, SwitcherError,
+    restore_latest_backup_core, save_profile_core, set_backup_policy_core,
+    set_default_profile_core, switch_profile_core, sync_current_configuration_core,
+    toggle_auto_start_core, verify_profile_core, AppState, EditableProfile, SwitcherError,
 };
 use serde_json::{json, Value};
 use std::{

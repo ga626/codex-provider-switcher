@@ -215,6 +215,8 @@ struct StoredSwitchPreflight {
     created_at: String,
     expires_at: i64,
     fingerprint: String,
+    candidate_fingerprint: String,
+    risk_acknowledgement_required: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1543,6 +1545,43 @@ fn protected_sections_match(before: &str, after: &str) -> Result<bool, SwitcherE
         && toml_value_at(&before, &["windows"]) == toml_value_at(&after, &["windows"]))
 }
 
+fn only_provider_owned_configuration_changed(
+    before: &str,
+    after: &str,
+) -> Result<bool, SwitcherError> {
+    let mut before = toml::from_str::<toml::Value>(before)?;
+    let mut after = toml::from_str::<toml::Value>(after)?;
+    for key in [
+        "model",
+        "model_provider",
+        "model_reasoning_effort",
+        "disable_response_storage",
+    ] {
+        before.as_table_mut().and_then(|table| table.remove(key));
+        after.as_table_mut().and_then(|table| table.remove(key));
+    }
+    for value in [&mut before, &mut after] {
+        if let Some(custom) = value
+            .get_mut("model_providers")
+            .and_then(|providers| providers.get_mut("custom"))
+            .and_then(toml::Value::as_table_mut)
+        {
+            for key in [
+                "name",
+                "wire_api",
+                "base_url",
+                "api_key",
+                "env_key",
+                "requires_openai_auth",
+                "experimental_bearer_token",
+            ] {
+                custom.remove(key);
+            }
+        }
+    }
+    Ok(before == after)
+}
+
 fn owned_configuration_fingerprint(
     config_text: &str,
     auth_text: &str,
@@ -1713,6 +1752,13 @@ fn restored_owned_files(
         "model_provider",
         &required_toml_string(&backup_config_value, "model_provider")?,
     );
+    remove_root_key(&mut lines, "model_reasoning_effort");
+    if let Some(reasoning_effort) = backup_config_value
+        .get("model_reasoning_effort")
+        .and_then(toml::Value::as_str)
+    {
+        upsert_root_string(&mut lines, "model_reasoning_effort", reasoning_effort);
+    }
     upsert_root_bool(
         &mut lines,
         "disable_response_storage",
@@ -1741,13 +1787,39 @@ fn restored_owned_files(
         );
     }
     remove_section_key(&mut lines, start, &mut end, "api_key");
+    for key in ["env_key", "experimental_bearer_token"] {
+        remove_section_key(&mut lines, start, &mut end, key);
+    }
+    remove_section_key(&mut lines, start, &mut end, "requires_openai_auth");
+    if let Some(value) = optional_toml_bool(backup_custom, "requires_openai_auth") {
+        upsert_section_bool(&mut lines, start, &mut end, "requires_openai_auth", value);
+    }
     let next_config = lines.join("\r\n");
     if !protected_sections_match(&current_config, &next_config)? {
         return Err(SwitcherError::Message(
             "恢复已阻止：检测到 MCP、插件、项目或其他受保护设置会被改动。".to_string(),
         ));
     }
-    Ok((next_config, None))
+    let backup_auth_text = String::from_utf8(unprotect_secret(&fs::read_to_string(
+        backup_dir.join("auth.json.dpapi"),
+    )?)?)
+    .map_err(|_| SwitcherError::Message("恢复点中的认证文件不是 UTF-8 文本。".to_string()))?;
+    let backup_auth = serde_json::from_str::<Value>(&backup_auth_text)
+        .map_err(|_| SwitcherError::Message("恢复点中的认证文件不是有效 JSON。".to_string()))?;
+    let mut current_auth = serde_json::from_str::<Value>(&fs::read_to_string(auth_path()?)?)?;
+    let backup_key = backup_auth.get("OPENAI_API_KEY").cloned();
+    let current_auth_object = current_auth.as_object_mut().ok_or_else(|| {
+        SwitcherError::Message("当前认证文件不是 JSON 对象，已拒绝恢复。".to_string())
+    })?;
+    if let Some(key) = backup_key {
+        current_auth_object.insert("OPENAI_API_KEY".to_string(), key);
+    } else {
+        current_auth_object.remove("OPENAI_API_KEY");
+    }
+    Ok((
+        next_config,
+        Some(serde_json::to_string_pretty(&current_auth)?),
+    ))
 }
 
 fn recover_pending_config_transaction() -> Result<(), SwitcherError> {
@@ -2131,6 +2203,7 @@ fn parse_provider_models(body: &Value) -> Vec<ProviderModel> {
     let items = body
         .get("data")
         .and_then(Value::as_array)
+        .or_else(|| body.get("models").and_then(Value::as_array))
         .or_else(|| body.as_array())
         .unwrap_or(&empty);
     let mut models = items
@@ -2193,6 +2266,26 @@ mod tests {
     }
 
     #[test]
+    fn parses_common_models_array_catalog_shape() {
+        let body = json!({
+            "models": [
+                { "id": "provider-reasoning-current" },
+                { "id": "provider-fast-current" }
+            ]
+        });
+
+        let ids = parse_provider_models(&body)
+            .into_iter()
+            .map(|model| model.id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ids,
+            vec!["provider-fast-current", "provider-reasoning-current"]
+        );
+    }
+
+    #[test]
     fn parses_provider_array_model_list() {
         let body =
             json!(["provider-fast-legacy", { "id": "vision-model" }, "", { "name": "ignored" }]);
@@ -2239,7 +2332,7 @@ mod tests {
     }
 
     #[test]
-    fn switching_does_not_add_missing_requires_openai_auth() {
+    fn switching_declares_profile_key_authentication_explicitly() {
         let original = r#"
 model = "gpt-test"
 model_provider = "custom"
@@ -2273,7 +2366,7 @@ api_key = "before-key"
 
         let next = build_next_config(original, &profile).unwrap();
 
-        assert!(!next.contains("requires_openai_auth"));
+        assert!(next.contains("requires_openai_auth = false"));
     }
 
     #[test]
@@ -2433,6 +2526,13 @@ fn fetch_provider_models(
     };
 
     let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("未知")
+        .to_string();
+    let final_url = response.url().to_string();
     if status.as_u16() == 401 || status.as_u16() == 403 {
         return Ok(build_model_catalog(
             provider_id,
@@ -2459,7 +2559,9 @@ fn fetch_provider_models(
                 provider_id,
                 profile,
                 "provider_error",
-                &format!("模型目录响应不是有效 JSON：{err}"),
+                &format!(
+                    "模型目录响应不是有效 JSON（content-type: {content_type}，最终地址: {final_url}）：{err}"
+                ),
                 Vec::new(),
             ));
         }
@@ -2467,11 +2569,22 @@ fn fetch_provider_models(
     let models = parse_provider_models(&body);
 
     if models.is_empty() {
+        let shape = if body.get("data").and_then(Value::as_array).is_some() {
+            "data"
+        } else if body.get("models").and_then(Value::as_array).is_some() {
+            "models"
+        } else if body.is_array() {
+            "top_level_array"
+        } else {
+            "unknown_object"
+        };
         return Ok(build_model_catalog(
             provider_id,
             profile,
             "empty_models",
-            "provider 返回了空模型列表。",
+            &format!(
+                "provider 返回空模型列表（形状: {shape}，content-type: {content_type}，最终地址: {final_url}）。"
+            ),
             Vec::new(),
         ));
     }
@@ -3011,7 +3124,9 @@ fn pending_backup_id() -> Option<String> {
 
 fn backup_retention_bucket(reason: &str, policy: &BackupPolicy) -> Option<(&'static str, usize)> {
     match reason {
-        "daily" | "before_switch" | "before_restore" => Some(("automatic", normalized_backup_limit(policy.automatic_limit))),
+        "daily" | "before_switch" | "before_restore" => {
+            Some(("automatic", normalized_backup_limit(policy.automatic_limit)))
+        }
         "manual" => Some(("manual", normalized_backup_limit(policy.manual_limit))),
         _ => None,
     }
@@ -3178,6 +3293,17 @@ fn upsert_root_bool(lines: &mut Vec<String>, key: &str, value: bool) {
     );
 }
 
+fn remove_root_key(lines: &mut Vec<String>, key: &str) {
+    let root_end = root_section_end(lines);
+    let prefix = format!("{key} ");
+    let mut index = 0usize;
+    lines.retain(|line| {
+        let retain = index >= root_end || !line.trim_start().starts_with(&prefix);
+        index += 1;
+        retain
+    });
+}
+
 fn upsert_section_string(
     lines: &mut Vec<String>,
     start: usize,
@@ -3242,14 +3368,16 @@ fn remove_section_key(lines: &mut Vec<String>, start: usize, end: &mut usize, ke
 
 fn build_next_config(original: &str, profile: &StoredProfile) -> Result<String, SwitcherError> {
     let mut lines: Vec<String> = original.lines().map(ToString::to_string).collect();
-    let original_value = toml::from_str::<toml::Value>(original)?;
-    let requires_openai_auth = original_value
-        .get("model_providers")
-        .and_then(|providers| providers.get("custom"))
-        .and_then(|custom| optional_toml_bool(custom, "requires_openai_auth"));
+    toml::from_str::<toml::Value>(original)?;
+    let uses_profile_credential = !profile.api_key.trim().is_empty();
 
     upsert_root_string(&mut lines, "model", &profile.model);
     upsert_root_string(&mut lines, "model_provider", "custom");
+    upsert_root_string(
+        &mut lines,
+        "model_reasoning_effort",
+        &profile.model_reasoning_effort,
+    );
     upsert_root_bool(&mut lines, "disable_response_storage", true);
 
     let start = lines
@@ -3268,17 +3396,17 @@ fn build_next_config(original: &str, profile: &StoredProfile) -> Result<String, 
 
     upsert_section_string(&mut lines, start, &mut end, "name", &profile.name);
     upsert_section_string(&mut lines, start, &mut end, "wire_api", "responses");
-    if let Some(requires_openai_auth) = requires_openai_auth {
-        upsert_section_bool(
-            &mut lines,
-            start,
-            &mut end,
-            "requires_openai_auth",
-            requires_openai_auth,
-        );
-    }
+    upsert_section_bool(
+        &mut lines,
+        start,
+        &mut end,
+        "requires_openai_auth",
+        !uses_profile_credential,
+    );
     upsert_section_string(&mut lines, start, &mut end, "base_url", &profile.base_url);
-    remove_section_key(&mut lines, start, &mut end, "api_key");
+    for key in ["api_key", "env_key", "experimental_bearer_token"] {
+        remove_section_key(&mut lines, start, &mut end, key);
+    }
     let next_config = lines.join("\r\n");
     let checks = validation_checks(&next_config);
     if checks
@@ -3287,7 +3415,9 @@ fn build_next_config(original: &str, profile: &StoredProfile) -> Result<String, 
     {
         return Err(SwitcherError::Message("写入前配置验证失败。".to_string()));
     }
-    if !protected_sections_match(original, &next_config)? {
+    if !protected_sections_match(original, &next_config)?
+        || !only_provider_owned_configuration_changed(original, &next_config)?
+    {
         return Err(SwitcherError::Message(
             "切换已阻止：检测到 MCP、插件、项目或其他受保护设置会被改动。".to_string(),
         ));
@@ -3295,7 +3425,26 @@ fn build_next_config(original: &str, profile: &StoredProfile) -> Result<String, 
     Ok(next_config)
 }
 
-fn switch_config(profile: &StoredProfile, expected_fingerprint: &str) -> Result<(), SwitcherError> {
+fn build_next_auth(original: &str, profile: &StoredProfile) -> Result<String, SwitcherError> {
+    let mut auth = serde_json::from_str::<Value>(original)?;
+    let object = auth.as_object_mut().ok_or_else(|| {
+        SwitcherError::Message("auth.json 必须是 JSON 对象，无法安全写入。".to_string())
+    })?;
+    if profile.api_key.trim().is_empty() {
+        return Ok(serde_json::to_string_pretty(&auth)?);
+    }
+    object.insert(
+        "OPENAI_API_KEY".to_string(),
+        Value::String(profile.api_key.trim().to_string()),
+    );
+    Ok(serde_json::to_string_pretty(&auth)?)
+}
+
+fn switch_config(
+    profile: &StoredProfile,
+    expected_fingerprint: &str,
+    expected_candidate_fingerprint: &str,
+) -> Result<(), SwitcherError> {
     let original = read_config()?;
     ensure_configuration_layer_is_unambiguous()?;
     let config = config_path()?;
@@ -3309,6 +3458,13 @@ fn switch_config(profile: &StoredProfile, expected_fingerprint: &str) -> Result<
     }
     healthy_baseline_backup()?;
     let next_config = build_next_config(&original, profile)?;
+    let next_auth = build_next_auth(&original_auth_text, profile)?;
+    let candidate_fingerprint = owned_configuration_fingerprint(&next_config, &next_auth)?;
+    if candidate_fingerprint != expected_candidate_fingerprint {
+        return Err(SwitcherError::Message(
+            "切换预览已失效：目标服务商认证或配置发生变化，请重新检查。".to_string(),
+        ));
+    }
     let backup = create_backup()?;
     let backup_id = backup
         .file_name()
@@ -3320,7 +3476,13 @@ fn switch_config(profile: &StoredProfile, expected_fingerprint: &str) -> Result<
         return Err(error);
     }
     update_config_transaction_phase("config_replaced")?;
-    let fingerprint = owned_configuration_fingerprint(&next_config, &original_auth_text)?;
+    if let Err(error) = write_bytes_atomically(&auth, next_auth.as_bytes()) {
+        let _ = write_bytes_atomically(&config, original.as_bytes());
+        let _ = complete_config_transaction();
+        return Err(error);
+    }
+    update_config_transaction_phase("auth_replaced")?;
+    let fingerprint = owned_configuration_fingerprint(&next_config, &next_auth)?;
     record_backup_post_change(&backup, &fingerprint)?;
     let initial_backup = backups_dir()?.join(INITIAL_BACKUP_LABEL);
     if let Ok(initial_manifest) =
@@ -3409,9 +3571,9 @@ pub fn create_manual_backup_core(confirmation: Option<&str>) -> Result<AppState,
     ensure_initial_backup()?;
     let limit = load_catalog()?.backup_policy.manual_limit;
     if managed_manual_backup_count()? >= limit && confirmation.map(str::trim) != Some("替换") {
-        return Err(SwitcherError::Message(
-            format!("已保留 {limit} 个手动恢复点。确认替换最早的手动恢复点前，请在确认窗口中继续。"),
-        ));
+        return Err(SwitcherError::Message(format!(
+            "已保留 {limit} 个手动恢复点。确认替换最早的手动恢复点前，请在确认窗口中继续。"
+        )));
     }
     let label = unique_backup_label("manual");
     create_backup_with_label(&label, "manual")?;
@@ -3423,11 +3585,17 @@ pub fn create_manual_backup_core(confirmation: Option<&str>) -> Result<AppState,
 }
 
 #[tauri::command]
-fn set_backup_policy(automatic_limit: usize, manual_limit: usize) -> Result<AppState, SwitcherError> {
+fn set_backup_policy(
+    automatic_limit: usize,
+    manual_limit: usize,
+) -> Result<AppState, SwitcherError> {
     set_backup_policy_core(automatic_limit, manual_limit)
 }
 
-pub fn set_backup_policy_core(automatic_limit: usize, manual_limit: usize) -> Result<AppState, SwitcherError> {
+pub fn set_backup_policy_core(
+    automatic_limit: usize,
+    manual_limit: usize,
+) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let next = BackupPolicy {
         automatic_limit: normalized_backup_limit(automatic_limit),
@@ -3437,7 +3605,10 @@ pub fn set_backup_policy_core(automatic_limit: usize, manual_limit: usize) -> Re
     save_catalog(&catalog)?;
     app_state_with_activity(
         "恢复点保留数量已更新",
-        &format!("自动保护保留 {} 个，手动保存保留 {} 个；旧版历史目录不会自动删除。", next.automatic_limit, next.manual_limit),
+        &format!(
+            "自动保护保留 {} 个，手动保存保留 {} 个；旧版历史目录不会自动删除。",
+            next.automatic_limit, next.manual_limit
+        ),
         "info",
     )
 }
@@ -3585,13 +3756,13 @@ fn prepare_switch(profile_id: String) -> Result<SwitchPreflight, SwitcherError> 
 }
 
 pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, SwitcherError> {
-    let catalog = load_catalog()?;
+    let mut catalog = load_catalog()?;
     let value = catalog
         .profiles
         .get(&profile_id)
         .cloned()
         .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
-    let profile: StoredProfile = serde_json::from_value(value)?;
+    let mut profile: StoredProfile = serde_json::from_value(value)?;
     let display_name = profile.name.clone();
     if profile.model.trim().is_empty() {
         return Err(SwitcherError::Message(
@@ -3605,21 +3776,33 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
     ensure_configuration_layer_is_unambiguous()?;
     let auth = fs::read_to_string(auth_path()?)?;
     let fingerprint = owned_configuration_fingerprint(&config, &auth)?;
-    build_next_config(&config, &profile)?;
+    let candidate_config = build_next_config(&config, &profile)?;
+    let candidate_auth = build_next_auth(&auth, &profile)?;
+    let candidate_fingerprint =
+        owned_configuration_fingerprint(&candidate_config, &candidate_auth)?;
     healthy_baseline_backup()?;
+    let verification = verify_provider_auth_probe(&profile);
+    let verified = verification.verified;
+    let detail = verification.detail.clone();
+    apply_verification(&mut profile, verification);
+    if verified {
+        mark_catalog_model_verified(&mut catalog, &profile_id, &profile.model)?;
+    }
+    catalog
+        .profiles
+        .insert(profile_id.clone(), serde_json::to_value(&profile)?);
+    save_catalog(&catalog)?;
     let mut risks = Vec::new();
     if profile.api_key.trim().is_empty() {
-        risks.push("未保存应用访问密钥，因此没有运行切换器的真实连接测试。".to_string());
+        risks.push(
+            "未保存应用访问密钥；切换器已记录外部认证风险，无法用 profile 凭据确认目标服务商。"
+                .to_string(),
+        );
     }
-    if !profile.verified || profile.verification_status != "verified" {
-        let detail = profile
-            .last_verification_detail
-            .as_deref()
-            .unwrap_or("尚未运行服务商可用性测试。")
-            .trim();
-        risks.push(format!("目标服务商尚未由切换器确认可用：{detail}"));
+    if !verified {
+        risks.push(format!("目标服务商的本次自动检查未确认可用：{detail}"));
     }
-    if let Some(detail) = custom_authentication_risk(&config)? {
+    if let Some(detail) = custom_authentication_risk(&candidate_config)? {
         risks.push(detail);
     }
     let operation_id = unique_backup_label("switch");
@@ -3630,6 +3813,8 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
         created_at: now_label(),
         expires_at,
         fingerprint,
+        candidate_fingerprint,
+        risk_acknowledgement_required: !risks.is_empty(),
     };
     write_bytes_atomically(
         &switch_preflight_path()?,
@@ -3641,7 +3826,9 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
         target_name: display_name,
         target_model: profile.model,
         backup_detail: "确认后将创建新的受保护恢复点。".to_string(),
-        protected_detail: "MCP、插件、项目设置和其他受保护内容已通过写入前检查。".to_string(),
+        protected_detail:
+            "候选 config/auth 已通过 provider 白名单和 MCP、插件、项目等受保护内容检查。"
+                .to_string(),
         risk_detail: (!risks.is_empty()).then(|| risks.join(" ")),
         expires_at: chrono::DateTime::from_timestamp(expires_at, 0)
             .map(|value| {
@@ -3655,7 +3842,11 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
 }
 
 #[tauri::command]
-fn switch_profile(profile_id: String, operation_id: String, risk_acknowledged: bool) -> Result<AppState, SwitcherError> {
+fn switch_profile(
+    profile_id: String,
+    operation_id: String,
+    risk_acknowledged: bool,
+) -> Result<AppState, SwitcherError> {
     switch_profile_core(profile_id, operation_id, risk_acknowledged)
 }
 
@@ -3690,15 +3881,17 @@ pub fn switch_profile_core(
             "切换预览已失效：服务商模型发生变化，请重新检查。".to_string(),
         ));
     }
-    let has_risk = profile.api_key.trim().is_empty()
-        || !profile.verified
-        || profile.verification_status != "verified";
+    let has_risk = preflight.risk_acknowledgement_required;
     if has_risk && !risk_acknowledged {
         return Err(SwitcherError::Message(
             "本次切换存在使用风险。请在确认窗口勾选“我已了解风险”后继续。".to_string(),
         ));
     }
-    switch_config(&profile, &preflight.fingerprint)?;
+    switch_config(
+        &profile,
+        &preflight.fingerprint,
+        &preflight.candidate_fingerprint,
+    )?;
     let _ = fs::remove_file(switch_preflight_path()?);
     profile.last_switched_at = Some(now_label());
     catalog
@@ -3708,9 +3901,9 @@ pub fn switch_profile_core(
     app_state_with_activity(
         &format!("已切换到 {display_name}"),
         if has_risk {
-            "已写入 Codex 服务商配置并生成回滚备份；保留现有登录信息。切换前检查提示的使用风险已由用户确认。"
+            "已写入同一候选认证合同的 Codex 服务商配置并生成回滚备份；切换前自动检查提示的使用风险已由用户确认。"
         } else {
-            "已写入 Codex 服务商配置并生成回滚备份；当前认证模式不会改写登录信息，切换前的真实服务商可用性测试已通过。"
+            "已写入同一候选认证合同的 Codex 服务商配置并生成回滚备份；切换前自动检查已通过。"
         },
         if has_risk { "warning" } else { "success" },
     )
