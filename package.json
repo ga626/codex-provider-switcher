@@ -1,7 +1,7 @@
 {
   "name": "codex-provider-switcher",
   "private": true,
-  "version": "0.10.2-alpha",
+  "version": "0.10.3-alpha",
   "type": "module",
   "scripts": {
     "dev": "vite",

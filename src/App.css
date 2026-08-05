@@ -757,7 +757,11 @@ label {
   grid-column: 1 / -1;
 }
 
-input,
+input:not([type]),
+input[type='text'],
+input[type='password'],
+input[type='search'],
+input[type='url'],
 textarea {
   width: 100%;
   color: var(--text);
@@ -770,7 +774,11 @@ textarea {
   font-weight: 560;
 }
 
-input:focus,
+input:not([type]):focus,
+input[type='text']:focus,
+input[type='password']:focus,
+input[type='search']:focus,
+input[type='url']:focus,
 textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
@@ -1187,8 +1195,17 @@ textarea {
   line-height: 1.45;
 }
 
-.risk-confirmation input {
+.risk-confirmation input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  padding: 0;
   margin-top: 2px;
+}
+
+.risk-confirmation input[type='checkbox']:focus-visible {
+  outline: 3px solid rgba(15, 118, 110, 0.28);
+  outline-offset: 2px;
 }
 
 .recovery-row {

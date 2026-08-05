@@ -783,7 +783,7 @@ function WorkspaceHeader({
   selectedIsCurrent: boolean
   onSwitchRequested: () => void
 }) {
-  const showSwitchAction = activeView === 'switch-check'
+  const showSwitchAction = Boolean(selectedProfile) && !selectedIsCurrent
   const copy: Record<ViewId, { title: string; note: string }> = {
     providers: {
       title: selectedProfile ? `编辑 ${selectedProfile.name}` : '新增服务商',

@@ -155,12 +155,11 @@ try {
   await desktop.getByRole('button', { name: '运行可用性测试' }).click()
   await desktop.getByText('开发预览不会发送真实服务商请求。').waitFor()
   await desktop.getByRole('button', { name: /服务商/ }).first().click()
-  if (await desktop.getByRole('button', { name: '切换到 Smoke Test API' }).count()) {
-    throw new Error('Provider configuration must not repeat the switch action.')
+  if (await desktop.getByRole('button', { name: '切换到 Smoke Test API' }).count() !== 1) {
+    throw new Error('Provider configuration must expose the global switch action.')
   }
-  await desktop.getByRole('button', { name: /切换前检查/ }).click()
   if (!await desktop.getByRole('button', { name: '切换到 Smoke Test API' }).isDisabled()) {
-    throw new Error('Preview mode must not enable a simulated provider switch.')
+    throw new Error('Preview mode must keep the global simulated switch disabled.')
   }
 
   await desktop.locator('.provider-row').filter({ hasText: '示例服务商 C' }).click()
