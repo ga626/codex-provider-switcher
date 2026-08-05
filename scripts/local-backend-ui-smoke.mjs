@@ -150,6 +150,8 @@ try {
   await page.getByRole('heading', { name: 'Signalman AI' }).waitFor()
   await page.getByText('2 个配置').waitFor()
   await page.getByRole('heading', { name: '编辑 UI Fixture Provider' }).waitFor()
+  await page.getByText('Codex 文件当前服务商').waitFor()
+  await page.getByText('已打开的 Codex 会话保留启动时的连接；切换后请在新会话确认实际使用。').waitFor()
   await page.getByRole('button', { name: /切换前检查/ }).click()
   await page.getByRole('heading', { name: '完成以下检查后即可切换' }).waitFor()
   await page.getByRole('heading', { name: '这些设置会在切换后继续生效' }).waitFor()
@@ -158,7 +160,8 @@ try {
   await page.getByRole('dialog', { name: '确认切换到 UI Fixture Provider？' }).waitFor()
   await page.getByText('切换影响确认').waitFor()
   await page.getByText('保护检查').first().waitFor()
-  await page.getByRole('button', { name: '取消' }).click()
+  await page.keyboard.press('Escape')
+  await page.getByRole('dialog', { name: '确认切换到 UI Fixture Provider？' }).waitFor({ state: 'detached' })
   await page.getByText('不保证', { exact: true }).count().then((count) => {
     if (count !== 0) throw new Error('switch check must not expose duplicate disclaimer cards')
   })
@@ -243,6 +246,23 @@ try {
   }
   await page.screenshot({ path: join(outputDir, 'risk-confirmation.png'), fullPage: true })
   await page.getByRole('button', { name: '取消' }).click()
+
+  const fixtureRow = page.locator(`[data-provider-id="${profileId}"]`)
+  const riskRow = page.locator(`[data-provider-id="${riskProfileId}"]`)
+  const orderBeforeDrag = await page.locator('[data-provider-id]').evaluateAll((items) => items.map((item) => item.getAttribute('data-provider-id')))
+  const sourceHandle = await riskRow.locator('.provider-drag-handle').boundingBox()
+  const targetHandle = await fixtureRow.locator('.provider-drag-handle').boundingBox()
+  if (!sourceHandle || !targetHandle) throw new Error('provider drag handles must be visible')
+  await page.mouse.move(sourceHandle.x + sourceHandle.width / 2, sourceHandle.y + sourceHandle.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(sourceHandle.x + sourceHandle.width / 2, sourceHandle.y + sourceHandle.height / 2 + 8)
+  await page.mouse.move(targetHandle.x + targetHandle.width / 2, targetHandle.y + targetHandle.height / 2, { steps: 10 })
+  await page.mouse.up()
+  await page.waitForTimeout(300)
+  const orderAfterDrag = await page.locator('[data-provider-id]').evaluateAll((items) => items.map((item) => item.getAttribute('data-provider-id')))
+  if (JSON.stringify(orderBeforeDrag) === JSON.stringify(orderAfterDrag)) {
+    throw new Error('provider drag handle did not change the persisted list order')
+  }
 
   const seriousConsoleEvents = consoleEvents.filter((event) => !event.includes('Download the React DevTools'))
   if (seriousConsoleEvents.length > 0) {

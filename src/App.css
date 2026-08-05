@@ -42,7 +42,7 @@
   height: 100%;
   min-width: 980px;
   display: grid;
-  grid-template-rows: 62px auto minmax(0, 1fr) 30px;
+  grid-template-rows: 62px auto auto minmax(0, 1fr) 30px;
   color: var(--text);
   background: var(--bg);
   overflow: hidden;
@@ -197,8 +197,54 @@ h2 {
   cursor: pointer;
 }
 
-.workbench {
+.active-provider-notice {
   grid-row: 3;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: auto minmax(180px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 8px 14px;
+  color: var(--text);
+  background: #edf8f7;
+  border-bottom: 1px solid rgba(15, 118, 110, 0.18);
+  font-size: 12px;
+}
+
+.active-provider-notice > svg {
+  color: var(--accent);
+}
+
+.active-provider-notice > div {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.active-provider-notice strong {
+  font-size: 12px;
+}
+
+.active-provider-notice span,
+.active-provider-notice small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.active-provider-notice.unknown {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-bottom-color: rgba(181, 112, 0, 0.2);
+}
+
+.active-provider-notice.unknown > svg {
+  color: var(--amber);
+}
+
+.workbench {
+  grid-row: 4;
   min-height: 0;
   display: grid;
   grid-template-columns: 276px minmax(0, 1fr);
@@ -400,19 +446,35 @@ h2 {
 .provider-row.dragging {
   opacity: 0.55;
   border-style: dashed;
+  z-index: 2;
+}
+
+.provider-row.drag-over {
+  border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .provider-drag-handle {
   width: 18px;
+  min-height: 28px;
   display: grid;
   place-items: center;
   color: var(--faint);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
   cursor: grab;
   flex: 0 0 auto;
+  touch-action: none;
 }
 
-.provider-row:active .provider-drag-handle {
+.provider-drag-handle:active {
   cursor: grabbing;
+}
+
+.provider-drag-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .provider-row.active {
@@ -542,7 +604,47 @@ h2 {
 .setting-toggle-row input {
   width: 42px;
   height: 22px;
-  accent-color: var(--accent);
+  appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  margin: 0;
+  cursor: pointer;
+  background: var(--border-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.setting-toggle-row input::after {
+  width: 16px;
+  height: 16px;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  content: '';
+  background: #fff;
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(24, 35, 49, 0.24);
+  transition: transform 160ms ease;
+}
+
+.setting-toggle-row input:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.setting-toggle-row input:checked::after {
+  transform: translateX(20px);
+}
+
+.setting-toggle-row input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.setting-toggle-row input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .confirm-dialog.application-settings-dialog {
@@ -1683,7 +1785,7 @@ textarea {
 }
 
 .statusbar {
-  grid-row: 4;
+  grid-row: 5;
   display: flex;
   align-items: center;
   gap: 18px;
