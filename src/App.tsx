@@ -23,7 +23,10 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   deleteProfile,
@@ -185,6 +188,17 @@ function requiresManualModelConfirmation(
   return catalog?.status !== 'ok' || !catalog.models.some((item) => item.id.toLocaleLowerCase() === model.toLocaleLowerCase())
 }
 
+function isClearlyIncompatibleModel(model: ModelCatalog['models'][number]) {
+  return model.tags.some((tag) => tag === 'embedding' || tag === 'audio')
+}
+
+function modelSelectionRank(model: ModelCatalog['models'][number]) {
+  if (isClearlyIncompatibleModel(model)) return 3
+  if (model.verifiedForResponses === 'verified') return 0
+  if (model.tags.includes('responses-candidate')) return 1
+  return 2
+}
+
 function draftMatchesProfile(draft: EditableProfile, profile: ProviderProfile | undefined) {
   if (!profile) return !draft.name && !draft.baseUrl && !draft.model && !draft.note && !draft.apiKey
   return (
@@ -193,6 +207,137 @@ function draftMatchesProfile(draft: EditableProfile, profile: ProviderProfile | 
     draft.model.trim() === profile.model &&
     draft.note.trim() === profile.note &&
     draft.apiKey.trim().length === 0
+  )
+}
+
+function useModalDialog(onClose: () => void) {
+  const dialogRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const focusInitialAction = () => dialogRef.current?.querySelector<HTMLElement>('[data-dialog-initial-focus]')?.focus()
+    const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(focusableSelector))
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    const focusTimer = window.setTimeout(focusInitialAction, 0)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.clearTimeout(focusTimer)
+      document.removeEventListener('keydown', handleKeyDown)
+      previousFocus?.focus()
+    }
+  }, [onClose])
+
+  return dialogRef
+}
+
+function ModalDialog({
+  className = '',
+  labelledBy,
+  onClose,
+  children,
+}: {
+  className?: string
+  labelledBy: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  const dialogRef = useModalDialog(onClose)
+  return (
+    <div className="confirm-backdrop" role="presentation">
+      <section ref={dialogRef} className={`confirm-dialog ${className}`} role="dialog" aria-modal="true" aria-labelledby={labelledBy}>
+        {children}
+      </section>
+    </div>
+  )
+}
+
+function SortableProviderRow({
+  profile,
+  index,
+  selected,
+  disabled,
+  onSelect,
+  onMove,
+}: {
+  profile: ProviderProfile
+  index: number
+  selected: boolean
+  disabled: boolean
+  onSelect: () => void
+  onMove: (targetIndex: number) => void
+}) {
+  const { attributes, isDragging, isOver, listeners, setActivatorNodeRef, setNodeRef, transform, transition } = useSortable({
+    id: profile.id,
+    disabled,
+  })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      data-provider-id={profile.id}
+      className={`provider-row ${selected ? 'selected' : ''} ${profile.active ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isOver ? 'drag-over' : ''}`}
+      role="option"
+      aria-selected={selected}
+      tabIndex={disabled ? -1 : 0}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.altKey && event.key === 'ArrowUp') {
+          event.preventDefault()
+          onMove(Math.max(0, index - 1))
+        } else if (event.altKey && event.key === 'ArrowDown') {
+          event.preventDefault()
+          onMove(index + 1)
+        } else if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect()
+        }
+      }}
+    >
+      <button
+        ref={setActivatorNodeRef}
+        className="provider-drag-handle"
+        type="button"
+        title="拖动排序"
+        aria-label={`拖动 ${profile.name} 调整列表顺序`}
+        onClick={(event) => event.stopPropagation()}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={15} aria-hidden="true" />
+      </button>
+      <span className="provider-symbol" aria-hidden="true"><Server size={16} /></span>
+      <span className="provider-row-main">
+        <strong>
+          {profile.name}
+          {profile.isDefault && <Star size={12} />}
+        </strong>
+        <small>{profile.baseUrl}</small>
+      </span>
+      <span className={`row-state ${profile.verified ? 'ok' : 'warning'}`} />
+    </div>
   )
 }
 
@@ -212,7 +357,10 @@ function App() {
   const [syncConfirm, setSyncConfirm] = useState(false)
   const [restartNotice, setRestartNotice] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [draggedProviderId, setDraggedProviderId] = useState<string | null>(null)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
 
   useEffect(() => {
     async function loadInitialState() {
@@ -378,6 +526,14 @@ function App() {
     void runAction('reorder-profiles', () => reorderProfiles(nextIds))
   }
 
+  function handleProviderDragEnd({ active, over }: DragEndEvent) {
+    if (!state || !over || active.id === over.id) return
+    const targetIndex = state.profiles.findIndex((profile) => profile.id === over.id)
+    if (targetIndex >= 0) {
+      moveProvider(String(active.id), targetIndex)
+    }
+  }
+
   function duplicateProfile() {
     if (!selectedProfile) return
     setSelectedId('')
@@ -492,6 +648,7 @@ function App() {
     { id: 'timeline', label: '活动记录', note: latestActivity?.time ?? '暂无记录', icon: <Activity size={17} /> },
   ]
   const selectedIsCurrent = Boolean(selectedProfile?.active)
+  const currentFileProfile = state.profiles.find((profile) => profile.active)
   const buildChannelLabel = state.runtimeMode !== 'tauri_native'
     ? '本地预览'
     : __CODEX_RELEASE_CHANNEL__ === 'stable'
@@ -554,6 +711,15 @@ function App() {
         </div>
       )}
 
+      <section className={`active-provider-notice ${currentFileProfile ? 'known' : 'unknown'}`} aria-live="polite">
+        <GitCompareArrows size={17} aria-hidden="true" />
+        <div>
+          <strong>{state.runtimeMode === 'browser_preview_mock' ? '预览当前服务商' : 'Codex 文件当前服务商'}</strong>
+          <span>{currentFileProfile ? `${currentFileProfile.name} · ${currentFileProfile.baseUrl}` : '当前文件配置未能与切换器目录唯一匹配。'}</span>
+        </div>
+        <small>{state.runtimeMode === 'browser_preview_mock' ? '预览不会读取本机文件。' : '已打开的 Codex 会话保留启动时的连接；切换后请在新会话确认实际使用。'}</small>
+      </section>
+
       {restoreConfirm && (
         <RestoreConfirmDialog
           backup={restoreConfirm}
@@ -614,55 +780,23 @@ function App() {
               </button>
             </div>
 
-            <div className="provider-list" aria-label="服务商列表">
-              {state.profiles.map((profile, index) => (
-                <div
-                  key={profile.id}
-                  className={`provider-row ${profile.id === selectedId ? 'selected' : ''} ${profile.active ? 'active' : ''} ${draggedProviderId === profile.id ? 'dragging' : ''}`}
-                  role="button"
-                  tabIndex={busy === null ? 0 : -1}
-                  draggable={busy === null}
-                  aria-label={`${profile.name}。按住拖动可调整列表顺序；按 Alt 加方向键也可移动。`}
-                  onDragStart={(event) => {
-                    setDraggedProviderId(profile.id)
-                    event.dataTransfer.effectAllowed = 'move'
-                    event.dataTransfer.setData('text/plain', profile.id)
-                  }}
-                  onDragEnd={() => setDraggedProviderId(null)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => {
-                    event.preventDefault()
-                    const sourceId = event.dataTransfer.getData('text/plain') || draggedProviderId
-                    setDraggedProviderId(null)
-                    if (sourceId) moveProvider(sourceId, index)
-                  }}
-                  onClick={() => selectProfile(profile)}
-                  onKeyDown={(event) => {
-                    if (event.altKey && event.key === 'ArrowUp') {
-                      event.preventDefault()
-                      moveProvider(profile.id, Math.max(0, index - 1))
-                    } else if (event.altKey && event.key === 'ArrowDown') {
-                      event.preventDefault()
-                      moveProvider(profile.id, Math.min(state.profiles.length - 1, index + 1))
-                    } else if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      selectProfile(profile)
-                    }
-                  }}
-                >
-                  <span className="provider-drag-handle" title="按住拖动排序" aria-hidden="true"><GripVertical size={15} /></span>
-                  <span className="provider-symbol" aria-hidden="true"><Server size={16} /></span>
-                  <span className="provider-row-main">
-                    <strong>
-                      {profile.name}
-                      {profile.isDefault && <Star size={12} />}
-                    </strong>
-                    <small>{profile.baseUrl}</small>
-                  </span>
-                  <span className={`row-state ${profile.verified ? 'ok' : 'warning'}`} />
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleProviderDragEnd}>
+              <SortableContext items={state.profiles.map((profile) => profile.id)} strategy={verticalListSortingStrategy}>
+                <div className="provider-list" role="listbox" aria-label="服务商列表">
+                  {state.profiles.map((profile, index) => (
+                    <SortableProviderRow
+                      key={profile.id}
+                      profile={profile}
+                      index={index}
+                      selected={profile.id === selectedId}
+                      disabled={busy !== null}
+                      onSelect={() => selectProfile(profile)}
+                      onMove={(targetIndex) => moveProvider(profile.id, Math.min(state.profiles.length - 1, targetIndex))}
+                    />
+                  ))}
                 </div>
-              ))}
-            </div>
+              </SortableContext>
+            </DndContext>
           </section>
 
         </aside>
@@ -830,19 +964,17 @@ function WorkspaceHeader({
 
 function RestartCodexNoticeDialog({ onClose }: { onClose: () => void }) {
   return (
-    <div className="confirm-backdrop" role="presentation">
-      <section className="confirm-dialog restart-notice-dialog" role="dialog" aria-modal="true" aria-labelledby="restart-notice-title">
-        <div className="confirm-dialog-icon"><RotateCcw size={20} /></div>
-        <div>
-          <span className="eyebrow">切换已完成</span>
-          <h2 id="restart-notice-title">请重新打开 Codex</h2>
-          <p>新配置已经写入并创建了恢复点，但当前正在运行的 Codex 或 ChatGPT 桌面端中的 Codex 会话不会自动切换。请关闭当前会话后重新打开，再确认实际工作正常。</p>
-        </div>
-        <div className="command-row">
-          <button className="primary-button" type="button" onClick={onClose}>我知道了</button>
-        </div>
-      </section>
-    </div>
+    <ModalDialog className="restart-notice-dialog" labelledBy="restart-notice-title" onClose={onClose}>
+      <div className="confirm-dialog-icon"><RotateCcw size={20} /></div>
+      <div>
+        <span className="eyebrow">切换已完成</span>
+        <h2 id="restart-notice-title">请重新打开 Codex</h2>
+        <p>新配置已经写入并创建了恢复点，但当前正在运行的 Codex 或 ChatGPT 桌面端中的 Codex 会话不会自动切换。请关闭当前会话后重新打开，再确认实际工作正常。</p>
+      </div>
+      <div className="command-row">
+        <button className="primary-button" type="button" onClick={onClose} data-dialog-initial-focus>我知道了</button>
+      </div>
+    </ModalDialog>
   )
 }
 
@@ -976,7 +1108,7 @@ function ModelsWorkspace({
       .join(' ')
       .toLocaleLowerCase()
       .includes(normalizedQuery)
-  })
+  }).toSorted((left, right) => modelSelectionRank(left) - modelSelectionRank(right))
   const totalModels = selectedModelCatalog?.models.length ?? 0
 
   return (
@@ -1022,15 +1154,17 @@ function ModelsWorkspace({
                       <span>当前模型可用性测试通过</span>
                     )}
                     {model.tags.map((tag) => <span key={tag}>{tag}</span>)}
+                    {isClearlyIncompatibleModel(model) && <span className="model-incompatible">不适用于 Codex Responses</span>}
                   </div>
                 </span>
                 <button
                   className="ghost-button compact-button"
                   type="button"
                   onClick={() => selectModel(model.id)}
-                  disabled={busy !== null || selectedProfile?.model === model.id}
+                  disabled={busy !== null || selectedProfile?.model === model.id || isClearlyIncompatibleModel(model)}
+                  title={isClearlyIncompatibleModel(model) ? '该模型目录标签表明它不适用于 Codex Responses。' : undefined}
                 >
-                  {selectedProfile?.model === model.id ? '当前模型' : '使用'}
+                  {selectedProfile?.model === model.id ? '当前模型' : isClearlyIncompatibleModel(model) ? '不适用' : '使用'}
                 </button>
               </div>
             ))
@@ -1060,20 +1194,18 @@ function ManualModelConfirmDialog({
   onConfirm: () => void
 }) {
   return (
-    <div className="confirm-backdrop" role="presentation">
-      <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="manual-model-dialog-title">
-        <div className="confirm-dialog-icon"><AlertTriangle size={20} /></div>
-        <div>
-          <span className="eyebrow">未验证模型</span>
-          <h2 id="manual-model-dialog-title">确认保存手动模型？</h2>
-          <p>{model} 不在最近刷新到的服务商模型目录中。保存后可运行可用性测试；测试未确认不代表已有 Codex 使用会失败。</p>
-        </div>
-        <div className="command-row">
-          <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
-          <button className="danger-button" type="button" onClick={onConfirm} disabled={busy}>继续保存</button>
-        </div>
-      </section>
-    </div>
+    <ModalDialog labelledBy="manual-model-dialog-title" onClose={onCancel}>
+      <div className="confirm-dialog-icon"><AlertTriangle size={20} /></div>
+      <div>
+        <span className="eyebrow">未验证模型</span>
+        <h2 id="manual-model-dialog-title">确认保存手动模型？</h2>
+        <p>{model} 不在最近刷新到的服务商模型目录中。保存后可运行可用性测试；测试未确认不代表已有 Codex 使用会失败。</p>
+      </div>
+      <div className="command-row">
+        <button className="ghost-button" type="button" onClick={onCancel} disabled={busy} data-dialog-initial-focus>取消</button>
+        <button className="danger-button" type="button" onClick={onConfirm} disabled={busy}>继续保存</button>
+      </div>
+    </ModalDialog>
   )
 }
 
@@ -1089,20 +1221,18 @@ function SyncCurrentConfigurationDialog({
   onConfirm: () => void
 }) {
   return (
-    <div className="confirm-backdrop" role="presentation">
-      <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="sync-dialog-title">
-        <div className="confirm-dialog-icon"><GitCompareArrows size={20} /></div>
-        <div>
-          <span className="eyebrow">同步当前 Codex 配置</span>
-          <h2 id="sync-dialog-title">确认更新切换器目录？</h2>
-          <p>{drift.profileName} 当前保存的是 {drift.savedModel}，Codex 正在使用 {drift.currentModel}。此操作只更新切换器目录，不会写入 Codex 配置、认证文件或发起远端请求。</p>
-        </div>
-        <div className="command-row">
-          <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
-          <button className="primary-button" type="button" onClick={onConfirm} disabled={busy}>确认同步</button>
-        </div>
-      </section>
-    </div>
+    <ModalDialog labelledBy="sync-dialog-title" onClose={onCancel}>
+      <div className="confirm-dialog-icon"><GitCompareArrows size={20} /></div>
+      <div>
+        <span className="eyebrow">同步当前 Codex 配置</span>
+        <h2 id="sync-dialog-title">确认更新切换器目录？</h2>
+        <p>{drift.profileName} 当前保存的是 {drift.savedModel}，Codex 正在使用 {drift.currentModel}。此操作只更新切换器目录，不会写入 Codex 配置、认证文件或发起远端请求。</p>
+      </div>
+      <div className="command-row">
+        <button className="ghost-button" type="button" onClick={onCancel} disabled={busy} data-dialog-initial-focus>取消</button>
+        <button className="primary-button" type="button" onClick={onConfirm} disabled={busy}>确认同步</button>
+      </div>
+    </ModalDialog>
   )
 }
 
@@ -1341,14 +1471,13 @@ function ApplicationSettingsDialog({
       ? `下载 v${updateInfo.latestVersion}`
       : '检查更新'
   return (
-    <div className="confirm-backdrop" role="presentation">
-      <section className="confirm-dialog application-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="application-settings-title">
+    <ModalDialog className="application-settings-dialog" labelledBy="application-settings-title" onClose={onClose}>
         <div className="section-heading-row">
           <div>
             <span className="eyebrow">应用设置</span>
             <h2 id="application-settings-title">应用偏好</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="关闭设置"><X size={16} /></button>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="关闭设置" data-dialog-initial-focus><X size={16} /></button>
         </div>
         <section className="settings-section" aria-labelledby="settings-startup-title">
           <div className="settings-section-heading">
@@ -1406,8 +1535,7 @@ function ApplicationSettingsDialog({
             </button>
           </div>
         </section>
-      </section>
-    </div>
+    </ModalDialog>
   )
 }
 
@@ -1424,27 +1552,25 @@ function RestoreConfirmDialog({
 }) {
   const [confirmation, setConfirmation] = useState('')
   return (
-    <div className="confirm-backdrop" role="presentation">
-      <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="restore-dialog-title">
-        <div className="confirm-dialog-icon"><AlertTriangle size={20} /></div>
-        <div>
-          <span className="eyebrow">安全恢复 · {backup.time}</span>
-          <h2 id="restore-dialog-title">确认回到这个恢复点？</h2>
-          <p>将只回退本工具写入的服务商、模型、接口地址和本机登录信息。MCP、插件、项目设置和你后来新增的内容不会被覆盖。</p>
-          <label className="restore-confirmation-field">
-            输入“恢复”后启用确认按钮
-            <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="恢复" autoFocus />
-          </label>
-        </div>
-        <div className="command-row">
-          <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
-          <button className="danger-button" type="button" onClick={() => onConfirm(confirmation)} disabled={busy || confirmation.trim() !== '恢复'}>
-            <RotateCcw size={16} />
-            确认恢复
-          </button>
-        </div>
-      </section>
-    </div>
+    <ModalDialog labelledBy="restore-dialog-title" onClose={onCancel}>
+      <div className="confirm-dialog-icon"><AlertTriangle size={20} /></div>
+      <div>
+        <span className="eyebrow">安全恢复 · {backup.time}</span>
+        <h2 id="restore-dialog-title">确认回到这个恢复点？</h2>
+        <p>将只回退本工具写入的服务商、模型、接口地址和本机登录信息。MCP、插件、项目设置和你后来新增的内容不会被覆盖。</p>
+        <label className="restore-confirmation-field">
+          输入“恢复”后启用确认按钮
+          <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="恢复" autoFocus data-dialog-initial-focus />
+        </label>
+      </div>
+      <div className="command-row">
+        <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
+        <button className="danger-button" type="button" onClick={() => onConfirm(confirmation)} disabled={busy || confirmation.trim() !== '恢复'}>
+          <RotateCcw size={16} />
+          确认恢复
+        </button>
+      </div>
+    </ModalDialog>
   )
 }
 
@@ -1462,36 +1588,34 @@ function SwitchConfirmDialog({
   const [riskAcknowledged, setRiskAcknowledged] = useState(false)
   const hasRisk = Boolean(preflight.riskDetail)
   return (
-    <div className="confirm-backdrop" role="presentation">
-      <section className="confirm-dialog switch-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="switch-dialog-title">
-        <div className="confirm-dialog-icon"><GitCompareArrows size={20} /></div>
-        <div>
-          <span className="eyebrow">切换影响确认</span>
-          <h2 id="switch-dialog-title">确认切换到 {preflight.targetName}？</h2>
-          <p>{preflight.riskDetail ? '本次可以安全写入配置，但仍有使用风险。确认时会再次核对当前配置没有变化，再创建新的恢复点；不会显示访问密钥或完整配置内容。' : '该服务商最近一次连接测试已通过。确认时会再次核对当前配置没有变化，再创建新的恢复点；不会显示访问密钥或完整配置内容。'}</p>
-          <dl className="switch-confirm-facts">
-            <div><dt>目标模型</dt><dd>{preflight.targetModel}</dd></div>
-            <div><dt>恢复点</dt><dd>{preflight.backupDetail}</dd></div>
-            <div><dt>保护检查</dt><dd>{preflight.protectedDetail}</dd></div>
-            {preflight.riskDetail && <div><dt>使用风险</dt><dd>{preflight.riskDetail}</dd></div>}
-          </dl>
-          {hasRisk && (
-            <label className="risk-confirmation">
-              <input type="checkbox" checked={riskAcknowledged} onChange={(event) => setRiskAcknowledged(event.target.checked)} />
-              <span>我已了解：这不会影响安全写入检查，但目标服务商的实际可用性尚未由本工具确认。</span>
-            </label>
-          )}
-          <p>此预览有效至 {preflight.expiresAt}。完成后请关闭当前 Codex 会话，并在新的会话中确认实际 provider 使用情况。</p>
-        </div>
-        <div className="command-row">
-          <button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button>
-          <button className="primary-button" type="button" onClick={() => onConfirm(riskAcknowledged)} disabled={busy || (hasRisk && !riskAcknowledged)}>
-            <PlugZap size={16} />
-            确认切换
-          </button>
-        </div>
-      </section>
-    </div>
+    <ModalDialog className="switch-confirm-dialog" labelledBy="switch-dialog-title" onClose={onCancel}>
+      <div className="confirm-dialog-icon"><GitCompareArrows size={20} /></div>
+      <div>
+        <span className="eyebrow">切换影响确认</span>
+        <h2 id="switch-dialog-title">确认切换到 {preflight.targetName}？</h2>
+        <p>{preflight.riskDetail ? '本次可以安全写入配置，但仍有使用风险。确认时会再次核对当前配置没有变化，再创建新的恢复点；不会显示访问密钥或完整配置内容。' : '该服务商最近一次连接测试已通过。确认时会再次核对当前配置没有变化，再创建新的恢复点；不会显示访问密钥或完整配置内容。'}</p>
+        <dl className="switch-confirm-facts">
+          <div><dt>目标模型</dt><dd>{preflight.targetModel}</dd></div>
+          <div><dt>恢复点</dt><dd>{preflight.backupDetail}</dd></div>
+          <div><dt>保护检查</dt><dd>{preflight.protectedDetail}</dd></div>
+          {preflight.riskDetail && <div><dt>使用风险</dt><dd>{preflight.riskDetail}</dd></div>}
+        </dl>
+        {hasRisk && (
+          <label className="risk-confirmation">
+            <input type="checkbox" checked={riskAcknowledged} onChange={(event) => setRiskAcknowledged(event.target.checked)} data-dialog-initial-focus />
+            <span>我已了解：这不会影响安全写入检查，但目标服务商的实际可用性尚未由本工具确认。</span>
+          </label>
+        )}
+        <p>此预览有效至 {preflight.expiresAt}。完成后请关闭当前 Codex 会话，并在新的会话中确认实际 provider 使用情况。</p>
+      </div>
+      <div className="command-row">
+        <button className="ghost-button" type="button" onClick={onCancel} disabled={busy} data-dialog-initial-focus={!hasRisk}>取消</button>
+        <button className="primary-button" type="button" onClick={() => onConfirm(riskAcknowledged)} disabled={busy || (hasRisk && !riskAcknowledged)}>
+          <PlugZap size={16} />
+          确认切换
+        </button>
+      </div>
+    </ModalDialog>
   )
 }
 

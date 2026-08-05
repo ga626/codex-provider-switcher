@@ -23,13 +23,14 @@ function assertBmp(buffer, width, height, label) {
   assert(Math.abs(buffer.readInt32LE(22)) === height, `${label} must be ${height}px high`)
 }
 
-const [packageJsonText, tauriConfigText, cargoToml, manifestText, libRs, adapterTs, mockDataTs, preflightScript, headerBmp, sidebarBmp] = await Promise.all([
+const [packageJsonText, tauriConfigText, cargoToml, manifestText, libRs, adapterTs, appTsx, mockDataTs, preflightScript, headerBmp, sidebarBmp] = await Promise.all([
   readText('package.json'),
   readText('src-tauri/tauri.conf.json'),
   readText('src-tauri/Cargo.toml'),
   readText('src-tauri/store/Package.appxmanifest'),
   readText('src-tauri/src/lib.rs'),
   readText('src/adapter.ts'),
+  readText('src/App.tsx'),
   readText('src/mockData.ts'),
   readText('scripts/qa/cutover-preflight.ps1'),
   readFile(join(root, 'src-tauri/installer/header.bmp')),
@@ -49,6 +50,8 @@ assert(tauriConfig.mainBinaryName === 'codex-provider-switcher', 'Tauri must bun
 assert(packageJson.scripts['tauri:dev'].includes('tauri dev'), 'tauri:dev must invoke the Tauri desktop runner')
 assert(packageJson.scripts['tauri:build'].includes('release:assets'), 'tauri:build must refresh branded installer assets')
 assert(packageJson.scripts['tauri:build'].includes('tauri build'), 'tauri:build must invoke the Tauri desktop bundler')
+assert(packageJson.dependencies['@dnd-kit/core'], 'Provider sorting must include the DnD runtime')
+assert(packageJson.dependencies['@dnd-kit/sortable'], 'Provider sorting must include the sortable integration')
 assert(!packageJson.scripts['tauri:dev'].includes('--bin local_backend'), 'tauri:dev must not select local_backend')
 assert(!packageJson.scripts['tauri:build'].includes('--bin local_backend'), 'tauri:build must not select local_backend')
 assert(cargoToml.includes('default-run = "codex-provider-switcher"'), 'Cargo must default to the desktop binary when multiple bins exist')
@@ -102,12 +105,17 @@ assert(libRs.includes('body.get("id").is_some()'), 'Provider verification must i
 assert(libRs.includes('has_compatible_response_output(&body)'), 'Provider verification must recognize a compatible response with model output')
 assert(libRs.includes('"response_shape_unconfirmed"'), 'Provider verification must distinguish an unconfirmed response shape from a provider failure')
 assert(libRs.includes('mark_catalog_model_verified'), 'Successful inference verification must update the matching catalog model')
-assert(libRs.includes('.timeout(Duration::from_secs(8))'), 'Compatibility probes must use the short timeout budget')
+assert(libRs.includes('.timeout(Duration::from_secs(15))'), 'Compatibility probes must use the bounded 15-second timeout budget')
 assert(libRs.includes('custom_authentication_risk(&candidate_config)?'), 'Switch preparation must surface the candidate external-authentication mode as a risk before confirmation')
 assertNotIncludes(switchProfileCore, '切换已阻止：缺少 API 密钥', 'Switching must not treat a missing TOML or profile API key as an unconditional blocker')
 assertNotIncludes(switchProfileCore, 'verify_provider_auth_probe', 'Switching must not trigger a remote compatibility probe')
 assertNotIncludes(libRs, 'uses_request_probe', 'src-tauri/src/lib.rs')
 assertNotIncludes(mockDataTs, 'safeMode:', 'Browser preview mock must not display an unimplemented safety mode')
+assert(appTsx.includes('DndContext'), 'Provider sorting must use the supported DnD context')
+assert(appTsx.includes('PointerSensor'), 'Provider sorting must expose a pointer interaction path')
+assert(appTsx.includes('KeyboardSensor'), 'Provider sorting must expose a keyboard interaction path')
+assert(appTsx.includes('className="provider-drag-handle"'), 'Provider sorting must expose a dedicated drag handle')
+assertNotIncludes(appTsx, 'draggable={busy === null}', 'Provider sorting must not rely on native HTML draggable behavior')
 assert(preflightScript.includes('Cutover preflight (read-only)'), 'Cutover preflight must remain read-only')
 assert(preflightScript.includes('New installation signature:'), 'Cutover preflight must report the installed app signature')
 assert(preflightScript.includes('Legacy process details:'), 'Cutover preflight must report legacy process ownership evidence')

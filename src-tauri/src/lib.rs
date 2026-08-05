@@ -2785,7 +2785,7 @@ fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOu
     };
 
     let client = match reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(15))
         .build()
     {
         Ok(client) => client,
