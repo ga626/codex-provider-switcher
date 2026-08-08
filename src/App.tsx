@@ -2,9 +2,13 @@ import {
   AlertTriangle,
   Boxes,
   CheckCircle2,
+  CircleHelp,
   Copy,
   Activity,
   Download,
+  Eye,
+  EyeOff,
+  FlaskConical,
   GripVertical,
   GitCompareArrows,
   KeyRound,
@@ -39,18 +43,20 @@ import {
   prepareSwitch,
   refreshModels,
   reorderProfiles,
+  runResponseProbe,
   restoreBackup,
   saveProfile,
   setDefaultProfile,
+  saveCostCalibration,
   syncCurrentConfiguration,
   switchProfile,
   setBackupPolicy,
   toggleAutoStart,
   verifyProfile,
 } from './adapter'
-import type { AppState, BackupItem, ConfigurationProtection, EditableProfile, ModelCatalog, ProviderProfile, SwitchPreflight, UpdateInfo, ValidationCheck } from './types'
+import type { AppState, BackupItem, ConfigurationProtection, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, SwitchPreflight, UpdateInfo, ValidationCheck } from './types'
 
-type ViewId = 'providers' | 'models' | 'switch-check' | 'protection' | 'timeline'
+type ViewId = 'providers' | 'models' | 'switch-check' | 'protection' | 'timeline' | 'lab'
 
 const emptyProfile: EditableProfile = {
   id: '',
@@ -123,7 +129,9 @@ function profileConfigurationChecks(profile: ProviderProfile | undefined, draft:
       id: 'profile-model',
       label: '模型名称',
       ok: model.length > 0,
-      detail: model.length > 0 ? model : '需要填写 Codex 使用的模型名称。',
+      detail: model.length > 0
+        ? providerModelLabel(model) === model ? model : `${providerModelLabel(model)}（模型标识：${model}）`
+        : '需要填写 Codex 使用的模型名称。',
       severity: 'required',
     },
     {
@@ -208,6 +216,26 @@ function draftMatchesProfile(draft: EditableProfile, profile: ProviderProfile | 
     draft.note.trim() === profile.note &&
     draft.apiKey.trim().length === 0
   )
+}
+
+function decimalToScaled(value: string) {
+  const [whole = '0', fraction = ''] = value.trim().split('.', 2)
+  return BigInt(whole) * 1_000_000_000_000n + BigInt(fraction.padEnd(12, '0').slice(0, 12) || '0')
+}
+
+function providerModelLabel(model: string) {
+  const mockLabels: Record<string, string> = {
+    'reasoning-current': '当前推理模型',
+    'reasoning-preview': '推理模型（预览）',
+    'reasoning-verified': '推理模型（已验证）',
+    'provider-reasoning-current': '默认推理模型',
+    'provider-reasoning-stable': '稳定推理模型',
+    'provider-fast-current': '默认快速模型',
+    'provider-fast-stable': '稳定快速模型',
+    'provider-chat-compatible': '兼容对话模型',
+    'provider-embedding-large': '向量模型',
+  }
+  return mockLabels[model] ?? model
 }
 
 function useModalDialog(onClose: () => void) {
@@ -334,7 +362,7 @@ function SortableProviderRow({
           {profile.name}
           {profile.isDefault && <Star size={12} />}
         </strong>
-        <small>{profile.baseUrl}</small>
+        <small>{profile.model ? `模型：${providerModelLabel(profile.model)}` : '尚未设置默认模型'}</small>
       </span>
       <span className={`row-state ${profile.verified ? 'ok' : 'warning'}`} />
     </div>
@@ -640,14 +668,12 @@ function App() {
     )
   }
 
-  const navItems: Array<{ id: ViewId; label: string; note: string; icon: React.ReactNode }> = [
+  const primaryNavItems: Array<{ id: ViewId; label: string; note: string; icon: React.ReactNode }> = [
     { id: 'providers', label: '服务商', note: `${state.profiles.length} 个配置`, icon: <LayoutDashboard size={17} /> },
-    { id: 'models', label: '模型目录', note: selectedModelCatalog?.status === 'ok' ? '已同步' : '待刷新', icon: <Boxes size={17} /> },
-    { id: 'switch-check', label: '切换前检查', note: !selectedProfile ? '先新增服务商' : hasUnsavedChanges ? '请先保存' : requiredFailures > 0 ? `${requiredFailures} 项待处理` : riskCount > 0 ? `${riskCount} 项风险可继续` : '可以切换', icon: <ShieldCheck size={17} /> },
-    { id: 'protection', label: '配置保护', note: state.configurationProtection.baselineReady ? '备份已就绪' : '需要处理', icon: <ShieldCheck size={17} /> },
+    { id: 'protection', label: '安全与恢复', note: state.configurationProtection.baselineReady ? '备份已就绪' : '需要处理', icon: <ShieldCheck size={17} /> },
     { id: 'timeline', label: '活动记录', note: latestActivity?.time ?? '暂无记录', icon: <Activity size={17} /> },
+    { id: 'lab', label: '实验室', note: '费用比较', icon: <FlaskConical size={17} /> },
   ]
-  const selectedIsCurrent = Boolean(selectedProfile?.active)
   const currentFileProfile = state.profiles.find((profile) => profile.active)
   const buildChannelLabel = state.runtimeMode !== 'tauri_native'
     ? '本地预览'
@@ -669,22 +695,27 @@ function App() {
             <p>服务商连接管理</p>
           </div>
         </div>
+        <nav className="top-navigation" aria-label="主导航">
+          {primaryNavItems.map((item) => (
+            <button key={item.id} className={`top-nav-item ${activeView === item.id || (item.id === 'providers' && ['models', 'switch-check'].includes(activeView)) ? 'selected' : ''}`} type="button" aria-label={item.label} title={item.label} onClick={() => setActiveView(item.id)}>
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
         <div className="title-actions">
-          <span className="build-identity" title="用于确认当前运行的版本和构建来源">
-            {buildChannelLabel} v{__APP_VERSION__} · {__CODEX_BUILD_SHA__.slice(0, 7)}
-          </span>
+          {state.runtimeMode === 'browser_preview_mock' && <span className="preview-status" title="开发预览不会读取本机配置，也不会连接、验证或切换真实服务商。">预览 · 只读</span>}
+          <div className="provider-command-bar" aria-label="当前正在使用的服务商">
+            <span className="provider-current-label">正在使用</span>
+            <strong>{currentFileProfile?.name ?? '未识别'}</strong>
+            <span className="provider-current-model">{currentFileProfile?.model ? providerModelLabel(currentFileProfile.model) : '未设置模型'}</span>
+          </div>
+          {state.runtimeMode === 'tauri_native' && <span className="build-identity" title="用于确认当前运行的发布渠道">{buildChannelLabel} v{__APP_VERSION__}</span>}
           <button className="icon-button" type="button" onClick={() => setSettingsOpen(true)} title="应用设置" aria-label="应用设置">
             <Settings size={17} />
           </button>
         </div>
       </header>
-
-      {state.runtimeMode === 'browser_preview_mock' && (
-        <section className="error-banner preview-banner">
-          <AlertTriangle size={18} />
-          <span>开发预览不读取本机配置，也不会连接、验证或切换真实服务商。</span>
-        </section>
-      )}
 
       {state.startupNotice && (
         <section className="error-banner">
@@ -710,15 +741,6 @@ function App() {
           <button type="button" onClick={() => setNotice(null)} aria-label="关闭完成提示"><X size={15} /></button>
         </div>
       )}
-
-      <section className={`active-provider-notice ${currentFileProfile ? 'known' : 'unknown'}`} aria-live="polite">
-        <GitCompareArrows size={17} aria-hidden="true" />
-        <div>
-          <strong>{state.runtimeMode === 'browser_preview_mock' ? '预览当前服务商' : 'Codex 文件当前服务商'}</strong>
-          <span>{currentFileProfile ? `${currentFileProfile.name} · ${currentFileProfile.baseUrl}` : '当前文件配置未能与切换器目录唯一匹配。'}</span>
-        </div>
-        <small>{state.runtimeMode === 'browser_preview_mock' ? '预览不会读取本机文件。' : '已打开的 Codex 会话保留启动时的连接；切换后请在新会话确认实际使用。'}</small>
-      </section>
 
       {restoreConfirm && (
         <RestoreConfirmDialog
@@ -750,29 +772,9 @@ function App() {
         />
       )}
 
-      <section className="workbench">
-        <aside className="navigation-pane">
-          <section className="sidebar-workspaces" aria-labelledby="workspace-nav-title">
-            <div className="nav-group-label" id="workspace-nav-title">工作区</div>
-            <nav className="nav-list" aria-label="主导航">
-              {navItems.map((item) => (
-                <button
-                  key={item.id}
-                  className={`nav-item ${activeView === item.id ? 'selected' : ''}`}
-                  type="button"
-                  onClick={() => setActiveView(item.id)}
-                >
-                  {item.icon}
-                  <span>
-                    <strong>{item.label}</strong>
-                    <small>{item.note}</small>
-                  </span>
-                </button>
-              ))}
-            </nav>
-          </section>
-
-          <section className="sidebar-connections" aria-labelledby="saved-connections-title">
+      <section className={`workbench ${['providers', 'models', 'switch-check'].includes(activeView) ? 'provider-workbench' : ''}`}>
+        {['providers', 'models', 'switch-check'].includes(activeView) && <aside className="provider-object-pane" aria-labelledby="saved-connections-title">
+          <section className="sidebar-connections">
             <div className="sidebar-section-title">
               <span id="saved-connections-title">服务商列表</span>
               <button type="button" onClick={startNewProfile} disabled={busy !== null} aria-label="新增服务商">
@@ -798,10 +800,9 @@ function App() {
               </SortableContext>
             </DndContext>
           </section>
+        </aside>}
 
-        </aside>
-
-        <section className="workspace-panel">
+        <section className={`workspace-panel ${['providers', 'models', 'switch-check'].includes(activeView) ? 'provider-context-panel' : 'full-workspace-panel'}`}>
           <WorkspaceHeader
             activeView={activeView}
             selectedProfile={selectedProfile}
@@ -809,8 +810,9 @@ function App() {
             riskCount={riskCount}
             selectedModelCatalog={selectedModelCatalog}
             canSwitch={canSwitch}
-            selectedIsCurrent={selectedIsCurrent}
-            onSwitchRequested={requestSwitch}
+            preview={state.runtimeMode === 'browser_preview_mock'}
+            requestSwitch={requestSwitch}
+            onViewChange={setActiveView}
           />
           <div className="workspace-scroll">
             {activeView === 'providers' && (
@@ -856,6 +858,7 @@ function App() {
               />
             )}
             {activeView === 'timeline' && <TimelineWorkspace state={state} />}
+            {activeView === 'lab' && <LabWorkspace state={state} selectedProfile={selectedProfile} busy={busy} runAction={runAction} />}
           </div>
         </section>
 
@@ -905,8 +908,9 @@ function WorkspaceHeader({
   riskCount,
   selectedModelCatalog,
   canSwitch,
-  selectedIsCurrent,
-  onSwitchRequested,
+  preview,
+  requestSwitch,
+  onViewChange,
 }: {
   activeView: ViewId
   selectedProfile: ProviderProfile | undefined
@@ -914,14 +918,17 @@ function WorkspaceHeader({
   riskCount: number
   selectedModelCatalog: ModelCatalog | undefined
   canSwitch: boolean
-  selectedIsCurrent: boolean
-  onSwitchRequested: () => void
+  preview: boolean
+  requestSwitch: () => Promise<void>
+  onViewChange: (view: ViewId) => void
 }) {
-  const showSwitchAction = Boolean(selectedProfile) && !selectedIsCurrent
+  if (activeView === 'lab') return null
+
+  const isProviderContext = ['providers', 'models', 'switch-check'].includes(activeView)
   const copy: Record<ViewId, { title: string; note: string }> = {
     providers: {
-      title: selectedProfile ? `编辑 ${selectedProfile.name}` : '新增服务商',
-      note: '管理连接配置、默认项和安全操作。',
+      title: '服务商',
+      note: selectedProfile ? `已选择 ${selectedProfile.name}` : '新增并管理服务商连接。',
     },
     models: {
       title: '模型目录',
@@ -939,6 +946,49 @@ function WorkspaceHeader({
       title: '活动记录',
       note: '切换、检查和配置变更按时间记录。',
     },
+    lab: {
+      title: '实验室',
+      note: '记录同一测试的实际花费，比较服务商性价比。',
+    },
+  }
+
+  if (isProviderContext) {
+    const switchLabel = !selectedProfile
+      ? '先选择服务商'
+      : selectedProfile.active
+        ? '当前正在使用'
+        : '检查并切换'
+    return (
+      <header className="workspace-header provider-workspace-header">
+        <nav className="provider-workflow-nav" aria-label="服务商管理入口">
+          <button className={activeView === 'providers' ? 'selected' : ''} type="button" onClick={() => onViewChange('providers')}>
+            <Settings size={19} aria-hidden="true" />
+            <span>配置</span>
+          </button>
+          <button className={activeView === 'models' ? 'selected' : ''} type="button" onClick={() => onViewChange('models')}>
+            <Boxes size={19} aria-hidden="true" />
+            <span>模型目录</span>
+          </button>
+          <button className={activeView === 'switch-check' ? 'selected' : ''} type="button" onClick={() => onViewChange('switch-check')}>
+            <ShieldCheck size={19} aria-hidden="true" />
+            <span>切换前检查</span>
+          </button>
+        </nav>
+        <div className="provider-switch-slot">
+          <button
+            className={`provider-switch-command ${selectedProfile?.active ? 'current' : 'ready'}`}
+            type="button"
+            disabled={!selectedProfile || selectedProfile.active || !canSwitch}
+            onClick={() => void requestSwitch()}
+            aria-label={selectedProfile?.active ? `当前正在使用 ${selectedProfile.name}` : selectedProfile ? `检查并切换到 ${selectedProfile.name}` : switchLabel}
+            title={preview ? '预览不会修改本机配置。' : selectedProfile ? `目标服务商：${selectedProfile.name}` : undefined}
+          >
+            <PlugZap size={18} />
+            {switchLabel}
+          </button>
+        </div>
+      </header>
+    )
   }
 
   return (
@@ -947,17 +997,9 @@ function WorkspaceHeader({
         <h2>{copy[activeView].title}</h2>
         <p>{copy[activeView].note}</p>
       </div>
-      {showSwitchAction && (
-        <div className="workspace-header-actions">
-          <span className={`workspace-badge ${selectedProfile && requiredFailures === 0 ? (riskCount > 0 ? 'warning' : 'ok') : 'warning'}`}>
-            {!selectedProfile ? '未选择服务商' : requiredFailures > 0 ? `${requiredFailures} 项阻止切换` : riskCount > 0 ? `可切换，但有 ${riskCount} 项风险` : '可以切换'}
-          </span>
-          <button className="primary-button header-switch-button" type="button" onClick={onSwitchRequested} disabled={!canSwitch}>
-            <PlugZap size={16} />
-            {selectedIsCurrent ? '当前使用中' : selectedProfile ? `切换到 ${selectedProfile.name}` : '先新增服务商'}
-          </button>
-        </div>
-      )}
+      {activeView === 'switch-check' && <span className={`workspace-badge ${selectedProfile && requiredFailures === 0 ? (riskCount > 0 ? 'warning' : 'ok') : 'warning'}`}>
+        {!selectedProfile ? '未选择服务商' : requiredFailures > 0 ? `${requiredFailures} 项阻止切换` : riskCount > 0 ? `可切换，但有 ${riskCount} 项风险` : '可以切换'}
+      </span>}
     </header>
   )
 }
@@ -995,14 +1037,15 @@ function ProviderWorkspace({
   duplicateProfile: () => void
   runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
 }) {
+  const [keyVisible, setKeyVisible] = useState(false)
+  const hasSavedKey = Boolean(selectedProfile?.hasApiKey && !draft.apiKey)
   return (
     <div className="workspace-stack">
       <section className="connection-banner">
         <div className="connection-status-icon"><PlugZap size={20} /></div>
         <div className="connection-copy">
-          <span>连接配置</span>
           <strong>{selectedProfile?.name ?? '新建服务商'}</strong>
-          <small>{draft.baseUrl || '填写接口地址后检查连接'}</small>
+          <small>{draft.baseUrl ? '连接信息已填写' : '填写连接信息后即可保存'}</small>
         </div>
         <div className={`connection-state ${selectedProfile?.active ? 'active' : ''}`}>
           <span className="status-dot" />
@@ -1033,6 +1076,7 @@ function ProviderWorkspace({
               onChange={(event) => updateDraft('model', event.target.value)}
               placeholder="先刷新模型目录，或手动输入服务商支持的模型"
             />
+            {providerModelLabel(draft.model) !== draft.model && <small className="model-purpose-note">用途：{providerModelLabel(draft.model)}。输入框内保留实际模型标识。</small>}
           </label>
           <label>
             访问密钥
@@ -1041,10 +1085,21 @@ function ProviderWorkspace({
               <input
                 value={draft.apiKey}
                 onChange={(event) => updateDraft('apiKey', event.target.value)}
-                placeholder={selectedProfile?.hasApiKey ? '已保存访问密钥；如需替换请重新输入。' : '粘贴访问密钥'}
-                type="password"
+                placeholder={hasSavedKey ? '••••••••••••' : '粘贴访问密钥'}
+                type={keyVisible ? 'text' : 'password'}
+                aria-label={hasSavedKey ? '已保存访问密钥，输入新密钥即可替换' : '访问密钥'}
               />
+              <button
+                className="icon-button key-visibility-button"
+                type="button"
+                onClick={() => setKeyVisible((visible) => !visible)}
+                title={keyVisible ? '隐藏本次输入的密钥' : '显示本次输入的密钥'}
+                aria-label={keyVisible ? '隐藏本次输入的密钥' : '显示本次输入的密钥'}
+              >
+                {keyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
             </div>
+            {hasSavedKey && <small className="key-saved-note">已保存。重新输入可替换；已保存内容不会回传到界面。</small>}
           </label>
           <label className="wide">
             备注
@@ -1117,7 +1172,7 @@ function ModelsWorkspace({
         <div>
           <span>当前服务商</span>
           <strong>{selectedProfile?.name ?? '未选择'}</strong>
-          <small>{selectedProfile?.baseUrl ?? '选择左侧服务商后刷新模型目录'}</small>
+          <small>{selectedProfile?.model ? `当前模型：${providerModelLabel(selectedProfile.model)}` : '选择左侧服务商后刷新模型目录'}</small>
         </div>
         <div className="model-toolbar-actions">
           <label className="model-search">
@@ -1146,7 +1201,8 @@ function ModelsWorkspace({
             visibleModels.map((model) => (
               <div className={`model-row ${selectedProfile?.model === model.id ? 'selected' : ''}`} key={model.id}>
                 <span>
-                  <strong>{model.id}</strong>
+                  <strong>{providerModelLabel(model.id)}</strong>
+                  {providerModelLabel(model.id) !== model.id && <small>模型标识：{model.id}</small>}
                   {model.aliases.length > 0 && <small>别名：{model.aliases.join(', ')}</small>}
                   <div className="model-meta">
                     <span>服务商目录</span>
@@ -1501,7 +1557,7 @@ function ApplicationSettingsDialog({
         <section className="settings-section" aria-labelledby="settings-protection-title">
           <div className="settings-section-heading">
             <h3 id="settings-protection-title">恢复保护</h3>
-            <p>首次启动基线永久保留。恢复和手动保存请前往“配置保护”。</p>
+            <p>首次启动基线永久保留。恢复和手动保存请前往“安全与恢复”。</p>
           </div>
           <div className="settings-option-group">
             <label>
@@ -1636,6 +1692,154 @@ function TimelineWorkspace({ state }: { state: AppState }) {
         </div>
       </section>
     </div>
+  )
+}
+
+function LabWorkspace({
+  state,
+  selectedProfile,
+  busy,
+  runAction,
+}: {
+  state: AppState
+  selectedProfile: ProviderProfile | undefined
+  busy: string | null
+  runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
+}) {
+  const [labProviderId, setLabProviderId] = useState(selectedProfile?.id ?? state.currentProfileId)
+  const [fundingMode, setFundingMode] = useState<CostCalibration['fundingMode']>('prepaid')
+  const [paidCny, setPaidCny] = useState('')
+  const [consumableCredit, setConsumableCredit] = useState('')
+  const [debitCredit, setDebitCredit] = useState('')
+  const profile = state.profiles.find((item) => item.id === labProviderId) ?? selectedProfile ?? state.profiles.find((item) => item.active)
+  const latestProbe = (state.responseProbes ?? []).find((item) => item.providerId === profile?.id && item.probeVersion === 'response-observation-v1')
+  const completedCalibrations = (state.costCalibrations ?? []).filter((item) => item.state === 'completed' && item.resultCny !== '0')
+  const comparableRecords = completedCalibrations
+    .filter((item) => item.model === (profile?.model || '未设置模型') && item.probeVersion === 'cost-calibration-v1')
+    .toSorted((left, right) => {
+      const difference = decimalToScaled(left.resultCny) - decimalToScaled(right.resultCny)
+      return difference < 0n ? -1 : difference > 0n ? 1 : 0
+    })
+  const lowestCost = comparableRecords[0] ? decimalToScaled(comparableRecords[0].resultCny) : null
+  const scoreFor = (item: CostCalibration) => {
+    if (!lowestCost || comparableRecords.length < 2) return null
+    const normalized = decimalToScaled(item.resultCny)
+    if (normalized <= 0n) return null
+    return Math.max(1, Math.min(100, Number((lowestCost * 100n) / normalized)))
+  }
+
+  useEffect(() => {
+    if (latestProbe?.status === 'final_cost_inline' && latestProbe.costCandidate) {
+      setDebitCredit(latestProbe.costCandidate)
+    }
+  }, [latestProbe?.id])
+
+  async function runCostTest() {
+    if (!profile) return
+    await runAction('run-cost-probe', () => runResponseProbe(profile.id))
+  }
+
+  async function saveCalibration() {
+    if (!profile) return
+    await runAction('save-cost-calibration', () => saveCostCalibration({
+      providerId: profile.id,
+      providerName: profile.name,
+      fundingMode,
+      paidCny,
+      consumableCredit,
+      debitCredit,
+      creditUnitLabel: '平台额度',
+      model: profile.model || '未设置模型',
+      probeVersion: 'cost-calibration-v1',
+    }))
+    setDebitCredit('')
+  }
+
+  return (
+    <div className="workspace-stack lab-workspace">
+      <section className="lab-intro">
+        <FlaskConical size={22} aria-hidden="true" />
+        <div>
+          <h3>性价比中心</h3>
+          <p>用同一条固定测试的人民币成本，比较服务商。</p>
+        </div>
+      </section>
+      <section className="surface-panel lab-ranking" aria-labelledby="lab-ranking-title">
+        <div className="section-heading-row">
+          <div>
+            <h3 id="lab-ranking-title">性价比排名</h3>
+          </div>
+          <span className="section-meta">同一模型中，最低实际花费为 100 分</span>
+        </div>
+        {comparableRecords.length < 2 ? <p className="lab-empty">先为至少两个服务商保存同一模型的费用记录，才能生成排名。</p> : (
+          <div className="lab-ranking-list">
+            {comparableRecords.map((item, index) => (
+              <div className="lab-ranking-row" key={item.id}>
+                <span className="ranking-position">{index + 1}</span>
+                <div><strong>{item.providerName}</strong><small>{providerModelLabel(item.model)} · {item.updatedAt}</small></div>
+                <strong className="ranking-cost">¥{item.resultCny}</strong>
+                <div className="ranking-score"><strong>{scoreFor(item)} 分</strong><span>越高越划算</span></div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="surface-panel lab-record-cost">
+        <div className="section-heading-row">
+          <div>
+            <h3>记录费用</h3>
+            <p className="section-description">先运行一次固定测试。系统会尝试读取本次扣费并填入“测试额度”；若服务商没有返回费用，就按提示从平台使用日志复制。再填写充值金额和平台实际额度，保存后即可参与同模型排名。</p>
+          </div>
+        </div>
+        <div className="lab-selected-provider">
+          <label>
+            服务商
+            <select value={profile?.id ?? ''} onChange={(event) => { setLabProviderId(event.target.value); setDebitCredit('') }}>
+              {state.profiles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </label>
+          <span>{profile?.model ? providerModelLabel(profile.model) : '未设置模型'}</span>
+        </div>
+        <div className={`lab-probe-status ${latestProbe ? latestProbe.status : 'idle'}`}>
+          <div>
+            <strong>{latestProbe?.status === 'final_cost_inline' ? '已读取测试额度' : latestProbe ? '未读取到测试额度' : '尚未运行测试'}</strong>
+            <span>{latestProbe?.status === 'final_cost_inline'
+              ? '已从响应中读取费用候选值。请确认它与平台使用日志的扣费单位一致。'
+              : latestProbe ? latestProbe.detail : '运行后会发出一条极短请求，不会切换服务商或改写 Codex 配置。'}</span>
+          </div>
+          <button className="primary-button" type="button" disabled={!profile || busy !== null} onClick={() => void runCostTest()}>
+            <Activity size={15} />运行固定测试
+          </button>
+        </div>
+        <div className="lab-form">
+          <label>
+            <span className="field-label">计费方式 <FieldHint text="充值：按实际付款换得平台余额。订阅固定：填写本账期的实际付款和可用总额度。" /></span>
+            <select aria-label="计费方式" value={fundingMode} onChange={(event) => setFundingMode(event.target.value as CostCalibration['fundingMode'])}><option value="prepaid">充值</option><option value="subscription">订阅固定</option></select>
+          </label>
+          <label><span className="field-label">充值金额 <FieldHint text="购买这笔平台额度实际支付的人民币金额。" /></span><input aria-label="充值金额" type="text" inputMode="decimal" value={paidCny} onChange={(event) => setPaidCny(event.target.value)} placeholder="例如 10" /></label>
+          <label><span className="field-label">平台实际额度 <FieldHint text="付款后可用于调用的总额度，含赠送和折扣，按平台后台余额填写。" /></span><input aria-label="平台实际额度" type="text" inputMode="decimal" value={consumableCredit} onChange={(event) => setConsumableCredit(event.target.value)} placeholder={fundingMode === 'subscription' ? '本账期可用总额度' : '充值后到账总额'} /></label>
+          <label><span className="field-label">测试额度 <FieldHint text="固定测试被平台扣掉的额度。系统能读到时会自动填入；否则从平台使用日志复制。" /></span><input aria-label="测试额度" type="text" inputMode="decimal" value={debitCredit} onChange={(event) => setDebitCredit(event.target.value)} placeholder="运行测试后自动填写，或从日志复制" /></label>
+        </div>
+        <div className="lab-module-actions"><button className="primary-button" type="button" disabled={!profile || busy !== null || !paidCny || !consumableCredit || !debitCredit} onClick={() => void saveCalibration()}><Save size={15} />计算并保存</button><span>按三项数据换算固定测试的人民币成本。</span></div>
+      </section>
+      <section className="surface-panel lab-results" aria-labelledby="lab-results-title">
+        <div className="section-heading-row"><div><h3 id="lab-results-title">费用记录</h3></div></div>
+        {completedCalibrations.length === 0 ? <p className="lab-empty">保存一条费用记录后，这里会显示实际花费和记录时间。</p> : (
+          <div className="lab-record-list">
+            {completedCalibrations.map((item) => <div className="lab-result-row" key={item.id}><span>{item.providerName}</span><strong>¥{item.resultCny}</strong><small>{providerModelLabel(item.model)} · {item.fundingMode === 'subscription' ? '订阅' : '充值'} · {item.updatedAt}</small></div>)}
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function FieldHint({ text }: { text: string }) {
+  return (
+    <span className="field-hint">
+      <button type="button" aria-label="查看字段说明"><CircleHelp size={14} aria-hidden="true" /></button>
+      <span role="tooltip">{text}</span>
+    </span>
   )
 }
 

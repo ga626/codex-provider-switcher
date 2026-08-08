@@ -1,9 +1,11 @@
 use codex_switcher_tauri_lib::{
     check_for_update_core, create_manual_backup_core, delete_profile_core, load_state_core,
     prepare_switch_core, refresh_models_core, reorder_profiles_core, restore_backup_core,
-    restore_latest_backup_core, save_profile_core, set_backup_policy_core,
+    restore_latest_backup_core, run_response_probe_core, save_cost_calibration_core,
+    save_profile_core, set_backup_policy_core,
     set_default_profile_core, switch_profile_core, sync_current_configuration_core,
-    toggle_auto_start_core, verify_profile_core, AppState, EditableProfile, SwitcherError,
+    toggle_auto_start_core, verify_profile_core, AppState, CostCalibrationInput, EditableProfile,
+    SwitcherError,
 };
 use serde_json::{json, Value};
 use std::{
@@ -325,6 +327,19 @@ fn handle_api(
             switch_profile_core(profile_id, operation_id, risk_acknowledged).map(state_json)
         }
         ("POST", "/api/profiles/verify") => verify_profile_core(profile_id(body)?).map(state_json),
+        ("POST", "/api/lab/response-probe") => {
+            run_response_probe_core(profile_id(body)?).map(state_json)
+        }
+        ("POST", "/api/lab/cost-calibration") => {
+            let input = request_json(body)?
+                .get("input")
+                .cloned()
+                .ok_or_else(|| SwitcherError::Message("缺少费用校准输入。".to_string()))
+                .and_then(|value| {
+                    serde_json::from_value::<CostCalibrationInput>(value).map_err(SwitcherError::from)
+                })?;
+            save_cost_calibration_core(input).map(state_json)
+        }
         ("POST", "/api/models/refresh") => refresh_models_core(profile_id(body)?).map(state_json),
         ("POST", "/api/profiles/default") => {
             set_default_profile_core(profile_id(body)?).map(state_json)

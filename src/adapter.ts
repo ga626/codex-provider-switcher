@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { initialState } from './mockData'
-import type { AppState, EditableProfile, ModelCatalog, ProviderProfile, SwitchPreflight, UpdateInfo } from './types'
+import type { AppState, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, ResponseProbeObservation, SwitchPreflight, UpdateInfo } from './types'
 
 const isTauri = '__TAURI_INTERNALS__' in window
 const allowBrowserMock = import.meta.env.VITE_CODEX_PROVIDER_SWITCHER_ALLOW_MOCK === 'true'
@@ -511,6 +511,93 @@ export async function verifyProfile(profileId: string): Promise<AppState> {
     title: '预览未执行验证',
     detail: `${target?.name ?? '服务商'} 没有连接远端服务商；请使用桌面开发版执行真实检查。`,
     tone: 'warning',
+  })
+  return structuredClone(mockState)
+}
+
+export async function runResponseProbe(profileId: string): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('run_response_probe', { profileId })
+  }
+  const webState = await tryWebBackend<AppState>('/api/lab/response-probe', apiPost({ profileId }))
+  if (webState) {
+    return webState
+  }
+  await mockDelay()
+  const profile = mockState.profiles.find((item) => item.id === profileId)
+  if (!profile) throw new Error('未找到服务商配置。')
+  const observedAt = nowLabel()
+  const observation: ResponseProbeObservation = {
+    id: crypto.randomUUID(),
+    providerId: profile.id,
+    providerName: profile.name,
+    model: profile.model || '未设置模型',
+    probeVersion: 'response-observation-v1',
+    observedAt,
+    status: 'final_cost_inline',
+    httpStatus: 200,
+    requestId: `preview-${Date.now().toString(36)}`,
+    usage: { inputTokens: 12, outputTokens: 4, totalTokens: 16 },
+    costCandidate: '0.000524',
+    detail: '预览模拟：已返回费用候选字段。真实桌面应用会发送一次短请求，并只保存非敏感观察字段。',
+  }
+  mockState.responseProbes.unshift(observation)
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: '预览已模拟返回能力探针',
+    detail: `${profile.name} 未连接远端；未读取或发送真实密钥。`,
+    tone: 'info',
+  })
+  return structuredClone(mockState)
+}
+
+export async function saveCostCalibration(input: Omit<CostCalibration, 'id' | 'createdAt' | 'updatedAt' | 'resultCny' | 'state'>): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('save_cost_calibration', { input })
+  }
+  const webState = await tryWebBackend<AppState>('/api/lab/cost-calibration', apiPost({ input }))
+  if (webState) {
+    return webState
+  }
+  await mockDelay()
+  const scale = 1_000_000_000_000n
+  function parseFixed(value: string, label: string) {
+    const trimmed = value.trim()
+    const match = /^(\d+)(?:\.(\d{1,12}))?$/.exec(trimmed)
+    if (!match) throw new Error(`${label} 必须是最多 12 位小数的正十进制数。`)
+    const whole = BigInt(match[1])
+    const fraction = BigInt((match[2] ?? '').padEnd(12, '0') || '0')
+    const scaled = whole * scale + fraction
+    if (scaled <= 0n) throw new Error(`${label} 必须大于 0。`)
+    return scaled
+  }
+  function formatFixed(value: bigint) {
+    const whole = value / scale
+    const fraction = (value % scale).toString().padStart(12, '0').replace(/0+$/, '')
+    return fraction ? `${whole}.${fraction}` : whole.toString()
+  }
+  const paid = parseFixed(input.paidCny, '实付金额')
+  const credit = parseFixed(input.consumableCredit, '可消费额度')
+  const debit = parseFixed(input.debitCredit, '后台最终扣费')
+  const calculated = (paid * debit) / credit
+  if (calculated <= 0n) throw new Error('计算结果过小，无法在当前精度下保存。')
+  const now = nowLabel()
+  const record: CostCalibration = {
+    ...input,
+    id: crypto.randomUUID(),
+    resultCny: formatFixed(calculated),
+    state: 'completed',
+    createdAt: now,
+    updatedAt: now,
+  }
+  mockState.costCalibrations.unshift(record)
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: '费用校准已保存',
+    detail: `${record.providerName} 的固定探针成本为 ¥${record.resultCny}。`,
+    tone: 'success',
   })
   return structuredClone(mockState)
 }

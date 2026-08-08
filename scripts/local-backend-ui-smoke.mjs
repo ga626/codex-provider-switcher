@@ -74,7 +74,7 @@ const providerServer = createServer((request, response) => {
       return
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })
-    response.end(JSON.stringify({ id: 'resp_ui_fixture', object: 'response' }))
+    response.end(JSON.stringify({ id: 'resp_ui_fixture', object: 'response', cost: 0.000524 }))
   })
 })
 await new Promise((resolve, reject) => {
@@ -148,15 +148,17 @@ try {
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
   await page.locator('.app-shell').waitFor()
   await page.getByRole('heading', { name: 'Signalman AI' }).waitFor()
-  await page.getByText('2 个配置').waitFor()
-  await page.getByRole('heading', { name: '编辑 UI Fixture Provider' }).waitFor()
-  await page.getByText('Codex 文件当前服务商').waitFor()
-  await page.getByText('已打开的 Codex 会话保留启动时的连接；切换后请在新会话确认实际使用。').waitFor()
+  await page.locator('.top-navigation').waitFor()
+  await page.locator('.provider-object-pane').waitFor()
+  await page.locator('.provider-row').filter({ hasText: 'UI Fixture Provider' }).click()
+  await page.getByRole('heading', { name: '基础配置' }).waitFor()
+  await page.getByText('连接信息已填写').waitFor()
   await page.getByRole('button', { name: /切换前检查/ }).click()
   await page.getByRole('heading', { name: '完成以下检查后即可切换' }).waitFor()
   await page.getByRole('heading', { name: '这些设置会在切换后继续生效' }).waitFor()
   await page.getByText('Responses 线路协议').waitFor()
-  await page.getByRole('button', { name: '切换到 UI Fixture Provider' }).click()
+  await page.locator('.top-navigation .top-nav-item[aria-label="服务商"]').click()
+  await page.getByRole('button', { name: '检查并切换到 UI Fixture Provider' }).click()
   await page.getByRole('dialog', { name: '确认切换到 UI Fixture Provider？' }).waitFor()
   await page.getByText('切换影响确认').waitFor()
   await page.getByText('保护检查').first().waitFor()
@@ -172,10 +174,22 @@ try {
     if (count !== 0) throw new Error('workspace must not render nested scrollable check lists')
   })
   await page.screenshot({ path: join(outputDir, 'switch-check.png'), fullPage: true })
-  await page.getByRole('button', { name: /配置保护/ }).click()
+  await page.getByRole('button', { name: /实验室/ }).click()
+  await page.getByRole('heading', { name: '性价比中心' }).waitFor()
+  await page.getByRole('button', { name: '运行固定测试' }).click()
+  await page.getByText('已读取测试额度').waitFor()
+  if (await page.getByLabel('测试额度').inputValue() !== '0.000524') {
+    throw new Error('cost test must prefill the provider cost candidate')
+  }
+  await page.getByLabel('充值金额').fill('10')
+  await page.getByLabel('平台实际额度').fill('1000')
+  await page.getByRole('button', { name: '计算并保存' }).click()
+  await page.getByText('¥0.00000524').waitFor()
+  await page.screenshot({ path: join(outputDir, 'cost-calibration.png'), fullPage: true })
+  await page.getByRole('button', { name: /安全与恢复/ }).click()
   await page.getByRole('heading', { name: '首次启动基线备份已就绪' }).waitFor()
-  await page.getByRole('button', { name: '切换到 UI Fixture Provider' }).count().then((count) => {
-    if (count !== 1) throw new Error('configuration protection must expose the same global switch action')
+  await page.getByRole('button', { name: '检查并切换到 UI Fixture Provider' }).count().then((count) => {
+    if (count !== 0) throw new Error('configuration protection must not expose a service-provider switch action')
   })
   await page.getByRole('heading', { name: '切换时会保留这些设置' }).waitFor()
   await page.getByText('MCP 服务').waitFor()
@@ -197,7 +211,7 @@ try {
   await page.getByRole('status').getByText('已恢复配置备份').waitFor()
   await page.getByRole('button', { name: /活动记录/ }).click()
   await page.getByText('已恢复配置备份').first().waitFor()
-  await page.getByRole('button', { name: /配置保护/ }).click()
+  await page.getByRole('button', { name: /安全与恢复/ }).click()
   await page.getByText('这些内容仍然在不在', { exact: true }).count().then((count) => {
     if (count !== 0) throw new Error('configuration protection must use product language')
   })
@@ -229,9 +243,9 @@ try {
   await applicationSettingsDialog.getByRole('button', { name: '关闭设置' }).click()
   await applicationSettingsDialog.waitFor({ state: 'detached' })
 
-  await page.getByRole('button', { name: /服务商/ }).first().click()
+  await page.locator('.top-navigation .top-nav-item[aria-label="服务商"]').click()
   await page.locator('.provider-row').filter({ hasText: 'Risk Fixture Provider' }).click()
-  await page.getByRole('button', { name: '切换到 Risk Fixture Provider' }).click()
+  await page.getByRole('button', { name: '检查并切换到 Risk Fixture Provider' }).click()
   const riskDialog = page.getByRole('dialog', { name: '确认切换到 Risk Fixture Provider？' })
   await riskDialog.waitFor()
   const riskCheckbox = riskDialog.getByRole('checkbox')
@@ -273,8 +287,8 @@ try {
     ok: true,
     url: baseUrl,
     outputDir,
-    screenshots: ['switch-check.png', 'configuration-protection.png', 'application-settings.png', 'risk-confirmation.png'],
-    assertion: 'frontend rendered through the local Web backend with global switching in every workspace, a fresh-risk confirmation dialog with a normally sized checkbox, protected recovery points, application settings, and Web-mode autostart protection',
+    screenshots: ['switch-check.png', 'cost-calibration.png', 'configuration-protection.png', 'application-settings.png', 'risk-confirmation.png'],
+    assertion: 'frontend rendered through the local Web backend with switching scoped to the selected provider page, a fixed cost test that prefilled a returned provider cost candidate, protected recovery points, application settings, and Web-mode autostart protection',
   }, null, 2))
 } finally {
   await browser.close()

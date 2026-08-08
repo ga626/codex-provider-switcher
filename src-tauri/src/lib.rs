@@ -140,6 +140,66 @@ pub struct ActivityItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CostCalibration {
+    pub id: String,
+    pub provider_id: String,
+    pub provider_name: String,
+    pub funding_mode: String,
+    pub paid_cny: String,
+    pub consumable_credit: String,
+    pub debit_credit: String,
+    pub credit_unit_label: String,
+    pub model: String,
+    pub probe_version: String,
+    pub result_cny: String,
+    pub state: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostCalibrationInput {
+    pub provider_id: String,
+    pub provider_name: String,
+    pub funding_mode: String,
+    pub paid_cny: String,
+    pub consumable_credit: String,
+    pub debit_credit: String,
+    pub credit_unit_label: String,
+    pub model: String,
+    pub probe_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResponseProbeObservation {
+    pub id: String,
+    pub provider_id: String,
+    pub provider_name: String,
+    pub model: String,
+    pub probe_version: String,
+    pub observed_at: String,
+    pub status: String,
+    pub http_status: Option<u16>,
+    pub request_id: Option<String>,
+    pub response_id: Option<String>,
+    pub usage: Option<ProbeUsage>,
+    pub cost_candidate: Option<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeUsage {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BackupItem {
     pub id: String,
     pub time: String,
@@ -276,6 +336,8 @@ pub struct AppState {
     pub model_catalogs: Vec<ModelCatalog>,
     pub checks: Vec<ValidationCheck>,
     pub activity: Vec<ActivityItem>,
+    pub cost_calibrations: Vec<CostCalibration>,
+    pub response_probes: Vec<ResponseProbeObservation>,
     pub backups: Vec<BackupItem>,
     pub configuration_protection: ConfigurationProtection,
 }
@@ -394,6 +456,10 @@ struct StoredCatalog {
     profiles: Map<String, Value>,
     #[serde(default)]
     model_catalogs: Map<String, Value>,
+    #[serde(default)]
+    cost_calibrations: Vec<CostCalibration>,
+    #[serde(default)]
+    response_probes: Vec<ResponseProbeObservation>,
     #[serde(default)]
     profile_order: Vec<String>,
     #[serde(default)]
@@ -913,6 +979,8 @@ fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
         version: default_version(),
         profiles: Map::new(),
         model_catalogs: Map::new(),
+        cost_calibrations: Vec::new(),
+        response_probes: Vec::new(),
         profile_order: Vec::new(),
         auto_start: false,
         backup_policy: default_backup_policy(),
@@ -2031,6 +2099,8 @@ fn app_state() -> Result<AppState, SwitcherError> {
         model_catalogs: catalog_model_catalogs(&catalog),
         checks: app_validation_checks(&config),
         activity: load_activity()?,
+        cost_calibrations: catalog.cost_calibrations.clone(),
+        response_probes: catalog.response_probes.clone(),
         backups: list_backups()?,
         configuration_protection: configuration_protection(&config),
     })
@@ -2077,6 +2147,8 @@ fn load_catalog_read_only() -> StoredCatalog {
             version: default_version(),
             profiles: Map::new(),
             model_catalogs: Map::new(),
+            cost_calibrations: Vec::new(),
+            response_probes: Vec::new(),
             profile_order: Vec::new(),
             auto_start: false,
             backup_policy: default_backup_policy(),
@@ -2091,6 +2163,8 @@ fn load_catalog_read_only() -> StoredCatalog {
                 version: default_version(),
                 profiles: Map::new(),
                 model_catalogs: Map::new(),
+                cost_calibrations: Vec::new(),
+                response_probes: Vec::new(),
                 profile_order: Vec::new(),
                 auto_start: false,
                 backup_policy: default_backup_policy(),
@@ -2118,6 +2192,8 @@ fn startup_safe_state(notice: StartupNotice) -> Result<AppState, SwitcherError> 
         model_catalogs: catalog_model_catalogs(&catalog),
         checks: app_validation_checks(&config),
         activity: load_activity().unwrap_or_else(|_| vec![activity_seed()]),
+        cost_calibrations: catalog.cost_calibrations.clone(),
+        response_probes: catalog.response_probes.clone(),
         backups: list_backups().unwrap_or_default(),
         configuration_protection: configuration_protection(&config),
     })
@@ -2930,6 +3006,120 @@ fn reset_profile_verification(profile: &mut StoredProfile, detail: &str) {
     profile.last_verification_stage = Some("profile".to_string());
     profile.last_verification_http_status = None;
     profile.last_verification_provider_code = None;
+}
+
+const COST_SCALE_DIGITS: u32 = 12;
+const COST_SCALE: u128 = 1_000_000_000_000;
+
+fn parse_fixed_decimal(value: &str, field_name: &str) -> Result<u128, SwitcherError> {
+    let value = value.trim();
+    if value.is_empty() || value.starts_with('-') || value.starts_with('+') {
+        return Err(SwitcherError::Message(format!("{field_name} 必须是大于 0 的十进制数。")));
+    }
+    let mut parts = value.split('.');
+    let whole = parts.next().unwrap_or_default();
+    let fraction = parts.next().unwrap_or_default();
+    if parts.next().is_some()
+        || whole.is_empty()
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+        || fraction.len() > COST_SCALE_DIGITS as usize
+    {
+        return Err(SwitcherError::Message(format!(
+            "{field_name} 必须是最多 {COST_SCALE_DIGITS} 位小数的正十进制数。"
+        )));
+    }
+    let whole = whole.parse::<u128>().map_err(|_| {
+        SwitcherError::Message(format!("{field_name} 数值过大，无法安全计算。"))
+    })?;
+    let fraction_value = if fraction.is_empty() {
+        0
+    } else {
+        fraction.parse::<u128>().map_err(|_| {
+            SwitcherError::Message(format!("{field_name} 数值无效。"))
+        })?
+    };
+    let fraction_scale = 10_u128.pow(COST_SCALE_DIGITS - fraction.len() as u32);
+    let scaled = whole
+        .checked_mul(COST_SCALE)
+        .and_then(|value| value.checked_add(fraction_value.checked_mul(fraction_scale)?))
+        .ok_or_else(|| SwitcherError::Message(format!("{field_name} 数值过大，无法安全计算。")))?;
+    if scaled == 0 {
+        return Err(SwitcherError::Message(format!("{field_name} 必须大于 0。")));
+    }
+    Ok(scaled)
+}
+
+fn format_fixed_decimal(value: u128) -> String {
+    let whole = value / COST_SCALE;
+    let fraction = value % COST_SCALE;
+    if fraction == 0 {
+        return whole.to_string();
+    }
+    let fraction = format!("{fraction:0width$}", width = COST_SCALE_DIGITS as usize);
+    format!("{whole}.{}", fraction.trim_end_matches('0'))
+}
+
+fn calculate_calibrated_cost(input: &CostCalibrationInput) -> Result<String, SwitcherError> {
+    let paid = parse_fixed_decimal(&input.paid_cny, "实付金额")?;
+    let credit = parse_fixed_decimal(&input.consumable_credit, "可消费额度")?;
+    let debit = parse_fixed_decimal(&input.debit_credit, "后台最终扣费")?;
+    let result = paid
+        .checked_mul(debit)
+        .ok_or_else(|| SwitcherError::Message("费用计算溢出，请缩小输入数值。".to_string()))?
+        / credit;
+    if result == 0 {
+        return Err(SwitcherError::Message(
+            "计算结果过小，无法在当前精度下保存。请提高输入精度。".to_string(),
+        ));
+    }
+    Ok(format_fixed_decimal(result))
+}
+
+fn probe_usage(body: &Value) -> Option<ProbeUsage> {
+    let usage = body.get("usage")?.as_object()?;
+    let input_tokens = usage
+        .get("input_tokens")
+        .or_else(|| usage.get("prompt_tokens"))
+        .and_then(Value::as_u64);
+    let output_tokens = usage
+        .get("output_tokens")
+        .or_else(|| usage.get("completion_tokens"))
+        .and_then(Value::as_u64);
+    let total_tokens = usage.get("total_tokens").and_then(Value::as_u64);
+    if input_tokens.is_none() && output_tokens.is_none() && total_tokens.is_none() {
+        None
+    } else {
+        Some(ProbeUsage {
+            input_tokens,
+            output_tokens,
+            total_tokens,
+        })
+    }
+}
+
+fn response_cost_candidate(body: &Value) -> Option<String> {
+    ["total_cost", "total_cost_usd", "cost"]
+        .iter()
+        .find_map(|key| match body.get(*key) {
+            Some(Value::String(value)) if !value.trim().is_empty() => Some(value.trim().to_string()),
+            Some(Value::Number(value)) => Some(value.to_string()),
+            _ => None,
+        })
+}
+
+fn response_header_id(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    ["x-request-id", "request-id"]
+        .iter()
+        .find_map(|name| headers.get(*name).and_then(|value| value.to_str().ok()))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn push_probe_observation(catalog: &mut StoredCatalog, observation: ResponseProbeObservation) {
+    catalog.response_probes.insert(0, observation);
+    catalog.response_probes.truncate(100);
 }
 
 fn mark_catalog_model_verified(
@@ -3957,6 +4147,173 @@ pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError
 }
 
 #[tauri::command]
+fn run_response_probe(profile_id: String) -> Result<AppState, SwitcherError> {
+    run_response_probe_core(profile_id)
+}
+
+pub fn run_response_probe_core(profile_id: String) -> Result<AppState, SwitcherError> {
+    let mut catalog = load_catalog()?;
+    let value = catalog
+        .profiles
+        .get(&profile_id)
+        .cloned()
+        .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
+    let profile: StoredProfile = serde_json::from_value(value)?;
+    if profile.api_key.trim().is_empty() {
+        return Err(SwitcherError::Message(
+            "缺少 API 密钥，无法运行返回能力探针。".to_string(),
+        ));
+    }
+    if profile.model.trim().is_empty() {
+        return Err(SwitcherError::Message(
+            "缺少默认模型，无法运行返回能力探针。".to_string(),
+        ));
+    }
+    let endpoint = provider_probe_endpoint(&profile.base_url, "responses")
+        .map_err(SwitcherError::Message)?;
+    let observed_at = now_label();
+    let mut observation = ResponseProbeObservation {
+        id: format!("response-probe-{}", Local::now().timestamp_millis()),
+        provider_id: profile_id.clone(),
+        provider_name: profile.name.clone(),
+        model: profile.model.clone(),
+        probe_version: "response-observation-v1".to_string(),
+        observed_at: observed_at.clone(),
+        status: "failed".to_string(),
+        http_status: None,
+        request_id: None,
+        response_id: None,
+        usage: None,
+        cost_candidate: None,
+        detail: "探针未完成。".to_string(),
+    };
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|err| SwitcherError::Message(format!("创建探针连接失败：{err}")))?;
+    let response = client
+        .post(endpoint)
+        .bearer_auth(profile.api_key.trim())
+        .json(&json!({
+            "model": profile.model.trim(),
+            "input": "Reply with OK.",
+            "max_output_tokens": 16,
+            "store": false,
+        }))
+        .send();
+
+    match response {
+        Ok(response) => {
+            let http_status = response.status().as_u16();
+            observation.http_status = Some(http_status);
+            observation.request_id = response_header_id(response.headers());
+            if response.status().is_success() {
+                match response.json::<Value>() {
+                    Ok(body) => {
+                        observation.response_id = body
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(ToString::to_string);
+                        observation.usage = probe_usage(&body);
+                        observation.cost_candidate = response_cost_candidate(&body);
+                        if observation.cost_candidate.is_some() {
+                            observation.status = "final_cost_inline".to_string();
+                            observation.detail = "响应中返回了费用候选字段；仍需核对平台币种和账单规则后再用于费用校准。".to_string();
+                        } else if observation.usage.is_some() {
+                            observation.status = "usage_only".to_string();
+                            observation.detail = "响应包含用量字段，可与服务商后台日志交叉核对。".to_string();
+                        } else if observation.request_id.is_some() || observation.response_id.is_some() {
+                            observation.status = "correlation_only".to_string();
+                            observation.detail = "已获得关联 ID，可到服务商后台定位本次调用。".to_string();
+                        } else {
+                            observation.status = "no_signal".to_string();
+                            observation.detail = "服务商已响应，但没有返回可安全保存的费用、用量或关联线索。".to_string();
+                        }
+                    }
+                    Err(_) => {
+                        observation.detail = "服务商已响应，但返回体无法按 JSON 解析；未保存完整响应。".to_string();
+                    }
+                }
+            } else {
+                observation.detail = format!("服务商返回 HTTP {http_status}；未保存错误响应内容。")
+            }
+        }
+        Err(error) if error.is_timeout() => {
+            observation.detail = "服务商响应超时；未确认返回能力。".to_string();
+        }
+        Err(error) if error.is_connect() => {
+            observation.detail = "无法建立服务商连接；请检查网络、DNS、TLS 或代理链路。".to_string();
+        }
+        Err(_) => {
+            observation.detail = "服务商请求在传输过程中失败；未确认返回能力。".to_string();
+        }
+    }
+
+    let succeeded = observation.status != "failed";
+    let status = observation.status.clone();
+    let detail = observation.detail.clone();
+    push_probe_observation(&mut catalog, observation);
+    save_catalog(&catalog)?;
+    app_state_with_activity(
+        if succeeded {
+            "返回能力探针已完成"
+        } else {
+            "返回能力探针未完成"
+        },
+        &format!("{}：{detail}", profile.name),
+        if succeeded && status != "no_signal" { "success" } else { "warning" },
+    )
+}
+
+#[tauri::command]
+fn save_cost_calibration(input: CostCalibrationInput) -> Result<AppState, SwitcherError> {
+    save_cost_calibration_core(input)
+}
+
+pub fn save_cost_calibration_core(input: CostCalibrationInput) -> Result<AppState, SwitcherError> {
+    if input.provider_id.trim().is_empty()
+        || input.provider_name.trim().is_empty()
+        || input.model.trim().is_empty()
+        || input.probe_version.trim().is_empty()
+    {
+        return Err(SwitcherError::Message(
+            "费用校准缺少服务商、模型或探针版本信息。".to_string(),
+        ));
+    }
+    let result_cny = calculate_calibrated_cost(&input)?;
+    let now = now_label();
+    let record = CostCalibration {
+        id: format!("cost-calibration-{}", Local::now().timestamp_millis()),
+        provider_id: input.provider_id,
+        provider_name: input.provider_name,
+        funding_mode: input.funding_mode,
+        paid_cny: input.paid_cny,
+        consumable_credit: input.consumable_credit,
+        debit_credit: input.debit_credit,
+        credit_unit_label: input.credit_unit_label,
+        model: input.model,
+        probe_version: input.probe_version,
+        result_cny: result_cny.clone(),
+        state: "completed".to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+        note: None,
+    };
+    let provider_name = record.provider_name.clone();
+    let mut catalog = load_catalog()?;
+    catalog.cost_calibrations.insert(0, record);
+    catalog.cost_calibrations.truncate(100);
+    save_catalog(&catalog)?;
+    app_state_with_activity(
+        "费用校准已保存",
+        &format!("{provider_name} 的固定探针人民币成本为 ¥{result_cny}。"),
+        "success",
+    )
+}
+
+#[tauri::command]
 fn refresh_models(profile_id: String) -> Result<AppState, SwitcherError> {
     refresh_models_core(profile_id)
 }
@@ -4213,6 +4570,8 @@ pub fn run() {
             prepare_switch,
             switch_profile,
             verify_profile,
+            run_response_probe,
+            save_cost_calibration,
             refresh_models,
             set_default_profile,
             sync_current_configuration,
@@ -4249,11 +4608,40 @@ mod legacy_profile_import_tests {
             version: default_version(),
             profiles,
             model_catalogs: Map::new(),
+            cost_calibrations: Vec::new(),
+            response_probes: Vec::new(),
             profile_order: vec![profile_id.to_string()],
             auto_start: false,
             backup_policy: default_backup_policy(),
             invariants: default_invariants(),
         }
+    }
+
+    fn calibration_input(paid_cny: &str, consumable_credit: &str, debit_credit: &str) -> CostCalibrationInput {
+        CostCalibrationInput {
+            provider_id: "test".to_string(),
+            provider_name: "Test".to_string(),
+            funding_mode: "prepaid".to_string(),
+            paid_cny: paid_cny.to_string(),
+            consumable_credit: consumable_credit.to_string(),
+            debit_credit: debit_credit.to_string(),
+            credit_unit_label: "credit".to_string(),
+            model: "gpt-test".to_string(),
+            probe_version: "cost-calibration-v1".to_string(),
+        }
+    }
+
+    #[test]
+    fn calibrated_cost_uses_exact_decimal_math() {
+        let input = calibration_input("10", "1000", "0.000524");
+        assert_eq!(calculate_calibrated_cost(&input).unwrap(), "0.00000524");
+    }
+
+    #[test]
+    fn calibrated_cost_rejects_invalid_or_zero_decimal_inputs() {
+        assert!(calculate_calibrated_cost(&calibration_input("0", "100", "1")).is_err());
+        assert!(calculate_calibrated_cost(&calibration_input("1", "abc", "1")).is_err());
+        assert!(calculate_calibrated_cost(&calibration_input("1.0000000000001", "1", "1")).is_err());
     }
 
     fn legacy_document(entries: Value) -> String {
