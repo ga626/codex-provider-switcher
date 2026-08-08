@@ -77,6 +77,44 @@ export type ActivityItem = {
   tone: 'success' | 'warning' | 'danger' | 'info'
 }
 
+export type CostCalibration = {
+  id: string
+  providerId: string
+  providerName: string
+  fundingMode: 'prepaid' | 'subscription'
+  paidCny: string
+  consumableCredit: string
+  debitCredit: string
+  creditUnitLabel: string
+  model: string
+  probeVersion: string
+  resultCny: string
+  state: 'completed' | 'incomparable' | 'stale'
+  createdAt: string
+  updatedAt: string
+  note?: string
+}
+
+export type ResponseProbeObservation = {
+  id: string
+  providerId: string
+  providerName: string
+  model: string
+  probeVersion: string
+  observedAt: string
+  status: 'preview' | 'usage_only' | 'correlation_only' | 'final_cost_inline' | 'no_signal' | 'failed'
+  httpStatus?: number
+  requestId?: string
+  responseId?: string
+  usage?: {
+    inputTokens?: number
+    outputTokens?: number
+    totalTokens?: number
+  }
+  costCandidate?: string
+  detail: string
+}
+
 export type BackupItem = {
   id: string
   time: string
@@ -134,6 +172,8 @@ export type AppState = {
   modelCatalogs: ModelCatalog[]
   checks: ValidationCheck[]
   activity: ActivityItem[]
+  costCalibrations: CostCalibration[]
+  responseProbes: ResponseProbeObservation[]
   backups: BackupItem[]
   configurationProtection: ConfigurationProtection
 }

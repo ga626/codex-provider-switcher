@@ -425,6 +425,23 @@ try {
   assert(await readFile(configPath, 'utf8') === originalConfig, 'verification changed config.toml')
   assert(await readFile(authPath, 'utf8') === originalAuth, 'verification changed auth.json')
 
+  const calibrated = await api('/api/lab/cost-calibration', {
+    input: {
+      providerId: profile.id,
+      providerName: profile.name,
+      fundingMode: 'prepaid',
+      paidCny: '10',
+      consumableCredit: '1000',
+      debitCredit: '0.000524',
+      creditUnitLabel: 'platform credit',
+      model: profile.model,
+      probeVersion: 'cost-calibration-v1',
+    },
+  })
+  assert(calibrated.costCalibrations[0]?.resultCny === '0.00000524', 'cost calibration did not use exact decimal arithmetic')
+  assert(await readFile(configPath, 'utf8') === originalConfig, 'cost calibration changed config.toml')
+  assert(await readFile(authPath, 'utf8') === originalAuth, 'cost calibration changed auth.json')
+
   const refreshedAfterVerification = await api('/api/models/refresh', { profileId: profile.id })
   assert(
     refreshedAfterVerification.modelCatalogs
