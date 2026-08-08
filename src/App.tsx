@@ -1732,7 +1732,7 @@ function LabWorkspace({
     if (latestProbe?.status === 'final_cost_inline' && latestProbe.costCandidate) {
       setDebitCredit(latestProbe.costCandidate)
     }
-  }, [latestProbe?.id])
+  }, [latestProbe?.costCandidate, latestProbe?.status])
 
   async function runCostTest() {
     if (!profile) return
