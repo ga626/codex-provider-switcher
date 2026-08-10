@@ -515,11 +515,11 @@ export async function verifyProfile(profileId: string): Promise<AppState> {
   return structuredClone(mockState)
 }
 
-export async function runResponseProbe(profileId: string): Promise<AppState> {
+export async function runResponseProbe(profileId: string, benchmarkModel: string): Promise<AppState> {
   if (isTauri) {
-    return invoke<AppState>('run_response_probe', { profileId })
+    return invoke<AppState>('run_response_probe', { profileId, benchmarkModel })
   }
-  const webState = await tryWebBackend<AppState>('/api/lab/response-probe', apiPost({ profileId }))
+  const webState = await tryWebBackend<AppState>('/api/lab/response-probe', apiPost({ profileId, benchmarkModel }))
   if (webState) {
     return webState
   }
@@ -531,15 +531,16 @@ export async function runResponseProbe(profileId: string): Promise<AppState> {
     id: crypto.randomUUID(),
     providerId: profile.id,
     providerName: profile.name,
-    model: profile.model || '未设置模型',
-    probeVersion: 'response-observation-v1',
+    model: benchmarkModel || profile.model || '未设置模型',
+    probeVersion: 'cost-calibration-v2',
     observedAt,
     status: 'final_cost_inline',
     httpStatus: 200,
     requestId: `preview-${Date.now().toString(36)}`,
-    usage: { inputTokens: 12, outputTokens: 4, totalTokens: 16 },
+    usage: { inputTokens: 12, outputTokens: 4, totalTokens: 16, cachedTokens: 0, reasoningTokens: 0 },
     costCandidate: '0.000524',
-    detail: '预览模拟：已返回费用候选字段。真实桌面应用会发送一次短请求，并只保存非敏感观察字段。',
+    costSource: 'response_usage',
+    detail: '预览模拟：已从 usage.cost 读取费用候选值。真实桌面应用会发送一次短请求，并只保存非敏感观察字段。',
   }
   mockState.responseProbes.unshift(observation)
   mockState.activity.unshift({
@@ -580,6 +581,7 @@ export async function saveCostCalibration(input: Omit<CostCalibration, 'id' | 'c
   const paid = parseFixed(input.paidCny, '实付金额')
   const credit = parseFixed(input.consumableCredit, '可消费额度')
   const debit = parseFixed(input.debitCredit, '后台最终扣费')
+  if (input.officialCny?.trim()) parseFixed(input.officialCny, '官方同次成本')
   const calculated = (paid * debit) / credit
   if (calculated <= 0n) throw new Error('计算结果过小，无法在当前精度下保存。')
   const now = nowLabel()
@@ -598,6 +600,26 @@ export async function saveCostCalibration(input: Omit<CostCalibration, 'id' | 'c
     title: '费用校准已保存',
     detail: `${record.providerName} 的固定探针成本为 ¥${record.resultCny}。`,
     tone: 'success',
+  })
+  return structuredClone(mockState)
+}
+
+export async function deleteCostCalibration(calibrationId: string): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('delete_cost_calibration', { calibrationId })
+  }
+  const webState = await tryWebBackend<AppState>('/api/lab/cost-calibration/delete', apiPost({ calibrationId }))
+  if (webState) return webState
+  await mockDelay()
+  const index = mockState.costCalibrations.findIndex((item) => item.id === calibrationId)
+  if (index < 0) throw new Error('未找到这条费用记录。')
+  const [removed] = mockState.costCalibrations.splice(index, 1)
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: '已删除费用记录',
+    detail: `${removed.providerName} 的一条基准测试记录已移除。`,
+    tone: 'info',
   })
   return structuredClone(mockState)
 }

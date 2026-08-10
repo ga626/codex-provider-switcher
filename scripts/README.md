@@ -4,7 +4,7 @@
 
 | 类别 | 入口 | 用途 |
 | --- | --- | --- |
-| 开发版桌面验收 | `npm run qa:dev-desktop` | 直接打开当前源码树桌面应用，不安装 |
+| 开发版桌面验收 | `npm run dev:desktop` | 直接打开当前源码树的隔离 Tauri 开发窗口；窗口明确标记“开发版 + 短 SHA”，仅使用 `.codex/runtime/dev-desktop/` 无凭据 fixture，不安装也不触碰稳定版或真实 Codex 配置 |
 | 基础质量 | `npm run verify:doctor`、`npm run lint`、`npm run build` | 检查仓库结构、静态质量和前端构建 |
 | 真实本地能力 | `npm run backend:build`、`npm run backend:smoke`、`npm run backend:functional-smoke` | 验证本地后端与隔离配置流程 |
 | UI/运行边界 | `npm run qa:preview-smoke`、`npm run runtime-boundary:smoke`、`npm run tauri:desktop-boundary:smoke` | 验证预览、真实运行边界和桌面壳约束 |

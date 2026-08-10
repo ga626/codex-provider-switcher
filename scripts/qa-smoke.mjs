@@ -233,18 +233,18 @@ try {
     throw new Error('Labs must not repeat the top-level workspace title.')
   }
   await desktop.getByRole('heading', { name: '性价比排名' }).waitFor()
-  await desktop.getByText('100 分').first().waitFor()
-  await desktop.getByText('75 分').first().waitFor()
+  await desktop.locator('.ranking-score').filter({ hasText: '100 分' }).first().waitFor()
+  await desktop.locator('.ranking-score').filter({ hasText: '74 分' }).first().waitFor()
   await desktop.getByRole('button', { name: '运行固定测试' }).click()
   await desktop.getByText('已读取测试额度').waitFor()
-  if (await desktop.getByLabel('测试额度').inputValue() !== '0.000524') {
+  if (await desktop.getByLabel('测试额度').inputValue() !== '0.000398') {
     throw new Error('The preview cost test must prefill the returned cost candidate.')
   }
   await desktop.getByLabel('充值金额').fill('10')
   await desktop.getByLabel('平台实际额度').fill('1000')
   await desktop.getByRole('button', { name: '计算并保存' }).click()
-  await desktop.locator('.lab-result-row').filter({ hasText: '示例服务商 D' }).filter({ hasText: '¥0.00000524' }).waitFor()
-  await desktop.getByRole('heading', { name: '费用记录' }).waitFor()
+  await desktop.locator('.lab-ranking-row').filter({ hasText: '示例服务商 D' }).filter({ hasText: '2 次' }).waitFor()
+  if (await desktop.getByRole('heading', { name: '费用记录' }).count() !== 0) throw new Error('Labs must keep one ranking surface instead of repeating a fee-record list.')
   if (await desktop.getByText('返回能力探针').count() !== 0) throw new Error('Labs must use cost-focused language instead of the old response probe name.')
   await desktop.getByRole('button', { name: /安全与恢复/ }).click()
   await desktop.getByRole('heading', { name: '首次启动基线备份已就绪' }).waitFor()
