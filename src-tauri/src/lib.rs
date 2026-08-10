@@ -12,6 +12,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use tauri::Manager;
 use tauri_plugin_autostart::ManagerExt;
 use thiserror::Error;
 
@@ -38,6 +39,17 @@ fn is_store_release_channel() -> bool {
         option_env!("CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL"),
         Some("store")
     )
+}
+
+fn development_window_title() -> Option<String> {
+    if matches!(
+        option_env!("CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL"),
+        Some("development")
+    ) {
+        let build_sha = option_env!("CODEX_PROVIDER_SWITCHER_BUILD_SHA").unwrap_or("local");
+        return Some(format!("Signalman AI · 开发版 · {build_sha}"));
+    }
+    None
 }
 
 #[derive(Debug, Error)]
@@ -151,6 +163,14 @@ pub struct CostCalibration {
     pub credit_unit_label: String,
     pub model: String,
     pub probe_version: String,
+    #[serde(default)]
+    pub cost_source: String,
+    #[serde(default)]
+    pub probe_id: Option<String>,
+    #[serde(default = "default_sample_kind")]
+    pub sample_kind: String,
+    #[serde(default)]
+    pub official_cny: Option<String>,
     pub result_cny: String,
     pub state: String,
     pub created_at: String,
@@ -170,6 +190,14 @@ pub struct CostCalibrationInput {
     pub credit_unit_label: String,
     pub model: String,
     pub probe_version: String,
+    #[serde(default)]
+    pub cost_source: String,
+    #[serde(default)]
+    pub probe_id: Option<String>,
+    #[serde(default = "default_sample_kind")]
+    pub sample_kind: String,
+    #[serde(default)]
+    pub official_cny: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,8 +213,12 @@ pub struct ResponseProbeObservation {
     pub http_status: Option<u16>,
     pub request_id: Option<String>,
     pub response_id: Option<String>,
+    #[serde(default)]
+    pub actual_model: Option<String>,
     pub usage: Option<ProbeUsage>,
     pub cost_candidate: Option<String>,
+    #[serde(default)]
+    pub cost_source: Option<String>,
     pub detail: String,
 }
 
@@ -196,6 +228,9 @@ pub struct ProbeUsage {
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
+    pub cached_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3076,6 +3111,10 @@ fn calculate_calibrated_cost(input: &CostCalibrationInput) -> Result<String, Swi
     Ok(format_fixed_decimal(result))
 }
 
+fn default_sample_kind() -> String {
+    "cold".to_string()
+}
+
 fn probe_usage(body: &Value) -> Option<ProbeUsage> {
     let usage = body.get("usage")?.as_object()?;
     let input_tokens = usage
@@ -3087,25 +3126,72 @@ fn probe_usage(body: &Value) -> Option<ProbeUsage> {
         .or_else(|| usage.get("completion_tokens"))
         .and_then(Value::as_u64);
     let total_tokens = usage.get("total_tokens").and_then(Value::as_u64);
-    if input_tokens.is_none() && output_tokens.is_none() && total_tokens.is_none() {
+    let prompt_details = usage
+        .get("input_tokens_details")
+        .or_else(|| usage.get("prompt_tokens_details"));
+    let completion_details = usage
+        .get("output_tokens_details")
+        .or_else(|| usage.get("completion_tokens_details"));
+    let cached_tokens = prompt_details
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("cached_tokens"))
+        .and_then(Value::as_u64);
+    let cache_write_tokens = prompt_details
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("cache_write_tokens"))
+        .and_then(Value::as_u64);
+    let reasoning_tokens = completion_details
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("reasoning_tokens"))
+        .and_then(Value::as_u64);
+    if input_tokens.is_none()
+        && output_tokens.is_none()
+        && total_tokens.is_none()
+        && cached_tokens.is_none()
+        && cache_write_tokens.is_none()
+        && reasoning_tokens.is_none()
+    {
         None
     } else {
         Some(ProbeUsage {
             input_tokens,
             output_tokens,
             total_tokens,
+            cached_tokens,
+            cache_write_tokens,
+            reasoning_tokens,
         })
     }
 }
 
-fn response_cost_candidate(body: &Value) -> Option<String> {
+fn numeric_cost(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(value)) if !value.trim().is_empty() => Some(value.trim().to_string()),
+        Some(Value::Number(value)) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn response_cost_candidate(body: &Value) -> Option<(String, String)> {
     ["total_cost", "total_cost_usd", "cost"]
         .iter()
-        .find_map(|key| match body.get(*key) {
-            Some(Value::String(value)) if !value.trim().is_empty() => Some(value.trim().to_string()),
-            Some(Value::Number(value)) => Some(value.to_string()),
-            _ => None,
+        .find_map(|key| numeric_cost(body.get(*key)).map(|cost| (cost, "response_inline".to_string())))
+        .or_else(|| {
+            body.get("usage").and_then(|usage| {
+                ["cost", "total_cost", "total_cost_usd"]
+                    .iter()
+                    .find_map(|key| numeric_cost(usage.get(*key)).map(|cost| (cost, "response_usage".to_string())))
+            })
         })
+}
+
+fn response_header_cost(headers: &reqwest::header::HeaderMap) -> Option<(String, String)> {
+    ["x-litellm-response-cost", "x-response-cost", "x-total-cost"]
+        .iter()
+        .find_map(|name| headers.get(*name).and_then(|value| value.to_str().ok()))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| (value.to_string(), "response_header".to_string()))
 }
 
 fn response_header_id(headers: &reqwest::header::HeaderMap) -> Option<String> {
@@ -4147,11 +4233,18 @@ pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError
 }
 
 #[tauri::command]
-fn run_response_probe(profile_id: String) -> Result<AppState, SwitcherError> {
-    run_response_probe_core(profile_id)
+fn run_response_probe(profile_id: String, benchmark_model: String) -> Result<AppState, SwitcherError> {
+    run_response_probe_for_model_core(profile_id, benchmark_model)
 }
 
 pub fn run_response_probe_core(profile_id: String) -> Result<AppState, SwitcherError> {
+    run_response_probe_for_model_core(profile_id, String::new())
+}
+
+pub fn run_response_probe_for_model_core(
+    profile_id: String,
+    benchmark_model: String,
+) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let value = catalog
         .profiles
@@ -4164,7 +4257,12 @@ pub fn run_response_probe_core(profile_id: String) -> Result<AppState, SwitcherE
             "缺少 API 密钥，无法运行返回能力探针。".to_string(),
         ));
     }
-    if profile.model.trim().is_empty() {
+    let requested_model = if benchmark_model.trim().is_empty() {
+        profile.model.trim().to_string()
+    } else {
+        benchmark_model.trim().to_string()
+    };
+    if requested_model.is_empty() {
         return Err(SwitcherError::Message(
             "缺少默认模型，无法运行返回能力探针。".to_string(),
         ));
@@ -4176,15 +4274,17 @@ pub fn run_response_probe_core(profile_id: String) -> Result<AppState, SwitcherE
         id: format!("response-probe-{}", Local::now().timestamp_millis()),
         provider_id: profile_id.clone(),
         provider_name: profile.name.clone(),
-        model: profile.model.clone(),
-        probe_version: "response-observation-v1".to_string(),
+        model: requested_model.clone(),
+        probe_version: "cost-calibration-v2".to_string(),
         observed_at: observed_at.clone(),
         status: "failed".to_string(),
         http_status: None,
         request_id: None,
         response_id: None,
+        actual_model: None,
         usage: None,
         cost_candidate: None,
+        cost_source: None,
         detail: "探针未完成。".to_string(),
     };
     let client = reqwest::blocking::Client::builder()
@@ -4195,7 +4295,7 @@ pub fn run_response_probe_core(profile_id: String) -> Result<AppState, SwitcherE
         .post(endpoint)
         .bearer_auth(profile.api_key.trim())
         .json(&json!({
-            "model": profile.model.trim(),
+            "model": requested_model,
             "input": "Reply with OK.",
             "max_output_tokens": 16,
             "store": false,
@@ -4207,6 +4307,10 @@ pub fn run_response_probe_core(profile_id: String) -> Result<AppState, SwitcherE
             let http_status = response.status().as_u16();
             observation.http_status = Some(http_status);
             observation.request_id = response_header_id(response.headers());
+            if let Some((cost, source)) = response_header_cost(response.headers()) {
+                observation.cost_candidate = Some(cost);
+                observation.cost_source = Some(source);
+            }
             if response.status().is_success() {
                 match response.json::<Value>() {
                     Ok(body) => {
@@ -4216,11 +4320,20 @@ pub fn run_response_probe_core(profile_id: String) -> Result<AppState, SwitcherE
                             .map(str::trim)
                             .filter(|value| !value.is_empty())
                             .map(ToString::to_string);
+                        observation.actual_model = body
+                            .get("model")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(ToString::to_string);
                         observation.usage = probe_usage(&body);
-                        observation.cost_candidate = response_cost_candidate(&body);
+                        if let Some((cost, source)) = response_cost_candidate(&body) {
+                            observation.cost_candidate = Some(cost);
+                            observation.cost_source = Some(source);
+                        }
                         if observation.cost_candidate.is_some() {
                             observation.status = "final_cost_inline".to_string();
-                            observation.detail = "响应中返回了费用候选字段；仍需核对平台币种和账单规则后再用于费用校准。".to_string();
+                            observation.detail = "已从响应内容或响应头读取费用候选值；仍需核对平台余额单位和账单规则后再保存。".to_string();
                         } else if observation.usage.is_some() {
                             observation.status = "usage_only".to_string();
                             observation.detail = "响应包含用量字段，可与服务商后台日志交叉核对。".to_string();
@@ -4283,6 +4396,13 @@ pub fn save_cost_calibration_core(input: CostCalibrationInput) -> Result<AppStat
         ));
     }
     let result_cny = calculate_calibrated_cost(&input)?;
+    let official_cny = input
+        .official_cny
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| parse_fixed_decimal(value, "官方同次成本").map(|_| value.to_string()))
+        .transpose()?;
     let now = now_label();
     let record = CostCalibration {
         id: format!("cost-calibration-{}", Local::now().timestamp_millis()),
@@ -4295,6 +4415,18 @@ pub fn save_cost_calibration_core(input: CostCalibrationInput) -> Result<AppStat
         credit_unit_label: input.credit_unit_label,
         model: input.model,
         probe_version: input.probe_version,
+        cost_source: if input.cost_source.trim().is_empty() {
+            "billing_log_manual".to_string()
+        } else {
+            input.cost_source
+        },
+        probe_id: input.probe_id,
+        sample_kind: if input.sample_kind.trim().is_empty() {
+            default_sample_kind()
+        } else {
+            input.sample_kind
+        },
+        official_cny,
         result_cny: result_cny.clone(),
         state: "completed".to_string(),
         created_at: now.clone(),
@@ -4311,6 +4443,25 @@ pub fn save_cost_calibration_core(input: CostCalibrationInput) -> Result<AppStat
         &format!("{provider_name} 的固定探针人民币成本为 ¥{result_cny}。"),
         "success",
     )
+}
+
+#[tauri::command]
+fn delete_cost_calibration(calibration_id: String) -> Result<AppState, SwitcherError> {
+    delete_cost_calibration_core(calibration_id)
+}
+
+pub fn delete_cost_calibration_core(calibration_id: String) -> Result<AppState, SwitcherError> {
+    if calibration_id.trim().is_empty() {
+        return Err(SwitcherError::Message("缺少费用记录标识。".to_string()));
+    }
+    let mut catalog = load_catalog()?;
+    let before = catalog.cost_calibrations.len();
+    catalog.cost_calibrations.retain(|item| item.id != calibration_id);
+    if catalog.cost_calibrations.len() == before {
+        return Err(SwitcherError::Message("未找到这条费用记录。".to_string()));
+    }
+    save_catalog(&catalog)?;
+    app_state_with_activity("已删除费用记录", "已删除一条基准测试费用记录。", "info")
 }
 
 #[tauri::command]
@@ -4561,6 +4712,14 @@ pub fn run() {
         builder.plugin(tauri_plugin_updater::Builder::new().build())
     };
     builder
+        .setup(|app| {
+            if let Some(title) = development_window_title() {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.set_title(&title)?;
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             load_state,
             check_for_update,
@@ -4572,6 +4731,7 @@ pub fn run() {
             verify_profile,
             run_response_probe,
             save_cost_calibration,
+            delete_cost_calibration,
             refresh_models,
             set_default_profile,
             sync_current_configuration,
@@ -4628,6 +4788,10 @@ mod legacy_profile_import_tests {
             credit_unit_label: "credit".to_string(),
             model: "gpt-test".to_string(),
             probe_version: "cost-calibration-v1".to_string(),
+            cost_source: "billing_log_manual".to_string(),
+            probe_id: None,
+            sample_kind: "cold".to_string(),
+            official_cny: None,
         }
     }
 
@@ -4642,6 +4806,32 @@ mod legacy_profile_import_tests {
         assert!(calculate_calibrated_cost(&calibration_input("0", "100", "1")).is_err());
         assert!(calculate_calibrated_cost(&calibration_input("1", "abc", "1")).is_err());
         assert!(calculate_calibrated_cost(&calibration_input("1.0000000000001", "1", "1")).is_err());
+    }
+
+    #[test]
+    fn probe_usage_retains_cache_and_reasoning_breakdown() {
+        let body = json!({
+            "usage": {
+                "input_tokens": 1200,
+                "output_tokens": 18,
+                "total_tokens": 1218,
+                "input_tokens_details": { "cached_tokens": 1024, "cache_write_tokens": 0 },
+                "output_tokens_details": { "reasoning_tokens": 7 }
+            }
+        });
+        let usage = probe_usage(&body).expect("usage should be detected");
+        assert_eq!(usage.cached_tokens, Some(1024));
+        assert_eq!(usage.cache_write_tokens, Some(0));
+        assert_eq!(usage.reasoning_tokens, Some(7));
+    }
+
+    #[test]
+    fn response_cost_candidate_accepts_usage_cost_extension() {
+        let body = json!({ "usage": { "cost": 0.000524 } });
+        assert_eq!(
+            response_cost_candidate(&body),
+            Some(("0.000524".to_string(), "response_usage".to_string()))
+        );
     }
 
     fn legacy_document(entries: Value) -> String {

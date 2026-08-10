@@ -32,7 +32,9 @@ src-tauri/target
 /AGENTS.md
 /.agents/
 /.codex/worktrees/
+/.codex/runtime/
 /.codex-praetor/
+/.playwright-cli/
 
 # Local secrets and Codex/user state
 auth.json

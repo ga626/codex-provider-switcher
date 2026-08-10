@@ -88,6 +88,10 @@ export type CostCalibration = {
   creditUnitLabel: string
   model: string
   probeVersion: string
+  costSource?: 'response_inline' | 'response_usage' | 'response_header' | 'billing_log_manual' | 'balance_difference'
+  probeId?: string
+  sampleKind?: 'cold' | 'warm'
+  officialCny?: string
   resultCny: string
   state: 'completed' | 'incomparable' | 'stale'
   createdAt: string
@@ -106,12 +110,17 @@ export type ResponseProbeObservation = {
   httpStatus?: number
   requestId?: string
   responseId?: string
+  actualModel?: string
   usage?: {
     inputTokens?: number
     outputTokens?: number
     totalTokens?: number
+    cachedTokens?: number
+    cacheWriteTokens?: number
+    reasoningTokens?: number
   }
   costCandidate?: string
+  costSource?: 'response_inline' | 'response_usage' | 'response_header'
   detail: string
 }
 

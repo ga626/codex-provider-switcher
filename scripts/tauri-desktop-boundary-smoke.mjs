@@ -23,16 +23,23 @@ function assertBmp(buffer, width, height, label) {
   assert(Math.abs(buffer.readInt32LE(22)) === height, `${label} must be ${height}px high`)
 }
 
-const [packageJsonText, tauriConfigText, cargoToml, manifestText, libRs, adapterTs, appTsx, mockDataTs, preflightScript, headerBmp, sidebarBmp] = await Promise.all([
+const [packageJsonText, viteConfigText, buildRs, tauriConfigText, cargoToml, manifestText, libRs, adapterTs, appTsx, appCss, mockDataTs, preflightScript, devDesktopScript, prepareDevRuntimeScript, developmentFixtureCatalogText, developmentFixtureActivityText, headerBmp, sidebarBmp] = await Promise.all([
   readText('package.json'),
+  readText('vite.config.ts'),
+  readText('src-tauri/build.rs'),
   readText('src-tauri/tauri.conf.json'),
   readText('src-tauri/Cargo.toml'),
   readText('src-tauri/store/Package.appxmanifest'),
   readText('src-tauri/src/lib.rs'),
   readText('src/adapter.ts'),
   readText('src/App.tsx'),
+  readText('src/App.css'),
   readText('src/mockData.ts'),
   readText('scripts/qa/cutover-preflight.ps1'),
+  readText('scripts/qa/start-dev-desktop.ps1'),
+  readText('scripts/qa/prepare-dev-runtime.ps1'),
+  readText('scripts/qa/fixtures/dev-desktop/profiles.json'),
+  readText('scripts/qa/fixtures/dev-desktop/activity.json'),
   readFile(join(root, 'src-tauri/installer/header.bmp')),
   readFile(join(root, 'src-tauri/installer/sidebar.bmp')),
 ])
@@ -40,6 +47,8 @@ const capabilityText = await readText('src-tauri/capabilities/default.json')
 
 const tauriConfig = JSON.parse(tauriConfigText)
 const packageJson = JSON.parse(packageJsonText)
+const developmentFixtureCatalog = JSON.parse(developmentFixtureCatalogText)
+const developmentFixtureActivity = JSON.parse(developmentFixtureActivityText)
 const switchProfileCore = libRs.slice(
   libRs.indexOf('pub fn switch_profile_core'),
   libRs.indexOf('#[tauri::command]\nfn verify_profile')
@@ -48,6 +57,7 @@ const switchProfileCore = libRs.slice(
 assert(tauriConfig.productName === 'Signalman AI', 'Tauri productName must use the approved brand')
 assert(tauriConfig.mainBinaryName === 'codex-provider-switcher', 'Tauri must bundle the desktop binary, not local_backend')
 assert(packageJson.scripts['tauri:dev'].includes('tauri dev'), 'tauri:dev must invoke the Tauri desktop runner')
+assert(packageJson.scripts['dev:desktop'].includes('qa:dev-desktop'), 'dev:desktop must use the isolated development desktop runner')
 assert(packageJson.scripts['tauri:build'].includes('release:assets'), 'tauri:build must refresh branded installer assets')
 assert(packageJson.scripts['tauri:build'].includes('tauri build'), 'tauri:build must invoke the Tauri desktop bundler')
 assert(packageJson.dependencies['@dnd-kit/core'], 'Provider sorting must include the DnD runtime')
@@ -65,6 +75,39 @@ assertBmp(headerBmp, 150, 57, 'NSIS installer header image')
 assertBmp(sidebarBmp, 164, 314, 'NSIS installer sidebar image')
 assert(Array.isArray(tauriConfig.app?.windows) && tauriConfig.app.windows.length === 1, 'Tauri must expose one main window')
 assert(tauriConfig.app.windows[0].title === 'Signalman AI', 'Tauri window title must use the approved brand')
+assert(viteConfigText.includes("CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL ?? 'development'"), 'Source-tree builds must default to the development channel')
+assert(buildRs.includes('rerun-if-env-changed=CODEX_PROVIDER_SWITCHER_BUILD_SHA'), 'Native desktop title must rebuild when the development revision changes')
+assert(devDesktopScript.includes('CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = "development"'), 'Development desktop builds must compile the development channel')
+assert(devDesktopScript.includes('CODEX_PROVIDER_SWITCHER_APP_DATA_DIR'), 'Development desktop must isolate app data')
+assert(devDesktopScript.includes('CODEX_PROVIDER_SWITCHER_CODEX_HOME'), 'Development desktop must isolate Codex config')
+assert(prepareDevRuntimeScript.includes('$runtimeRoot = Join-Path $projectRoot') && prepareDevRuntimeScript.includes('dev-desktop'), 'Development desktop runtime root must be inside the repository')
+assert(prepareDevRuntimeScript.includes('fixtureConfig') && prepareDevRuntimeScript.includes('fixtureAuth'), 'Development desktop must create credential-free Codex fixtures')
+assert(prepareDevRuntimeScript.includes('fixtureCatalog') && prepareDevRuntimeScript.includes('fixtureActivity'), 'Development desktop must load the complete product demo fixtures')
+assert(prepareDevRuntimeScript.includes('Copy-Item -LiteralPath $fixtureCatalog') && prepareDevRuntimeScript.includes('Copy-Item -LiteralPath $fixtureActivity'), 'Development desktop must copy demo fixtures into its isolated runtime')
+assert(devDesktopScript.includes('Get-CimInstance Win32_Process') && devDesktopScript.includes('$desktopExecutable = Join-Path $projectRoot'), 'Development desktop must only stop a stale source-tree development process before rebuilding')
+assert(prepareDevRuntimeScript.includes('UTF8Encoding($false)'), 'Development desktop fixture JSON must be UTF-8 without a byte-order mark')
+assertNotIncludes(devDesktopScript + prepareDevRuntimeScript, 'D:' + String.fromCharCode(92) + 'Software' + String.fromCharCode(92) + 'Signalman AI', 'Development desktop runner')
+assertNotIncludes(devDesktopScript + prepareDevRuntimeScript, 'Signalman AI.lnk', 'Development desktop runner')
+assertNotIncludes(devDesktopScript + prepareDevRuntimeScript, 'C:' + String.fromCharCode(92) + 'Users' + String.fromCharCode(92) + 'ga990' + String.fromCharCode(92) + '.codex', 'Development desktop runner')
+assert(appTsx.includes("setTitle(`Signalman AI · 开发版 · ${__CODEX_BUILD_SHA__}`)"), 'Development desktop must set a distinct native window title')
+assert(appTsx.includes("隔离数据"), 'Development desktop must visibly disclose isolated data')
+assert(appTsx.includes('固定测试模型 <FieldHint'), 'Cost ranking must explain the fixed benchmark model at its control')
+assert(appTsx.includes('1% 表示约为官方成本的 1/100'), 'Cost ranking must express official comparison in the user-readable direction')
+assertNotIncludes(appTsx, '最低成本 = 100 分', 'Cost ranking must not show an unlinked score explanation')
+assert(Object.keys(developmentFixtureCatalog.profiles).length === 4, 'Development demo catalog must contain four example providers')
+assert(developmentFixtureCatalog.model_catalogs['example-provider-a']?.models?.length === 4, 'Development demo catalog must include four example Codex models')
+assert(developmentFixtureCatalog.cost_calibrations.length >= 3, 'Development demo catalog must include cost calibration samples')
+assert(developmentFixtureCatalog.response_probes.length >= 3, 'Development demo catalog must include response probe samples')
+assert(developmentFixtureActivity.length >= 3, 'Development demo activity must include a complete visible history')
+assertNotIncludes(developmentFixtureCatalogText, 'OPENAI_API_KEY', 'Development demo catalog')
+assertNotIncludes(developmentFixtureCatalogText, 'C:' + String.fromCharCode(92) + 'Users' + String.fromCharCode(92) + 'ga990', 'Development demo catalog')
+assert(developmentFixtureCatalogText.includes('development-placeholder'), 'Development demo catalog must use only a non-secret placeholder key')
+assert(appCss.includes('grid-row: 3;'), 'The status bar must stay inside the current three-row app shell')
+assert(appCss.includes('position: absolute;\n  z-index: 20;\n  top: 72px;'), 'Startup errors must overlay, not occupy the workbench grid row')
+assert(appCss.includes('--ranking-columns: 48px minmax(210px, 1.4fr) minmax(150px, 1fr) minmax(150px, 1fr) 76px 56px 72px;'), 'Cost ranking must use one deliberate shared table grid')
+assert(libRs.includes('fn development_window_title() -> Option<String>'), 'Desktop shell must define a development window title')
+assert(libRs.includes('app.get_webview_window("main")'), 'Desktop shell must apply the development title before frontend load')
+assert(libRs.includes('window.set_title(&title)?'), 'Desktop shell must force the distinct development window title')
 assert(manifestText.includes('<DisplayName>Signalman AI</DisplayName>'), 'MSIX display name must use the approved brand')
 assert(manifestText.includes('Name="ga626.CodexProviderSwitcher"'), 'MSIX identity must retain the Partner Center assignment')
 assert(libRs.includes('const APP_DIR_NAME: &str = "CodeX Provider Switcher"'), 'Existing app data directory must remain readable after rebranding')

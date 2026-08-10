@@ -1,7 +1,7 @@
 {
   "name": "codex-provider-switcher",
   "private": true,
-  "version": "0.10.5-alpha",
+  "version": "0.10.6-alpha",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,6 +13,10 @@
     "qa:smoke": "node scripts/qa-smoke.mjs",
     "qa:preview-smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/run-preview-smoke.ps1",
     "qa:dev-desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/start-dev-desktop.ps1",
+    "dev:desktop": "npm run qa:dev-desktop --",
+    "qa:dev-web": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/start-dev-web.ps1",
+    "dev:web": "npm run qa:dev-web --",
+    "dev:parity": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/start-dev-parity.ps1",
     "qa:install-release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/prepare-install-release-qa.ps1",
     "qa:updater-release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/prepare-updater-release-qa.ps1",
     "qa:stable-install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/stable-install.ps1",

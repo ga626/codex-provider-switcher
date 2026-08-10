@@ -36,6 +36,7 @@ import {
   deleteProfile,
   checkForUpdate,
   createManualBackup,
+  deleteCostCalibration,
   isGitHubReleaseBuild,
   isStoreManagedBuild,
   loadState,
@@ -54,9 +55,20 @@ import {
   toggleAutoStart,
   verifyProfile,
 } from './adapter'
-import type { AppState, BackupItem, ConfigurationProtection, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, SwitchPreflight, UpdateInfo, ValidationCheck } from './types'
+import type { AppState, BackupItem, ConfigurationProtection, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, ResponseProbeObservation, SwitchPreflight, UpdateInfo, ValidationCheck } from './types'
 
 type ViewId = 'providers' | 'models' | 'switch-check' | 'protection' | 'timeline' | 'lab'
+
+const BENCHMARK_MODELS = [
+  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', inputUsdPerMillion: 5, cachedInputUsdPerMillion: 0.5, cacheWriteUsdPerMillion: 6.25, outputUsdPerMillion: 30 },
+  { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', inputUsdPerMillion: 2, cachedInputUsdPerMillion: 0.2, cacheWriteUsdPerMillion: 2.5, outputUsdPerMillion: 12 },
+  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', inputUsdPerMillion: 0.2, cachedInputUsdPerMillion: 0.02, cacheWriteUsdPerMillion: 0.25, outputUsdPerMillion: 1.2 },
+  { id: 'gpt-5.5', label: 'GPT-5.5', inputUsdPerMillion: 5, cachedInputUsdPerMillion: 0.5, cacheWriteUsdPerMillion: 0, outputUsdPerMillion: 30 },
+] as const
+
+// The official API price table is in USD. A fixed, dated reference keeps saved samples comparable.
+// Snapshot: Wise mid-market USD/CNY, 2026-08-09 (latest available when this reference was refreshed).
+const OFFICIAL_USD_TO_CNY = 6.74545
 
 const emptyProfile: EditableProfile = {
   id: '',
@@ -221,6 +233,49 @@ function draftMatchesProfile(draft: EditableProfile, profile: ProviderProfile | 
 function decimalToScaled(value: string) {
   const [whole = '0', fraction = ''] = value.trim().split('.', 2)
   return BigInt(whole) * 1_000_000_000_000n + BigInt(fraction.padEnd(12, '0').slice(0, 12) || '0')
+}
+
+function scaledToDecimal(value: bigint) {
+  const whole = value / 1_000_000_000_000n
+  const fraction = (value % 1_000_000_000_000n).toString().padStart(12, '0').replace(/0+$/, '')
+  return fraction ? `${whole}.${fraction}` : whole.toString()
+}
+
+function medianScaled(values: bigint[]) {
+  const sorted = values.toSorted((left, right) => left < right ? -1 : left > right ? 1 : 0)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2n
+}
+
+function formatCny(value: string, maximumFractionDigits = 2) {
+  return new Intl.NumberFormat('zh-CN', {
+    style: 'currency',
+    currency: 'CNY',
+    maximumFractionDigits,
+  }).format(Number(value))
+}
+
+function benchmarkModelLabel(model: string) {
+  return BENCHMARK_MODELS.find((item) => item.id === model)?.label ?? model
+}
+
+function estimateOfficialCny(probe: ResponseProbeObservation | undefined, modelId: string) {
+  const model = BENCHMARK_MODELS.find((item) => item.id === modelId)
+  const usage = probe?.usage
+  if (!model || !usage || usage.inputTokens === undefined || usage.outputTokens === undefined) return null
+
+  const inputTokens = Math.max(0, usage.inputTokens)
+  const cachedTokens = Math.min(inputTokens, Math.max(0, usage.cachedTokens ?? 0))
+  const cacheWriteTokens = Math.max(0, usage.cacheWriteTokens ?? 0)
+  const outputTokens = Math.max(0, usage.outputTokens)
+  // Cached input is included in input_tokens, so bill the remainder at the normal input rate.
+  const usd = (
+    (inputTokens - cachedTokens) * model.inputUsdPerMillion
+    + cachedTokens * model.cachedInputUsdPerMillion
+    + cacheWriteTokens * model.cacheWriteUsdPerMillion
+    + outputTokens * model.outputUsdPerMillion
+  ) / 1_000_000
+  return decimalToScaled((usd * OFFICIAL_USD_TO_CNY).toFixed(12))
 }
 
 function providerModelLabel(model: string) {
@@ -389,6 +444,17 @@ function App() {
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
+
+  useEffect(() => {
+    if (__CODEX_RELEASE_CHANNEL__ !== 'development' || !('__TAURI_INTERNALS__' in window)) return
+
+    // Keep the native window visibly distinct from the daily stable app. This
+    // is deliberately loaded only in Tauri, so the browser preview stays free
+    // of native API calls.
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+      void getCurrentWindow().setTitle(`Signalman AI · 开发版 · ${__CODEX_BUILD_SHA__}`)
+    }).catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     async function loadInitialState() {
@@ -684,6 +750,9 @@ function App() {
         : __CODEX_RELEASE_CHANNEL__ === 'store'
           ? '商店版'
           : '开发版'
+  const buildIdentityLabel = __CODEX_RELEASE_CHANNEL__ === 'development'
+    ? `开发版 · ${__CODEX_BUILD_SHA__}`
+    : `${buildChannelLabel} · v${__APP_VERSION__}`
 
   return (
     <main className="app-shell" data-view={activeView}>
@@ -710,7 +779,7 @@ function App() {
             <strong>{currentFileProfile?.name ?? '未识别'}</strong>
             <span className="provider-current-model">{currentFileProfile?.model ? providerModelLabel(currentFileProfile.model) : '未设置模型'}</span>
           </div>
-          {state.runtimeMode === 'tauri_native' && <span className="build-identity" title="用于确认当前运行的发布渠道">{buildChannelLabel} v{__APP_VERSION__}</span>}
+          {state.runtimeMode === 'tauri_native' && <span className="build-identity" title={__CODEX_RELEASE_CHANNEL__ === 'development' ? '开发版使用隔离数据；稳定版和真实 Codex 配置不会被读取或修改。' : '用于确认当前运行的发布渠道'}>{buildIdentityLabel}</span>}
           <button className="icon-button" type="button" onClick={() => setSettingsOpen(true)} title="应用设置" aria-label="应用设置">
             <Settings size={17} />
           </button>
@@ -1711,21 +1780,38 @@ function LabWorkspace({
   const [paidCny, setPaidCny] = useState('')
   const [consumableCredit, setConsumableCredit] = useState('')
   const [debitCredit, setDebitCredit] = useState('')
+  const [historyProviderId, setHistoryProviderId] = useState<string | null>(null)
   const profile = state.profiles.find((item) => item.id === labProviderId) ?? selectedProfile ?? state.profiles.find((item) => item.active)
-  const latestProbe = (state.responseProbes ?? []).find((item) => item.providerId === profile?.id && item.probeVersion === 'response-observation-v1')
+  const [benchmarkModel, setBenchmarkModel] = useState('gpt-5.6-terra')
+  const latestProbe = (state.responseProbes ?? []).find((item) => (
+    item.providerId === profile?.id && item.model === benchmarkModel && item.probeVersion === 'cost-calibration-v2'
+  ))
   const completedCalibrations = (state.costCalibrations ?? []).filter((item) => item.state === 'completed' && item.resultCny !== '0')
-  const comparableRecords = completedCalibrations
-    .filter((item) => item.model === (profile?.model || '未设置模型') && item.probeVersion === 'cost-calibration-v1')
-    .toSorted((left, right) => {
-      const difference = decimalToScaled(left.resultCny) - decimalToScaled(right.resultCny)
-      return difference < 0n ? -1 : difference > 0n ? 1 : 0
-    })
-  const lowestCost = comparableRecords[0] ? decimalToScaled(comparableRecords[0].resultCny) : null
-  const scoreFor = (item: CostCalibration) => {
-    if (!lowestCost || comparableRecords.length < 2) return null
-    const normalized = decimalToScaled(item.resultCny)
-    if (normalized <= 0n) return null
-    return Math.max(1, Math.min(100, Number((lowestCost * 100n) / normalized)))
+  const comparableRecords = completedCalibrations.filter((item) => (
+    item.model === benchmarkModel && item.probeVersion === 'cost-calibration-v2'
+  ))
+  const ranking = Array.from(new Map(state.profiles.map((item) => [item.id, item])).values()).flatMap((provider) => {
+    const samples = comparableRecords.filter((item) => item.providerId === provider.id)
+    if (samples.length === 0) return []
+    const median = medianScaled(samples.map((item) => decimalToScaled(item.resultCny)))
+    const officialCosts = samples.map((sample) => estimateOfficialCny(
+      (state.responseProbes ?? []).find((probe) => probe.id === sample.probeId),
+      benchmarkModel,
+    )).filter((cost): cost is bigint => cost !== null)
+    return [{ provider, samples, median, officialMedian: officialCosts.length > 0 ? medianScaled(officialCosts) : null }]
+  }).toSorted((left, right) => left.median < right.median ? -1 : left.median > right.median ? 1 : 0)
+  const lowestCost = ranking[0]?.median ?? null
+  const displayMultiplier = lowestCost && Number(scaledToDecimal(lowestCost)) * 1000 < 0.01 ? 10_000 : 1_000
+  const scoreFor = (median: bigint) => {
+    if (!lowestCost || ranking.length < 2 || median <= 0n) return null
+    return Math.max(1, Math.min(100, Number((lowestCost * 100n) / median)))
+  }
+  const costSourceLabel: Record<NonNullable<CostCalibration['costSource']>, string> = {
+    response_inline: '响应费用',
+    response_usage: '用量费用',
+    response_header: '响应头费用',
+    billing_log_manual: '平台日志',
+    balance_difference: '余额差额',
   }
 
   useEffect(() => {
@@ -1735,8 +1821,8 @@ function LabWorkspace({
   }, [latestProbe?.costCandidate, latestProbe?.status])
 
   async function runCostTest() {
-    if (!profile) return
-    await runAction('run-cost-probe', () => runResponseProbe(profile.id))
+    if (!profile || !benchmarkModel) return
+    await runAction('run-cost-probe', () => runResponseProbe(profile.id, benchmarkModel))
   }
 
   async function saveCalibration() {
@@ -1748,11 +1834,19 @@ function LabWorkspace({
       paidCny,
       consumableCredit,
       debitCredit,
-      creditUnitLabel: '平台额度',
-      model: profile.model || '未设置模型',
-      probeVersion: 'cost-calibration-v1',
+      creditUnitLabel: '同一平台额度',
+      model: benchmarkModel || '未设置模型',
+      probeVersion: 'cost-calibration-v2',
+      costSource: latestProbe?.costCandidate ? latestProbe.costSource ?? 'response_inline' : 'billing_log_manual',
+      probeId: latestProbe?.id,
+      sampleKind: 'cold',
     }))
     setDebitCredit('')
+  }
+
+  async function removeCalibration(calibration: CostCalibration) {
+    if (!window.confirm(`删除 ${calibration.providerName} 在 ${calibration.updatedAt} 保存的这条费用记录？此操作不可恢复。`)) return
+    await runAction('delete-cost-calibration', () => deleteCostCalibration(calibration.id))
   }
 
   return (
@@ -1768,27 +1862,57 @@ function LabWorkspace({
         <div className="section-heading-row">
           <div>
             <h3 id="lab-ranking-title">性价比排名</h3>
+            <p className="section-description">只比较同一个固定测试模型。成本取每个服务商的多次冷启动中位数，避免单次波动影响排名。</p>
           </div>
-          <span className="section-meta">同一模型中，最低实际花费为 100 分</span>
         </div>
-        {comparableRecords.length < 2 ? <p className="lab-empty">先为至少两个服务商保存同一模型的费用记录，才能生成排名。</p> : (
-          <div className="lab-ranking-list">
-            {comparableRecords.map((item, index) => (
-              <div className="lab-ranking-row" key={item.id}>
-                <span className="ranking-position">{index + 1}</span>
-                <div><strong>{item.providerName}</strong><small>{providerModelLabel(item.model)} · {item.updatedAt}</small></div>
-                <strong className="ranking-cost">¥{item.resultCny}</strong>
-                <div className="ranking-score"><strong>{scoreFor(item)} 分</strong><span>越高越划算</span></div>
+        <div className="lab-benchmark-control">
+          <label><span className="field-label">固定测试模型 <FieldHint text="排名只比较同一模型下、同一固定测试请求的结果；切换模型后会显示该模型自己的排名。" /></span><select value={benchmarkModel} onChange={(event) => { setBenchmarkModel(event.target.value); setDebitCredit('') }}>
+            {BENCHMARK_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+          </select></label>
+        </div>
+        {ranking.length < 2 ? <p className="lab-empty">先为至少两个服务商保存“{benchmarkModelLabel(benchmarkModel || '固定模型')}”的费用样本，才能生成排名。</p> : (
+          <div className="lab-ranking-list" role="table" aria-label="性价比排名">
+            <div className="lab-ranking-head ranking-grid" role="row">
+              <span className="ranking-cell ranking-cell--position">排名</span>
+              <span className="ranking-cell ranking-cell--provider">服务商</span>
+              <span className="ranking-cell ranking-cell--cost">估算成本 <FieldHint text={`按“每 ${displayMultiplier.toLocaleString()} 次”固定测试估算的人民币成本。`} /></span>
+              <span className="ranking-cell ranking-cell--official">官方对照 <FieldHint text={`这是该服务商成本占同一测试按官方 API 标准价格估算成本的百分比；1% 表示约为官方成本的 1/100。固定参考汇率：1 USD = ¥${OFFICIAL_USD_TO_CNY}。`} /></span>
+              <span className="ranking-cell ranking-cell--score">评分 <FieldHint text="本表中成本最低的服务商为 100 分；其余服务商按成本比例折算，分数越高代表本次比较越划算。" /></span>
+              <span className="ranking-cell ranking-cell--samples">样本 <FieldHint text="参与中位数计算的已保存冷启动样本数量。" /></span>
+              <span className="ranking-cell ranking-cell--manage">管理</span>
+            </div>
+            {ranking.map((item, index) => {
+              const medianCny = scaledToDecimal(item.median)
+              const officialRatio = item.officialMedian && item.officialMedian > 0n ? Number((item.median * 1000n) / item.officialMedian) / 10 : null
+              const providerHistoryOpen = historyProviderId === item.provider.id
+              return <div className="lab-ranking-group" key={item.provider.id}>
+              <div className="lab-ranking-row ranking-grid" role="row">
+                <span className="ranking-cell ranking-cell--position ranking-position">{index + 1}</span>
+                <div className="ranking-cell ranking-cell--provider"><strong>{item.provider.name}</strong><small>{benchmarkModelLabel(benchmarkModel)} · 最近 {item.samples[0]?.updatedAt}</small></div>
+                <div className="ranking-cell ranking-cell--cost ranking-cost"><strong>{formatCny((Number(medianCny) * displayMultiplier).toString())}</strong><small>单次 {formatCny(medianCny, 8)}</small></div>
+                <div className="ranking-cell ranking-cell--official ranking-official">{officialRatio === null ? <span>—</span> : <strong>{officialRatio}%</strong>}</div>
+                <div className="ranking-cell ranking-cell--score ranking-score"><strong>{scoreFor(item.median) ?? '—'}{scoreFor(item.median) ? ' 分' : ''}</strong><span>越高越划算</span></div>
+                <span className="ranking-cell ranking-cell--samples ranking-samples">{item.samples.length} 次</span>
+                <button className="ghost-button ranking-cell ranking-cell--manage ranking-manage" type="button" onClick={() => setHistoryProviderId(providerHistoryOpen ? null : item.provider.id)}>{providerHistoryOpen ? '收起' : '管理'}</button>
               </div>
-            ))}
+              {providerHistoryOpen && <div className="lab-history-list">
+                <strong>本服务商的原始样本</strong>
+                {item.samples.map((sample) => <div className="lab-history-row" key={sample.id}>
+                  <span>{sample.updatedAt} · {costSourceLabel[sample.costSource ?? 'billing_log_manual']}</span>
+                  <strong>单次 {formatCny(sample.resultCny, 8)}</strong>
+                  <button className="danger-text-button" type="button" disabled={busy !== null} onClick={() => void removeCalibration(sample)}><Trash2 size={14} />删除</button>
+                </div>)}
+              </div>}
+              </div>
+            })}
           </div>
         )}
       </section>
       <section className="surface-panel lab-record-cost">
         <div className="section-heading-row">
           <div>
-            <h3>记录费用</h3>
-            <p className="section-description">先运行一次固定测试。系统会尝试读取本次扣费并填入“测试额度”；若服务商没有返回费用，就按提示从平台使用日志复制。再填写充值金额和平台实际额度，保存后即可参与同模型排名。</p>
+            <h3>新增测试样本</h3>
+            <p className="section-description">充值金额填写人民币。平台实际额度和测试额度只要来自同一个平台余额体系即可，不需要换算成美元，也不需要和其他服务商统一。人民币成本 = 充值金额 × 测试额度 ÷ 平台实际额度。</p>
           </div>
         </div>
         <div className="lab-selected-provider">
@@ -1798,13 +1922,13 @@ function LabWorkspace({
               {state.profiles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           </label>
-          <span>{profile?.model ? providerModelLabel(profile.model) : '未设置模型'}</span>
+          <span>固定模型：{benchmarkModelLabel(benchmarkModel || '未选择模型')}</span>
         </div>
         <div className={`lab-probe-status ${latestProbe ? latestProbe.status : 'idle'}`}>
           <div>
-            <strong>{latestProbe?.status === 'final_cost_inline' ? '已读取测试额度' : latestProbe ? '未读取到测试额度' : '尚未运行测试'}</strong>
+            <strong>{latestProbe?.status === 'final_cost_inline' ? '已读取测试额度' : latestProbe ? '需要从平台日志补充测试额度' : '尚未运行测试'}</strong>
             <span>{latestProbe?.status === 'final_cost_inline'
-              ? '已从响应中读取费用候选值。请确认它与平台使用日志的扣费单位一致。'
+              ? `已通过${latestProbe.costSource === 'response_header' ? '响应头' : latestProbe.costSource === 'response_usage' ? '用量字段' : '响应字段'}读取费用。请确认它与平台余额单位一致。`
               : latestProbe ? latestProbe.detail : '运行后会发出一条极短请求，不会切换服务商或改写 Codex 配置。'}</span>
           </div>
           <button className="primary-button" type="button" disabled={!profile || busy !== null} onClick={() => void runCostTest()}>
@@ -1820,15 +1944,7 @@ function LabWorkspace({
           <label><span className="field-label">平台实际额度 <FieldHint text="付款后可用于调用的总额度，含赠送和折扣，按平台后台余额填写。" /></span><input aria-label="平台实际额度" type="text" inputMode="decimal" value={consumableCredit} onChange={(event) => setConsumableCredit(event.target.value)} placeholder={fundingMode === 'subscription' ? '本账期可用总额度' : '充值后到账总额'} /></label>
           <label><span className="field-label">测试额度 <FieldHint text="固定测试被平台扣掉的额度。系统能读到时会自动填入；否则从平台使用日志复制。" /></span><input aria-label="测试额度" type="text" inputMode="decimal" value={debitCredit} onChange={(event) => setDebitCredit(event.target.value)} placeholder="运行测试后自动填写，或从日志复制" /></label>
         </div>
-        <div className="lab-module-actions"><button className="primary-button" type="button" disabled={!profile || busy !== null || !paidCny || !consumableCredit || !debitCredit} onClick={() => void saveCalibration()}><Save size={15} />计算并保存</button><span>按三项数据换算固定测试的人民币成本。</span></div>
-      </section>
-      <section className="surface-panel lab-results" aria-labelledby="lab-results-title">
-        <div className="section-heading-row"><div><h3 id="lab-results-title">费用记录</h3></div></div>
-        {completedCalibrations.length === 0 ? <p className="lab-empty">保存一条费用记录后，这里会显示实际花费和记录时间。</p> : (
-          <div className="lab-record-list">
-            {completedCalibrations.map((item) => <div className="lab-result-row" key={item.id}><span>{item.providerName}</span><strong>¥{item.resultCny}</strong><small>{providerModelLabel(item.model)} · {item.fundingMode === 'subscription' ? '订阅' : '充值'} · {item.updatedAt}</small></div>)}
-          </div>
-        )}
+        <div className="lab-module-actions"><button className="primary-button" type="button" disabled={!profile || !benchmarkModel || busy !== null || !paidCny || !consumableCredit || !debitCredit} onClick={() => void saveCalibration()}><Save size={15} />计算并保存</button><span>官方对照按标准短上下文价与固定参考汇率 1 USD = ¥{OFFICIAL_USD_TO_CNY} 自动估算。</span></div>
       </section>
     </div>
   )
