@@ -32,20 +32,21 @@ try {
   }
 
   const captures = [
-    ['01-providers.png', async () => {}],
-    ['02-models.png', async () => {
-      await page.getByRole('button', { name: /模型目录/ }).click()
-      await page.getByRole('heading', { name: '模型目录' }).waitFor()
-      await page.getByRole('button', { name: '刷新模型目录' }).click()
-      await page.getByText('已返回 6 个示例模型。').first().waitFor()
+    ['01-providers.png', async () => {
+      await page.getByRole('button', { name: '服务商', exact: true }).click()
+      await page.getByRole('heading', { name: '服务商配置' }).waitFor()
     }],
-    ['03-safety.png', async () => {
-      await page.getByRole('button', { name: /安全检查/ }).click()
-      await page.getByRole('heading', { name: '安全检查' }).waitFor()
+    ['02-safety.png', async () => {
+      await page.getByRole('button', { name: '安全与恢复', exact: true }).click()
+      await page.getByRole('heading', { name: '配置保护' }).waitFor()
     }],
-    ['04-activity.png', async () => {
-      await page.getByRole('button', { name: /活动记录/ }).click()
+    ['03-activity.png', async () => {
+      await page.getByRole('button', { name: '活动记录', exact: true }).click()
       await page.getByRole('heading', { name: '活动记录' }).waitFor()
+    }],
+    ['04-cost-center.png', async () => {
+      await page.getByRole('button', { name: '实验室', exact: true }).click()
+      await page.getByRole('heading', { name: '性价比中心' }).waitFor()
     }],
   ]
 

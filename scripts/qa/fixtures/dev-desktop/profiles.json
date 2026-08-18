@@ -2,7 +2,7 @@
   "version": "0.1",
   "profiles": {
     "example-provider-c": {
-      "name": "示例服务商 C",
+      "name": "服务商 C",
       "base_url": "https://provider-c.example/v1",
       "api_key": "development-placeholder",
       "model": "gpt-5.6-terra",
@@ -10,7 +10,7 @@
       "verified": false,
       "verification_status": "billing_unavailable",
       "default": true,
-      "note": "演示用额度失败状态。隔离开发版不会连接真实服务商。",
+      "note": "最近一次额度检查未通过。",
       "last_verified_at": "2026-07-29 10:42",
       "last_verification_detail": "服务商返回额度不足，未写入 Codex 配置。",
       "last_verification_stage": "billing",
@@ -18,7 +18,7 @@
       "last_verification_provider_code": "insufficient_quota"
     },
     "example-provider-b": {
-      "name": "示例服务商 B",
+      "name": "服务商 B",
       "base_url": "https://provider-b.example/v1",
       "api_key": "development-placeholder",
       "model": "",
@@ -26,14 +26,14 @@
       "verified": false,
       "verification_status": "response_shape_unconfirmed",
       "default": false,
-      "note": "演示用响应形状待确认状态。",
+      "note": "等待确认响应格式。",
       "last_verified_at": "2026-07-29 10:38",
       "last_verification_detail": "服务端已返回 JSON，但无法确认其可供 Codex 使用。",
       "last_verification_stage": "response_shape",
       "last_verification_http_status": 200
     },
     "example-provider-d": {
-      "name": "示例服务商 D",
+      "name": "服务商 D",
       "base_url": "https://provider-d.example/v1",
       "api_key": "development-placeholder",
       "model": "gpt-5.6-terra",
@@ -42,14 +42,14 @@
       "verification_status": "verified",
       "verification_response_shape": "standard_responses",
       "default": false,
-      "note": "演示用已验证状态。",
+      "note": "连接检查已通过。",
       "last_verified_at": "2026-07-29 10:34",
       "last_verification_detail": "短时 Responses 请求返回可识别的模型输出。",
       "last_verification_stage": "inference",
       "last_verification_http_status": 200
     },
     "example-provider-a": {
-      "name": "示例服务商 A",
+      "name": "服务商 A",
       "base_url": "https://provider-a.example/v1",
       "api_key": "development-placeholder",
       "model": "gpt-5.6-terra",
@@ -58,7 +58,7 @@
       "verification_status": "verified",
       "verification_response_shape": "standard_responses",
       "default": false,
-      "note": "演示用当前配置。真实服务商信息不会进入隔离开发版。",
+      "note": "当前配置已验证。",
       "last_switched_at": "2026-07-01 22:10",
       "last_verified_at": "2026-07-29 10:36",
       "last_verification_detail": "短时 Responses 请求返回可识别的模型输出。",
@@ -72,7 +72,7 @@
       "baseUrl": "https://provider-a.example/v1",
       "fetchedAt": "2026-08-07 20:10:00",
       "status": "ok",
-      "statusDetail": "开发演示目录：仅用于界面验收，不来自真实服务商。",
+      "statusDetail": "已刷新 4 个可用模型。",
       "models": [
         { "id": "gpt-5.6-sol", "aliases": ["GPT-5.6 Sol"], "source": "mock", "tags": ["responses-candidate", "reasoning"], "verifiedForResponses": "verified" },
         { "id": "gpt-5.6-terra", "aliases": ["GPT-5.6 Terra"], "source": "mock", "tags": ["responses-candidate", "reasoning"], "verifiedForResponses": "verified" },
@@ -82,14 +82,14 @@
     }
   },
   "cost_calibrations": [
-    { "id": "cost-demo-d", "providerId": "example-provider-d", "providerName": "示例服务商 D", "fundingMode": "prepaid", "paidCny": "10", "consumableCredit": "1000", "debitCredit": "0.000398", "creditUnitLabel": "同一平台额度", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "costSource": "response_usage", "probeId": "probe-demo-d", "sampleKind": "cold", "resultCny": "0.00000398", "state": "completed", "createdAt": "2026-08-07 20:16", "updatedAt": "2026-08-07 20:16" },
-    { "id": "cost-demo-a", "providerId": "example-provider-a", "providerName": "示例服务商 A", "fundingMode": "prepaid", "paidCny": "10", "consumableCredit": "1000", "debitCredit": "0.000524", "creditUnitLabel": "同一平台额度", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "costSource": "billing_log_manual", "probeId": "probe-demo-a", "sampleKind": "cold", "resultCny": "0.00000524", "state": "completed", "createdAt": "2026-08-07 20:12", "updatedAt": "2026-08-07 20:12" },
-    { "id": "cost-demo-a-repeat", "providerId": "example-provider-a", "providerName": "示例服务商 A", "fundingMode": "prepaid", "paidCny": "10", "consumableCredit": "1000", "debitCredit": "0.000548", "creditUnitLabel": "同一平台额度", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "costSource": "response_header", "probeId": "probe-demo-a-repeat", "sampleKind": "cold", "resultCny": "0.00000548", "state": "completed", "createdAt": "2026-08-07 20:15", "updatedAt": "2026-08-07 20:15" }
+    { "id": "cost-demo-d", "providerId": "example-provider-d", "providerName": "服务商 D", "fundingMode": "prepaid", "paidCny": "10", "consumableCredit": "1000", "debitCredit": "0.000398", "creditUnitLabel": "同一平台额度", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "costSource": "response_usage", "probeId": "probe-demo-d", "sampleKind": "cold", "resultCny": "0.00000398", "state": "completed", "createdAt": "2026-08-07 20:16", "updatedAt": "2026-08-07 20:16" },
+    { "id": "cost-demo-a", "providerId": "example-provider-a", "providerName": "服务商 A", "fundingMode": "prepaid", "paidCny": "10", "consumableCredit": "1000", "debitCredit": "0.000524", "creditUnitLabel": "同一平台额度", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "costSource": "billing_log_manual", "probeId": "probe-demo-a", "sampleKind": "cold", "resultCny": "0.00000524", "state": "completed", "createdAt": "2026-08-07 20:12", "updatedAt": "2026-08-07 20:12" },
+    { "id": "cost-demo-a-repeat", "providerId": "example-provider-a", "providerName": "服务商 A", "fundingMode": "prepaid", "paidCny": "10", "consumableCredit": "1000", "debitCredit": "0.000548", "creditUnitLabel": "同一平台额度", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "costSource": "response_header", "probeId": "probe-demo-a-repeat", "sampleKind": "cold", "resultCny": "0.00000548", "state": "completed", "createdAt": "2026-08-07 20:15", "updatedAt": "2026-08-07 20:15" }
   ],
   "response_probes": [
-    { "id": "probe-demo-d", "providerId": "example-provider-d", "providerName": "示例服务商 D", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "observedAt": "2026-08-07 20:16", "status": "final_cost_inline", "httpStatus": 200, "requestId": "preview-demo-d", "usage": { "inputTokens": 12, "outputTokens": 4, "totalTokens": 16, "cachedTokens": 0, "cacheWriteTokens": 0, "reasoningTokens": 0 }, "costCandidate": "0.000398", "costSource": "response_usage", "detail": "开发演示：已从响应中的用量字段读取费用。" },
-    { "id": "probe-demo-a", "providerId": "example-provider-a", "providerName": "示例服务商 A", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "observedAt": "2026-08-07 20:12", "status": "correlation_only", "httpStatus": 200, "requestId": "preview-demo-a", "usage": { "inputTokens": 12, "outputTokens": 4, "totalTokens": 16, "cachedTokens": 0, "cacheWriteTokens": 0, "reasoningTokens": 0 }, "detail": "开发演示：费用由平台日志补充。" },
-    { "id": "probe-demo-a-repeat", "providerId": "example-provider-a", "providerName": "示例服务商 A", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "observedAt": "2026-08-07 20:15", "status": "final_cost_inline", "httpStatus": 200, "requestId": "preview-demo-a-repeat", "usage": { "inputTokens": 12, "outputTokens": 4, "totalTokens": 16, "cachedTokens": 0, "cacheWriteTokens": 0, "reasoningTokens": 0 }, "costCandidate": "0.000548", "costSource": "response_header", "detail": "开发演示：已从响应头读取费用。" }
+    { "id": "probe-demo-d", "providerId": "example-provider-d", "providerName": "服务商 D", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "observedAt": "2026-08-07 20:16", "status": "final_cost_inline", "httpStatus": 200, "requestId": "preview-demo-d", "usage": { "inputTokens": 12, "outputTokens": 4, "totalTokens": 16, "cachedTokens": 0, "cacheWriteTokens": 0, "reasoningTokens": 0 }, "costCandidate": "0.000398", "costSource": "response_usage", "detail": "已从响应中的用量字段读取费用。" },
+    { "id": "probe-demo-a", "providerId": "example-provider-a", "providerName": "服务商 A", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "observedAt": "2026-08-07 20:12", "status": "correlation_only", "httpStatus": 200, "requestId": "preview-demo-a", "usage": { "inputTokens": 12, "outputTokens": 4, "totalTokens": 16, "cachedTokens": 0, "cacheWriteTokens": 0, "reasoningTokens": 0 }, "detail": "费用由平台账单记录补充。" },
+    { "id": "probe-demo-a-repeat", "providerId": "example-provider-a", "providerName": "服务商 A", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "observedAt": "2026-08-07 20:15", "status": "final_cost_inline", "httpStatus": 200, "requestId": "preview-demo-a-repeat", "usage": { "inputTokens": 12, "outputTokens": 4, "totalTokens": 16, "cachedTokens": 0, "cacheWriteTokens": 0, "reasoningTokens": 0 }, "costCandidate": "0.000548", "costSource": "response_header", "detail": "已从响应头读取费用。" }
   ],
   "profile_order": ["example-provider-c", "example-provider-b", "example-provider-d", "example-provider-a"],
   "auto_start": false,

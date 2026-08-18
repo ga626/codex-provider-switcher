@@ -1,6 +1,7 @@
 use codex_switcher_tauri_lib::{
-    check_for_update_core, create_manual_backup_core, delete_profile_core, load_state_core,
-    prepare_switch_core, refresh_models_core, reorder_profiles_core, restore_backup_core,
+    check_for_update_core, create_manual_backup_core, delete_profile_core,
+    load_state_core, reveal_profile_api_key_core,
+    prepare_switch_core, prepare_connection_environment_core, refresh_models_core, reorder_profiles_core, restore_backup_core,
     restore_latest_backup_core, run_response_probe_for_model_core, save_cost_calibration_core,
     delete_cost_calibration_core,
     save_profile_core, set_backup_policy_core,
@@ -303,6 +304,8 @@ fn handle_api(
         ("POST", "/api/profiles/reorder") => profile_ids(body)
             .and_then(reorder_profiles_core)
             .map(state_json),
+        ("POST", "/api/profiles/reveal-key") => reveal_profile_api_key_core(profile_id(body)?)
+            .map(|value| json!({ "apiKey": value })),
         ("POST", "/api/profiles/prepare-switch") => prepare_switch_core(profile_id(body)?)
             .and_then(|value| serde_json::to_value(value).map_err(SwitcherError::from)),
         ("POST", "/api/profiles/switch") => {
@@ -368,6 +371,15 @@ fn handle_api(
             set_default_profile_core(profile_id(body)?).map(state_json)
         }
         ("POST", "/api/config/sync-current") => sync_current_configuration_core().map(state_json),
+        ("POST", "/api/config/prepare-environment") => {
+            let layer_id = request_json(body)?
+                .get("layerId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| SwitcherError::Message("请选择要管理的配置层。".to_string()))?
+                .to_string();
+            prepare_connection_environment_core(layer_id).map(state_json)
+        }
         ("POST", "/api/auto-start") => {
             let enabled = request_json(body)?
                 .get("enabled")

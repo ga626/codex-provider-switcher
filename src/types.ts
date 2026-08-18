@@ -49,15 +49,23 @@ export type ModelCatalog = {
   providerId: string
   baseUrl: string
   fetchedAt?: string
+  lastSuccessfulAt?: string
   status:
     | 'not_fetched'
     | 'ok'
+    | 'stale'
     | 'missing_key'
     | 'unauthorized'
+    | 'rate_limited'
+    | 'service_error'
     | 'network_error'
     | 'provider_error'
     | 'empty_models'
   statusDetail: string
+  httpStatus?: number
+  providerCode?: string
+  requestId?: string
+  retryAfterSeconds?: number
   models: ProviderModel[]
 }
 
@@ -156,6 +164,20 @@ export type ConfigurationProtection = {
   restoreDetail: string
 }
 
+export type ConnectionEnvironmentLayer = {
+  id: string
+  label: string
+  detail: string
+  selected: boolean
+}
+
+export type ConnectionEnvironment = {
+  status: 'needs_setup' | 'ready' | 'needs_selection' | 'error'
+  selectedLayerId?: string
+  detail: string
+  layers: ConnectionEnvironmentLayer[]
+}
+
 export type UpdateInfo = {
   currentVersion: string
   latestVersion: string
@@ -185,6 +207,7 @@ export type AppState = {
   responseProbes: ResponseProbeObservation[]
   backups: BackupItem[]
   configurationProtection: ConfigurationProtection
+  connectionEnvironment: ConnectionEnvironment
 }
 
 export type SwitchPreflight = {
@@ -194,6 +217,9 @@ export type SwitchPreflight = {
   targetModel: string
   backupDetail: string
   protectedDetail: string
+  availabilityStatus: string
+  availabilityDetail: string
+  availabilityCheckedAt: string
   riskDetail?: string
   expiresAt: string
 }

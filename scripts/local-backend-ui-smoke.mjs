@@ -105,6 +105,10 @@ const consoleEvents = []
 
 try {
   await waitForBackend()
+  const preparedEnvironment = await apiPost('/api/config/prepare-environment', { layerId: 'user-config' })
+  if (preparedEnvironment.connectionEnvironment?.status !== 'ready') {
+    throw new Error('first-use connection environment was not prepared')
+  }
   const saved = await apiPost('/api/profiles/save', {
     profile: {
       id: '',
@@ -135,6 +139,21 @@ try {
   })
   const riskProfileId = riskSaved.profiles.find((profile) => profile.name === 'Risk Fixture Provider')?.id
   if (!riskProfileId) throw new Error('risk fixture provider was not saved')
+  await apiPost('/api/lab/cost-calibration', {
+    input: {
+      providerId: riskProfileId,
+      providerName: 'Risk Fixture Provider',
+      fundingMode: 'prepaid',
+      paidCny: '10',
+      consumableCredit: '1000',
+      debitCredit: '0.0008',
+      creditUnitLabel: '同一平台额度',
+      model: 'gpt-5.6-terra',
+      probeVersion: 'cost-calibration-v2',
+      costSource: 'billing_log_manual',
+      sampleKind: 'cold',
+    },
+  })
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   page.on('console', (message) => {
     if (['error', 'warning'].includes(message.type())) {
@@ -153,25 +172,23 @@ try {
   await page.locator('.provider-row').filter({ hasText: 'UI Fixture Provider' }).click()
   await page.getByRole('heading', { name: '基础配置' }).waitFor()
   await page.getByText('连接信息已填写').waitFor()
-  await page.getByRole('button', { name: /切换前检查/ }).click()
-  await page.getByRole('heading', { name: '完成以下检查后即可切换' }).waitFor()
-  await page.getByRole('heading', { name: '这些设置会在切换后继续生效' }).waitFor()
-  await page.getByText('Responses 线路协议').waitFor()
-  await page.locator('.top-navigation .top-nav-item[aria-label="服务商"]').click()
-  await page.getByRole('button', { name: '检查并切换到 UI Fixture Provider' }).click()
+  await page.getByRole('complementary', { name: '连接与切换' }).waitFor()
+  await page.locator('.connection-dock .dock-status-list dt').filter({ hasText: '连接环境' }).waitFor()
+  await page.getByText('已准备', { exact: true }).first().waitFor()
+  await page.getByRole('button', { name: '检查并切换' }).click()
   await page.getByRole('dialog', { name: '确认切换到 UI Fixture Provider？' }).waitFor()
   await page.getByText('切换影响确认').waitFor()
   await page.getByText('保护检查').first().waitFor()
   await page.keyboard.press('Escape')
   await page.getByRole('dialog', { name: '确认切换到 UI Fixture Provider？' }).waitFor({ state: 'detached' })
   await page.getByText('不保证', { exact: true }).count().then((count) => {
-    if (count !== 0) throw new Error('switch check must not expose duplicate disclaimer cards')
+    if (count !== 0) throw new Error('connection dock must not expose duplicate disclaimer cards')
   })
   await page.locator('.inspector-panel').count().then((count) => {
     if (count !== 0) throw new Error('workspace must not render a duplicate right-side inspector')
   })
   await page.locator('.compact-check-list').count().then((count) => {
-    if (count !== 0) throw new Error('workspace must not render nested scrollable check lists')
+    if (count !== 0) throw new Error('provider workspace must not render nested scrollable check lists')
   })
   await page.screenshot({ path: join(outputDir, 'switch-check.png'), fullPage: true })
   await page.getByRole('button', { name: /实验室/ }).click()
@@ -184,7 +201,7 @@ try {
   await page.getByLabel('充值金额').fill('10')
   await page.getByLabel('平台实际额度').fill('1000')
   await page.getByRole('button', { name: '计算并保存' }).click()
-  await page.getByText('¥0.00000524').waitFor()
+  await page.getByText('¥0.05').waitFor()
   await page.screenshot({ path: join(outputDir, 'cost-calibration.png'), fullPage: true })
   await page.getByRole('button', { name: /安全与恢复/ }).click()
   await page.getByRole('heading', { name: '首次启动基线备份已就绪' }).waitFor()
@@ -245,7 +262,7 @@ try {
 
   await page.locator('.top-navigation .top-nav-item[aria-label="服务商"]').click()
   await page.locator('.provider-row').filter({ hasText: 'Risk Fixture Provider' }).click()
-  await page.getByRole('button', { name: '检查并切换到 Risk Fixture Provider' }).click()
+  await page.getByRole('complementary', { name: '连接与切换' }).getByRole('button', { name: '检查并切换' }).click()
   const riskDialog = page.getByRole('dialog', { name: '确认切换到 Risk Fixture Provider？' })
   await riskDialog.waitFor()
   const riskCheckbox = riskDialog.getByRole('checkbox')

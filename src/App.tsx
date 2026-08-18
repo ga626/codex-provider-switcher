@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   Boxes,
   CheckCircle2,
+  ChevronDown,
   CircleHelp,
   Copy,
   Activity,
@@ -13,6 +14,7 @@ import {
   GitCompareArrows,
   KeyRound,
   LayoutDashboard,
+  MessageSquare,
   PlugZap,
   Plus,
   RefreshCcw,
@@ -30,7 +32,7 @@ import {
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   deleteProfile,
@@ -41,8 +43,10 @@ import {
   isStoreManagedBuild,
   loadState,
   openUpdate,
+  prepareConnectionEnvironment,
   prepareSwitch,
   refreshModels,
+  revealProfileApiKey,
   reorderProfiles,
   runResponseProbe,
   restoreBackup,
@@ -58,6 +62,23 @@ import {
 import type { AppState, BackupItem, ConfigurationProtection, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, ResponseProbeObservation, SwitchPreflight, UpdateInfo, ValidationCheck } from './types'
 
 type ViewId = 'providers' | 'models' | 'switch-check' | 'protection' | 'timeline' | 'lab'
+type NoticeTone = 'success' | 'warning' | 'danger' | 'info'
+type NoticeState = { message: string; tone: NoticeTone }
+type FirstRunPhase = 'consent' | 'preparing' | 'review' | 'ready' | 'failed'
+const FIRST_RUN_FEED = [
+  { title: '读取配置位置', detail: '确认当前电脑上要管理的 Codex 配置层' },
+  { title: '检查配置文件', detail: '确认配置文件可以读取，避免覆盖未知内容' },
+  { title: '解析 TOML 语法', detail: '检查配置结构是否能被 Codex 正常解析' },
+  { title: '确认根模型', detail: '确认 Codex 有可用的默认模型入口' },
+  { title: '确认服务商入口', detail: '检查 custom 服务商分组是否存在且可定位' },
+  { title: '确认 Responses 线路', detail: '确认切换器使用 Codex 兼容的请求协议' },
+  { title: '检查认证方式', detail: '确认不会覆盖密钥或其他登录信息' },
+  { title: '创建恢复点', detail: '先保存原始配置，出现问题可以完整撤回' },
+  { title: '写入连接设置', detail: '只补齐 Signalman 管理范围内的连接字段' },
+  { title: '回读写入结果', detail: '重新读取刚刚写入的内容，确认没有写坏' },
+  { title: '复核保护范围', detail: '确认项目、MCP、插件和历史记录没有被改动' },
+  { title: '生成检查摘要', detail: '整理成你接下来可以查看的结果清单' },
+] as const
 
 const BENCHMARK_MODELS = [
   { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', inputUsdPerMillion: 5, cachedInputUsdPerMillion: 0.5, cacheWriteUsdPerMillion: 6.25, outputUsdPerMillion: 30 },
@@ -172,7 +193,7 @@ function providerAvailabilityChecks(
     severity: 'warning',
   }]
 
-  if (profile.model.length > 0 && modelCatalog?.status === 'ok') {
+  if (profile.model.length > 0 && modelCatalogCanBeUsed(modelCatalog)) {
     const modelIds = new Set(modelCatalog.models.map((item) => item.id))
     checks.push({
       id: 'profile-model-catalog',
@@ -198,6 +219,10 @@ function verificationDetail(profile: ProviderProfile | undefined) {
     : profile.lastVerificationDetail
 }
 
+function modelCatalogCanBeUsed(catalog: ModelCatalog | undefined): catalog is ModelCatalog {
+  return catalog?.status === 'ok' || catalog?.status === 'stale'
+}
+
 function requiresManualModelConfirmation(
   draft: EditableProfile,
   profile: ProviderProfile | undefined,
@@ -205,7 +230,7 @@ function requiresManualModelConfirmation(
 ) {
   const model = draft.model.trim()
   if (!model || model === profile?.model) return false
-  return catalog?.status !== 'ok' || !catalog.models.some((item) => item.id.toLocaleLowerCase() === model.toLocaleLowerCase())
+  return !modelCatalogCanBeUsed(catalog) || !catalog?.models.some((item) => item.id.toLocaleLowerCase() === model.toLocaleLowerCase())
 }
 
 function isClearlyIncompatibleModel(model: ModelCatalog['models'][number]) {
@@ -431,7 +456,7 @@ function App() {
   const [draft, setDraft] = useState<EditableProfile>(emptyProfile)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<NoticeState | null>(null)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [restoreConfirm, setRestoreConfirm] = useState<BackupItem | null>(null)
@@ -440,6 +465,19 @@ function App() {
   const [syncConfirm, setSyncConfirm] = useState(false)
   const [restartNotice, setRestartNotice] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(false)
+  const [setupDialogOpen, setSetupDialogOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [firstRun, setFirstRun] = useState<boolean | null>(null)
+  const [firstRunPhase, setFirstRunPhase] = useState<FirstRunPhase>('consent')
+  const [firstRunTransitioning, setFirstRunTransitioning] = useState(false)
+  const [firstRunError, setFirstRunError] = useState<string | null>(null)
+  const [preparationStep, setPreparationStep] = useState(0)
+  const preparationTimer = useRef<number | null>(null)
+  const [paneWidths, setPaneWidths] = useState({ left: 276, right: 360 })
+  const [resizingPane, setResizingPane] = useState<'left' | 'right' | null>(null)
+  const resizeStart = useRef<{ x: number; left: number; right: number } | null>(null)
+  const initialGuideHandled = useRef(false)
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -457,6 +495,61 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!resizingPane) return undefined
+    const onMove = (event: PointerEvent) => {
+      const start = resizeStart.current
+      if (!start) return
+      const delta = event.clientX - start.x
+      if (resizingPane === 'left') {
+        setPaneWidths((current) => ({ ...current, left: Math.max(220, Math.min(380, start.left + delta)) }))
+      } else {
+        setPaneWidths((current) => ({ ...current, right: Math.max(320, Math.min(460, start.right - delta)) }))
+      }
+    }
+    const onUp = () => {
+      resizeStart.current = null
+      setResizingPane(null)
+      document.body.style.removeProperty('cursor')
+      document.body.style.removeProperty('user-select')
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp, { once: true })
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [resizingPane])
+
+  function beginResize(pane: 'left' | 'right', event: React.PointerEvent<HTMLDivElement>) {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    resizeStart.current = { x: event.clientX, left: paneWidths.left, right: paneWidths.right }
+    setResizingPane(pane)
+  }
+
+  function resizePaneWithKeyboard(pane: 'left' | 'right', event: React.KeyboardEvent<HTMLDivElement>) {
+    const direction = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : 0
+    if (!direction && !['Home', 'End', 'Enter'].includes(event.key)) return
+    event.preventDefault()
+    const step = event.shiftKey ? 32 : 8
+    setPaneWidths((current) => {
+      if (event.key === 'Enter') {
+        return pane === 'left'
+          ? { ...current, left: current.left === 220 ? 276 : 220 }
+          : { ...current, right: current.right === 320 ? 360 : 320 }
+      }
+      if (pane === 'left') {
+        const next = event.key === 'Home' ? 220 : event.key === 'End' ? 380 : Math.max(220, Math.min(380, current.left + direction * step))
+        return { ...current, left: next }
+      }
+      const next = event.key === 'Home' ? 320 : event.key === 'End' ? 460 : Math.max(320, Math.min(460, current.right - direction * step))
+      return { ...current, right: next }
+    })
+  }
+
+  useEffect(() => {
     async function loadInitialState() {
       setBusy('refresh')
       try {
@@ -468,6 +561,8 @@ function App() {
           setDraft(toEditable(selected))
         }
         setError(null)
+        setFirstRun(next.connectionEnvironment.status !== 'ready')
+        setFirstRunPhase(next.connectionEnvironment.status === 'ready' ? 'ready' : 'consent')
       } catch (err) {
         setError(errorMessage(err, '加载切换器状态失败。'))
       } finally {
@@ -478,11 +573,34 @@ function App() {
     void loadInitialState()
   }, [])
 
+  useEffect(() => () => {
+    if (preparationTimer.current !== null) window.clearInterval(preparationTimer.current)
+  }, [])
+
   useEffect(() => {
     if (!notice) return undefined
     const timeout = window.setTimeout(() => setNotice(null), 5000)
     return () => window.clearTimeout(timeout)
   }, [notice])
+
+  useEffect(() => {
+    let activeRegion: HTMLElement | null = null
+    const onPointerMove = (event: PointerEvent) => {
+      const region = (event.target as HTMLElement | null)?.closest<HTMLElement>('.scroll-region') ?? null
+      if (activeRegion && activeRegion !== region) activeRegion.removeAttribute('data-scrollbar-intent')
+      activeRegion = region
+      if (!region) return
+      const bounds = region.getBoundingClientRect()
+      const nearScrollbar = event.clientX >= bounds.right - 14 || event.clientY >= bounds.bottom - 14
+      if (nearScrollbar) region.setAttribute('data-scrollbar-intent', 'true')
+      else region.removeAttribute('data-scrollbar-intent')
+    }
+    document.addEventListener('pointermove', onPointerMove)
+    return () => {
+      document.removeEventListener('pointermove', onPointerMove)
+      activeRegion?.removeAttribute('data-scrollbar-intent')
+    }
+  }, [])
 
   async function refresh() {
     setBusy('refresh')
@@ -547,7 +665,8 @@ function App() {
       if (label === 'switch') {
         setRestartNotice(true)
       }
-      setNotice(next.activity[0]?.title ?? '操作已完成')
+      const activity = next.activity[0]
+      setNotice({ message: activity?.title ?? '操作已完成', tone: activity?.tone ?? 'success' })
       setError(null)
     } catch (err) {
       try {
@@ -560,6 +679,56 @@ function App() {
     } finally {
       setBusy(null)
     }
+  }
+
+  async function prepareFirstRun(layerId: string) {
+    setFirstRunPhase('preparing')
+    setFirstRunError(null)
+    setPreparationStep(0)
+    setBusy('prepare-connection-environment')
+    let phase = 0
+    preparationTimer.current = window.setInterval(() => {
+      phase = Math.min(FIRST_RUN_FEED.length, phase + 1)
+      setPreparationStep(phase)
+    }, 600)
+    try {
+      // The backend operation is real; the visible feed gives it enough time
+      // to be understood instead of flashing straight to the result screen.
+      const [next] = await Promise.all([
+        prepareConnectionEnvironment(layerId),
+        new Promise((resolve) => window.setTimeout(resolve, FIRST_RUN_FEED.length * 600 + 450)),
+      ])
+      setState(next)
+      const selected = next.profiles.find((profile) => profile.id === selectedId) ?? next.profiles[0]
+      if (selected) {
+        setSelectedId(selected.id)
+        setDraft(toEditable(selected))
+      }
+      setFirstRunPhase('review')
+      setPreparationStep(FIRST_RUN_FEED.length)
+      setNotice({ message: '连接环境已准备好', tone: 'success' })
+      setError(null)
+    } catch (err) {
+      setFirstRunPhase('failed')
+      setFirstRunError(errorMessage(err, '准备连接环境失败。原有文件没有被替换。'))
+    } finally {
+      if (preparationTimer.current !== null) window.clearInterval(preparationTimer.current)
+      preparationTimer.current = null
+      setBusy(null)
+    }
+  }
+
+  function enterSignalman() {
+    setFirstRunTransitioning(true)
+    setFirstRun(false)
+    setActiveView('providers')
+    window.setTimeout(() => {
+      setFirstRunTransitioning(false)
+      if (!initialGuideHandled.current) {
+        initialGuideHandled.current = true
+        setGuideOpen(true)
+      }
+    }, 520)
   }
 
   async function saveEditableProfile(nextDraft: EditableProfile, busyLabel: string) {
@@ -578,10 +747,24 @@ function App() {
         setSelectedId(saved.id)
         setDraft(toEditable(saved))
       }
-      setNotice(next.activity[0]?.title ?? '已保存配置')
+      const activity = next.activity[0]
+      setNotice({ message: activity?.title ?? '已保存配置', tone: activity?.tone ?? 'success' })
       setError(null)
     } catch (err) {
       setError(errorMessage(err, '保存配置失败。'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function revealSavedApiKey(profileId: string) {
+    setBusy('reveal-key')
+    try {
+      setError(null)
+      return await revealProfileApiKey(profileId)
+    } catch (err) {
+      setError(errorMessage(err, '无法读取已保存的访问密钥。'))
+      return null
     } finally {
       setBusy(null)
     }
@@ -693,7 +876,24 @@ function App() {
     if (!selectedProfile || !canSwitch) return
     setBusy('prepare-switch')
     try {
-      setSwitchConfirm(await prepareSwitch(selectedProfile.id))
+      const preflight = await prepareSwitch(selectedProfile.id)
+      setSwitchConfirm(preflight)
+
+      // The preflight probe persists the latest verification result. Refresh
+      // the visible state before opening the dialog so the checklist behind it
+      // cannot keep showing a stale green result after a failed probe.
+      try {
+        const latest = await loadState()
+        setState(latest)
+        const latestSelected = latest.profiles.find((profile) => profile.id === selectedProfile.id)
+        if (latestSelected) {
+          setSelectedId(latestSelected.id)
+          setDraft(toEditable(latestSelected))
+        }
+      } catch {
+        // The preflight result is still authoritative for the confirmation
+        // dialog; a state refresh failure must not hide it.
+      }
       setError(null)
     } catch (err) {
       setError(errorMessage(err, '切换前检查失败。'))
@@ -734,6 +934,21 @@ function App() {
     )
   }
 
+  if (firstRun === true) {
+    return <FirstRunShell
+      environment={state.connectionEnvironment}
+      phase={firstRunPhase}
+      activeStep={preparationStep}
+      checks={state.checks}
+      error={firstRunError}
+      busy={busy !== null}
+      onPrepare={(layerId) => void prepareFirstRun(layerId)}
+      onContinue={() => setFirstRunPhase('ready')}
+      onBack={(target) => setFirstRunPhase(target === 'setup' ? 'consent' : 'review')}
+      onEnter={enterSignalman}
+    />
+  }
+
   const primaryNavItems: Array<{ id: ViewId; label: string; note: string; icon: React.ReactNode }> = [
     { id: 'providers', label: '服务商', note: `${state.profiles.length} 个配置`, icon: <LayoutDashboard size={17} /> },
     { id: 'protection', label: '安全与恢复', note: state.configurationProtection.baselineReady ? '备份已就绪' : '需要处理', icon: <ShieldCheck size={17} /> },
@@ -755,7 +970,7 @@ function App() {
     : `${buildChannelLabel} · v${__APP_VERSION__}`
 
   return (
-    <main className="app-shell" data-view={activeView}>
+    <main className={`app-shell${firstRunTransitioning ? ' first-run-transitioning' : ''}`} data-view={activeView}>
       <header className="app-titlebar">
         <div className="brand-lockup">
           <span className="brand-mark"><GitCompareArrows size={20} /></span>
@@ -779,7 +994,6 @@ function App() {
             <strong>{currentFileProfile?.name ?? '未识别'}</strong>
             <span className="provider-current-model">{currentFileProfile?.model ? providerModelLabel(currentFileProfile.model) : '未设置模型'}</span>
           </div>
-          {state.runtimeMode === 'tauri_native' && <span className="build-identity" title={__CODEX_RELEASE_CHANNEL__ === 'development' ? '开发版使用隔离数据；稳定版和真实 Codex 配置不会被读取或修改。' : '用于确认当前运行的发布渠道'}>{buildIdentityLabel}</span>}
           <button className="icon-button" type="button" onClick={() => setSettingsOpen(true)} title="应用设置" aria-label="应用设置">
             <Settings size={17} />
           </button>
@@ -804,9 +1018,9 @@ function App() {
       )}
 
       {notice && (
-        <div className="success-toast" role="status">
-          <CheckCircle2 size={17} />
-          <span>{notice}</span>
+        <div className={`success-toast ${notice.tone}`} role="status">
+          {notice.tone === 'success' ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}
+          <span>{notice.message}</span>
           <button type="button" onClick={() => setNotice(null)} aria-label="关闭完成提示"><X size={15} /></button>
         </div>
       )}
@@ -841,19 +1055,24 @@ function App() {
         />
       )}
 
-      <section className={`workbench ${['providers', 'models', 'switch-check'].includes(activeView) ? 'provider-workbench' : ''}`}>
-        {['providers', 'models', 'switch-check'].includes(activeView) && <aside className="provider-object-pane" aria-labelledby="saved-connections-title">
+      <section className={`workbench ${['providers', 'models', 'switch-check'].includes(activeView) ? `provider-workbench ${activeView === 'providers' ? 'has-provider-dock' : ''}` : ''}`} style={{ '--provider-left': `${paneWidths.left}px`, '--provider-right': `${paneWidths.right}px` } as React.CSSProperties}>
+        {['providers', 'models', 'switch-check'].includes(activeView) && <aside id="provider-object-pane" className="provider-object-pane" aria-labelledby="saved-connections-title">
           <section className="sidebar-connections">
             <div className="sidebar-section-title">
               <span id="saved-connections-title">服务商列表</span>
-              <button type="button" onClick={startNewProfile} disabled={busy !== null} aria-label="新增服务商">
-                <Plus size={15} />
-              </button>
+              <span
+                className="provider-add-transition-target"
+                data-transition-target="provider-add"
+              >
+                <button type="button" onClick={startNewProfile} disabled={busy !== null} aria-label="新增服务商" data-tour="provider-add">
+                  <Plus size={15} />
+                </button>
+              </span>
             </div>
 
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleProviderDragEnd}>
               <SortableContext items={state.profiles.map((profile) => profile.id)} strategy={verticalListSortingStrategy}>
-                <div className="provider-list" role="listbox" aria-label="服务商列表">
+                <div className="provider-list scroll-region" role="listbox" aria-label="服务商列表" data-tour="provider-list">
                   {state.profiles.map((profile, index) => (
                     <SortableProviderRow
                       key={profile.id}
@@ -870,18 +1089,15 @@ function App() {
             </DndContext>
           </section>
         </aside>}
+        {['providers', 'models', 'switch-check'].includes(activeView) && <div className="pane-resizer pane-resizer-left" role="separator" aria-orientation="vertical" aria-label="调整服务商列表宽度" aria-controls="provider-object-pane" aria-valuemin={220} aria-valuemax={380} aria-valuenow={paneWidths.left} tabIndex={0} onPointerDown={(event) => beginResize('left', event)} onKeyDown={(event) => resizePaneWithKeyboard('left', event)} />}
 
-        <section className={`workspace-panel ${['providers', 'models', 'switch-check'].includes(activeView) ? 'provider-context-panel' : 'full-workspace-panel'}`}>
+        <section id="provider-context-panel" className={`workspace-panel ${['providers', 'models', 'switch-check'].includes(activeView) ? 'provider-context-panel' : 'full-workspace-panel'}`}>
           <WorkspaceHeader
             activeView={activeView}
             selectedProfile={selectedProfile}
             requiredFailures={requiredFailures}
             riskCount={riskCount}
             selectedModelCatalog={selectedModelCatalog}
-            canSwitch={canSwitch}
-            preview={state.runtimeMode === 'browser_preview_mock'}
-            requestSwitch={requestSwitch}
-            onViewChange={setActiveView}
           />
           <div className="workspace-scroll">
             {activeView === 'providers' && (
@@ -893,6 +1109,14 @@ function App() {
                 saveCurrentProfile={saveCurrentProfile}
                 duplicateProfile={duplicateProfile}
                 runAction={runAction}
+                revealApiKey={revealSavedApiKey}
+                selectedModelCatalog={selectedModelCatalog}
+                onRefreshModels={() => selectedProfile && runAction('refresh-models', () => refreshModels(selectedProfile.id))}
+                onSelectModel={selectModel}
+                environment={state.connectionEnvironment}
+                onOpenSetup={() => setSetupDialogOpen(true)}
+                onOpenFeedback={() => setFeedbackOpen(true)}
+                feedbackAvailable={Boolean(selectedProfile && (error || !selectedProfile.verified && selectedProfile.verificationStatus !== 'not_checked' || selectedModelCatalog?.status && !['ok', 'not_fetched'].includes(selectedModelCatalog.status) || availabilityChecks.some((check) => !check.ok)))}
               />
             )}
             {activeView === 'models' && (
@@ -924,18 +1148,48 @@ function App() {
                 busy={busy}
                 onRestoreRequested={(backup) => setRestoreConfirm(backup)}
                 onBackupRequested={(confirmation) => void runAction('create-manual-backup', () => createManualBackup(confirmation))}
+                onOpenSetup={() => setSetupDialogOpen(true)}
               />
             )}
             {activeView === 'timeline' && <TimelineWorkspace state={state} />}
             {activeView === 'lab' && <LabWorkspace state={state} selectedProfile={selectedProfile} busy={busy} runAction={runAction} />}
           </div>
         </section>
+        {activeView === 'providers' && <>
+        <div className="pane-resizer pane-resizer-right" role="separator" aria-orientation="vertical" aria-label="调整连接与切换栏宽度" aria-controls="connection-dock" aria-valuemin={320} aria-valuemax={460} aria-valuenow={paneWidths.right} tabIndex={0} onPointerDown={(event) => beginResize('right', event)} onKeyDown={(event) => resizePaneWithKeyboard('right', event)} />
+        <ConnectionDock
+          profile={selectedProfile}
+          catalog={selectedModelCatalog}
+          environment={state.connectionEnvironment}
+          hasUnsavedChanges={hasUnsavedChanges}
+          requiredFailures={requiredFailures}
+          riskCount={riskCount}
+          busy={busy}
+          canSwitch={canSwitch}
+          preview={state.runtimeMode === 'browser_preview_mock'}
+          onSave={() => void saveCurrentProfile()}
+          onRefreshModels={() => selectedProfile && void runAction('refresh-models', () => refreshModels(selectedProfile.id))}
+          onVerify={() => selectedProfile && void runAction('verify-profile', () => verifyProfile(selectedProfile.id))}
+          onSwitch={() => void requestSwitch()}
+          onOpenSetup={() => setSetupDialogOpen(true)}
+          onOpenGuide={() => setGuideOpen(true)}
+          availabilityChecks={availabilityChecks}
+          profileConfigChecks={profileConfigChecks}
+          configChecks={state.checks}
+        /></>}
 
       </section>
 
       <footer className="statusbar">
-        <span>{busy ? `正在执行：${busy}` : '就绪'}</span>
-        <span>本机资料仅保存在此设备</span>
+        <div className="statusbar-left">
+          <span>{busy ? `正在执行：${busy}` : '就绪'}</span>
+          <span>{state.connectionEnvironment.status === 'ready' ? '连接环境已准备' : '需要准备连接环境'}</span>
+          <span>本机资料仅保存在此设备</span>
+        </div>
+        <div className="statusbar-right">
+          <button className="statusbar-link" type="button" onClick={() => setGuideOpen(true)}>查看使用说明</button>
+          {state.runtimeMode === 'tauri_native' && <span className="build-identity statusbar-build" title={__CODEX_RELEASE_CHANNEL__ === 'development' ? '开发版使用隔离数据；稳定版和真实 Codex 配置不会被读取或修改。' : '用于确认当前运行的发布渠道'}>{buildIdentityLabel}</span>}
+        </div>
       </footer>
       {syncConfirm && state.configurationDrift && (
         <SyncCurrentConfigurationDialog
@@ -966,6 +1220,9 @@ function App() {
           onUpdate={() => void handleUpdate()}
         />
       )}
+      {feedbackOpen && <FeedbackDialog state={state} selectedProfile={selectedProfile} onClose={() => setFeedbackOpen(false)} onCopied={() => setNotice({ message: '脱敏反馈已复制', tone: 'success' })} onSubmitted={(receipt) => setNotice({ message: `问题已提交给维护者：${receipt}`, tone: 'success' })} />}
+      {setupDialogOpen && <ConnectionEnvironmentDialog environment={state.connectionEnvironment} busy={busy !== null} onClose={() => setSetupDialogOpen(false)} onConfirm={(layerId) => { setSetupDialogOpen(false); void runAction('prepare-connection-environment', () => prepareConnectionEnvironment(layerId)) }} />}
+      {guideOpen && <GettingStartedDialog environment={state.connectionEnvironment} onClose={() => setGuideOpen(false)} onOpenProviders={() => { setActiveView('providers') }} />}
     </main>
   )
 }
@@ -976,20 +1233,12 @@ function WorkspaceHeader({
   requiredFailures,
   riskCount,
   selectedModelCatalog,
-  canSwitch,
-  preview,
-  requestSwitch,
-  onViewChange,
 }: {
   activeView: ViewId
   selectedProfile: ProviderProfile | undefined
   requiredFailures: number
   riskCount: number
   selectedModelCatalog: ModelCatalog | undefined
-  canSwitch: boolean
-  preview: boolean
-  requestSwitch: () => Promise<void>
-  onViewChange: (view: ViewId) => void
 }) {
   if (activeView === 'lab') return null
 
@@ -1022,39 +1271,11 @@ function WorkspaceHeader({
   }
 
   if (isProviderContext) {
-    const switchLabel = !selectedProfile
-      ? '先选择服务商'
-      : selectedProfile.active
-        ? '当前正在使用'
-        : '检查并切换'
     return (
       <header className="workspace-header provider-workspace-header">
-        <nav className="provider-workflow-nav" aria-label="服务商管理入口">
-          <button className={activeView === 'providers' ? 'selected' : ''} type="button" onClick={() => onViewChange('providers')}>
-            <Settings size={19} aria-hidden="true" />
-            <span>配置</span>
-          </button>
-          <button className={activeView === 'models' ? 'selected' : ''} type="button" onClick={() => onViewChange('models')}>
-            <Boxes size={19} aria-hidden="true" />
-            <span>模型目录</span>
-          </button>
-          <button className={activeView === 'switch-check' ? 'selected' : ''} type="button" onClick={() => onViewChange('switch-check')}>
-            <ShieldCheck size={19} aria-hidden="true" />
-            <span>切换前检查</span>
-          </button>
-        </nav>
-        <div className="provider-switch-slot">
-          <button
-            className={`provider-switch-command ${selectedProfile?.active ? 'current' : 'ready'}`}
-            type="button"
-            disabled={!selectedProfile || selectedProfile.active || !canSwitch}
-            onClick={() => void requestSwitch()}
-            aria-label={selectedProfile?.active ? `当前正在使用 ${selectedProfile.name}` : selectedProfile ? `检查并切换到 ${selectedProfile.name}` : switchLabel}
-            title={preview ? '预览不会修改本机配置。' : selectedProfile ? `目标服务商：${selectedProfile.name}` : undefined}
-          >
-            <PlugZap size={18} />
-            {switchLabel}
-          </button>
+        <div>
+          <h2>服务商配置</h2>
+          <p>{selectedProfile ? `正在编辑 ${selectedProfile.name}；保存、模型、检查和切换都在这里完成。` : '新增或选择一个服务商后，按右侧提示继续。'}</p>
         </div>
       </header>
     )
@@ -1070,6 +1291,134 @@ function WorkspaceHeader({
         {!selectedProfile ? '未选择服务商' : requiredFailures > 0 ? `${requiredFailures} 项阻止切换` : riskCount > 0 ? `可切换，但有 ${riskCount} 项风险` : '可以切换'}
       </span>}
     </header>
+  )
+}
+
+function FirstRunShell({
+  environment,
+  phase,
+  activeStep,
+  checks,
+  error,
+  busy,
+  onPrepare,
+  onContinue,
+  onBack,
+  onEnter,
+}: {
+  environment: AppState['connectionEnvironment']
+  phase: FirstRunPhase
+  activeStep: number
+  checks: ValidationCheck[]
+  error: string | null
+  busy: boolean
+  onPrepare: (layerId: string) => void
+  onContinue: () => void
+  onBack: (target: 'setup' | 'review') => void
+  onEnter: () => void
+}) {
+  const [consented, setConsented] = useState(false)
+  const [layerId, setLayerId] = useState(environment.selectedLayerId ?? environment.layers[0]?.id ?? '')
+  const selectedLayer = environment.layers.find((layer) => layer.id === layerId)
+  const progress = phase === 'ready' || phase === 'review' ? 100 : phase === 'preparing' ? Math.min(96, Math.max(4, Math.round((activeStep / FIRST_RUN_FEED.length) * 100))) : 0
+  const showSetup = phase === 'consent' || phase === 'failed'
+  const activePreparation = FIRST_RUN_FEED[Math.min(activeStep, FIRST_RUN_FEED.length - 1)]
+  const preparationListRef = useRef<HTMLDivElement>(null)
+  // A provider model and endpoint do not exist until the user adds a provider.
+  // Keep them in the normal workspace audit, but do not misrepresent them as
+  // incomplete connection-environment preparation on first launch.
+  const environmentChecks = checks.filter((check) => check.id !== 'root-model' && check.id !== 'custom-base-url')
+  const passedChecks = environmentChecks.filter((check) => check.ok).length
+  const orderedChecks = [...environmentChecks].sort((left, right) => Number(left.ok) - Number(right.ok))
+
+  useEffect(() => {
+    if (phase !== 'preparing') return
+    const list = preparationListRef.current
+    const activeRow = list?.children.item(Math.min(activeStep, FIRST_RUN_FEED.length - 1))
+    if (activeRow instanceof HTMLElement) activeRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [activeStep, phase])
+
+  useEffect(() => {
+    if (!layerId && environment.layers[0]) setLayerId(environment.layers[0].id)
+  }, [environment.layers, layerId])
+
+  return (
+    <main className="first-run-shell">
+      <section className={`first-run-card ${phase}`} aria-live="polite">
+        <div className="first-run-brand"><span className="brand-mark"><GitCompareArrows size={20} /></span><span>Signalman AI</span></div>
+        {showSetup && <>
+          <div className="first-run-heading">
+            <span className="first-run-kicker">第一次打开</span>
+            <h1>先把连接环境准备好</h1>
+            <p>Signalman AI 帮你管理多个 AI 服务商，在切换前检查连接并保留恢复点。</p>
+          </div>
+          <div className="first-run-impact" aria-label="准备连接环境会做什么">
+            <div><ShieldCheck size={17} /><span>先创建一个可恢复的备份</span></div>
+            <div><CheckCircle2 size={17} /><span>只统一 Signalman 管理的连接设置</span></div>
+            <div><CheckCircle2 size={17} /><span>项目、MCP、插件和历史记录不会被改动</span></div>
+          </div>
+          <details className="first-run-details">
+            <summary>查看具体会改什么</summary>
+            <p>只在这台电脑上整理服务商连接需要的 Codex 设置，先备份、写入后再回读确认。不会上传配置、密钥或其他本机文件，也不会读取或改动项目、插件、MCP 和历史记录。</p>
+          </details>
+          {environment.layers.length > 1 && <label className="first-run-layer-select">选择要管理的配置层<select value={layerId} onChange={(event) => setLayerId(event.target.value)}>{environment.layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.label}</option>)}</select></label>}
+          {environment.layers.length === 0 && <p className="first-run-inline-error">没有找到可管理的 Codex 配置层。</p>}
+          {error && <div className="first-run-error"><XCircle size={17} /><span>{error}</span></div>}
+          <label className="first-run-consent"><input type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)} />我已了解：程序会先备份，再准备连接环境</label>
+          <div className="first-run-actions"><button className="primary-button first-run-primary" type="button" disabled={!consented || !layerId || busy} onClick={() => onPrepare(layerId)} data-dialog-initial-focus><ShieldCheck size={17} />{phase === 'failed' ? '重新准备连接环境' : '准备连接环境'}</button></div>
+        </>}
+        {phase === 'preparing' && <div className="first-run-progress-card">
+          <div className="first-run-progress-heading">
+            <div className="first-run-progress-icon"><RefreshCcw className="spin" size={20} /></div>
+            <div className="first-run-heading"><span className="first-run-kicker">正在准备</span><h1>把连接环境整理好</h1><p>Signalman 正在逐项检查并保存结果，请稍等片刻。</p></div>
+          </div>
+          <div className="first-run-progress-meta"><span>准备进度</span><strong>{progress}%</strong></div>
+          <div className="first-run-progress-track" role="progressbar" aria-label="准备连接环境进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span style={{ width: `${progress}%` }} /></div>
+          <div ref={preparationListRef} className="first-run-step-list" aria-label="准备过程">
+            {FIRST_RUN_FEED.map((step, index) => <div className={`first-run-step ${index < activeStep ? 'done' : index === activeStep ? 'active' : ''}`} key={step.title}>
+              <span className="first-run-step-marker">{index < activeStep ? <CheckCircle2 size={15} /> : index === activeStep ? <RefreshCcw className="spin" size={15} /> : <span className="first-run-step-dot" />}</span>
+              <span className="first-run-step-copy"><strong>{step.title}</strong><small>{step.detail}</small></span>
+              <span className="first-run-step-state">{index < activeStep ? '已完成' : index === activeStep ? '进行中' : '等待'}</span>
+            </div>)}
+          </div>
+          <p className="first-run-live-line" aria-live="polite"><span className="first-run-live-dot" />{activePreparation.detail}</p>
+          <p className="first-run-safety-note">不会上传配置或密钥。遇到问题会恢复原文件。</p>
+        </div>}
+        {phase === 'review' && <div className="first-run-review">
+          <div className="first-run-complete-heading">
+            <div className="first-run-review-icon"><CheckCircle2 size={21} /></div>
+            <div><span className="first-run-kicker">检查完成</span><h1>连接环境检查完毕</h1></div>
+          </div>
+          <p className="first-run-complete-intro">后台已经完成真实检查和配置准备。先看一眼结果，确认后再继续下一步。</p>
+          <div className="first-run-review-summary"><strong>{passedChecks}/{environmentChecks.length || 0} 项检查通过</strong><span>{environmentChecks.length - passedChecks > 0 ? `${environmentChecks.length - passedChecks} 项待配置，不影响继续使用。` : '全部通过。'}恢复点已创建。</span></div>
+          <div className="first-run-review-list" aria-label="检查结果">
+            {environmentChecks.length === 0 && <div className="first-run-review-empty">已完成连接环境准备，当前没有需要展示的额外检查项。</div>}
+            {orderedChecks.map((check) => {
+              const visual = getCheckVisual(check)
+              return <div className={`first-run-review-row ${visual.className}`} key={check.id}>
+                {visual.icon}<span><strong>{check.label}</strong><small>{check.detail}</small></span>
+                <em>{check.ok ? '通过' : check.severity === 'required' ? '需处理' : '待配置'}</em>
+              </div>
+            })}
+          </div>
+          <div className="first-run-complete-actions"><button className="ghost-button" type="button" onClick={() => onBack('setup')}><RotateCcw size={16} />上一步</button><button className="primary-button first-run-primary" type="button" onClick={onContinue} data-dialog-initial-focus><ChevronDown size={17} />下一步</button></div>
+        </div>}
+        {phase === 'ready' && <div className="first-run-complete">
+          <div className="first-run-complete-heading">
+            <div className="first-run-complete-icon"><CheckCircle2 size={22} /></div>
+            <div><span className="first-run-kicker">可以开始了</span><h1>连接环境已准备好</h1></div>
+          </div>
+          <p className="first-run-complete-intro">Signalman AI 会帮你管理多个 AI 服务商，在切换前检查连接，并在本机保留可恢复的配置。</p>
+          <div className="first-run-complete-summary">
+            <div><CheckCircle2 size={16} /><span><strong>配置已就绪</strong><small>{selectedLayer?.label ?? '当前 Codex 配置'}已完成准备</small></span></div>
+            <div><CheckCircle2 size={16} /><span><strong>恢复点已创建</strong><small>原有设置可以随时恢复</small></span></div>
+            <div><CheckCircle2 size={16} /><span><strong>可以添加服务商</strong><small>现在进入工作台开始配置</small></span></div>
+          </div>
+          <div className="first-run-complete-actions"><button className="ghost-button" type="button" onClick={() => onBack('review')}><RotateCcw size={16} />上一步</button><button className="primary-button first-run-primary" type="button" onClick={onEnter} data-dialog-initial-focus><PlugZap size={17} />进入 Signalman</button></div>
+        </div>}
+      </section>
+      <p className="first-run-footer">本地优先 · 配置只保存在此设备</p>
+    </main>
   )
 }
 
@@ -1097,6 +1446,14 @@ function ProviderWorkspace({
   saveCurrentProfile,
   duplicateProfile,
   runAction,
+  revealApiKey,
+  selectedModelCatalog,
+  onRefreshModels,
+  onSelectModel,
+  environment,
+  onOpenSetup,
+  onOpenFeedback,
+  feedbackAvailable,
 }: {
   draft: EditableProfile
   selectedProfile: ProviderProfile | undefined
@@ -1105,11 +1462,65 @@ function ProviderWorkspace({
   saveCurrentProfile: () => Promise<void>
   duplicateProfile: () => void
   runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
+  revealApiKey: (profileId: string) => Promise<string | null>
+  selectedModelCatalog: ModelCatalog | undefined
+  onRefreshModels: () => void
+  onSelectModel: (model: string) => Promise<void>
+  environment: AppState['connectionEnvironment']
+  onOpenSetup: () => void
+  onOpenFeedback: () => void
+  feedbackAvailable: boolean
 }) {
   const [keyVisible, setKeyVisible] = useState(false)
+  const [revealedKey, setRevealedKey] = useState<string | null>(null)
   const hasSavedKey = Boolean(selectedProfile?.hasApiKey && !draft.apiKey)
+  const keyValue = keyVisible ? revealedKey ?? draft.apiKey : draft.apiKey
+  const [modelQuery, setModelQuery] = useState(draft.model)
+  const [modelOpen, setModelOpen] = useState(false)
+  const [modelSearchActive, setModelSearchActive] = useState(false)
+  const filteredModels = useMemo(() => {
+    // Opening the picker shows the full catalog. Typing explicitly activates
+    // filtering so a query identical to the selected model still works.
+    const query = modelOpen && modelSearchActive ? modelQuery.trim().toLowerCase() : ''
+    if (!query) return selectedModelCatalog?.models.slice(0, 8) ?? []
+    return (selectedModelCatalog?.models ?? []).filter((model) => [model.id, ...model.aliases, ...model.tags].some((value) => value.toLowerCase().includes(query))).slice(0, 8)
+  }, [modelOpen, modelQuery, modelSearchActive, selectedModelCatalog])
+
+  useEffect(() => {
+    setKeyVisible(false)
+    setRevealedKey(null)
+  }, [selectedProfile?.id])
+
+  useEffect(() => setModelQuery(draft.model), [draft.model])
+
+  async function toggleKeyVisibility() {
+    if (keyVisible) {
+      setKeyVisible(false)
+      return
+    }
+    if (revealedKey || draft.apiKey) {
+      setKeyVisible(true)
+      return
+    }
+    if (!selectedProfile?.hasApiKey) return
+    const value = await revealApiKey(selectedProfile.id)
+    if (value) {
+      setRevealedKey(value)
+      setKeyVisible(true)
+    }
+  }
+
   return (
     <div className="workspace-stack">
+      {environment.status !== 'ready' && <section className={`environment-setup ${environment.status}`} data-tour="environment-setup">
+        <div>
+          <span className="setup-step-number">1</span>
+          <div className="setup-copy"><strong>先准备连接环境</strong>
+          <p>{environment.detail}</p>
+          </div>
+        </div>
+        <button className="primary-button" type="button" disabled={busy !== null} onClick={onOpenSetup} data-tour="environment-setup-action"><ShieldCheck size={16} />一键准备连接环境</button>
+      </section>}
       <section className="connection-banner">
         <div className="connection-status-icon"><PlugZap size={20} /></div>
         <div className="connection-copy">
@@ -1129,31 +1540,39 @@ function ProviderWorkspace({
           </div>
            <span className="section-meta">凭据仅保存在此设备</span>
         </div>
-        <div className="form-grid">
-          <label>
+        <div className="form-grid" data-tour="provider-form">
+          <label data-tour="provider-name">
             服务商名称
-            <input value={draft.name} onChange={(event) => updateDraft('name', event.target.value)} placeholder="示例 API" />
+            <input value={draft.name} onChange={(event) => updateDraft('name', event.target.value)} placeholder="输入服务商名称" />
           </label>
-          <label>
+          <label data-tour="provider-base-url">
             接口地址
-            <input value={draft.baseUrl} onChange={(event) => updateDraft('baseUrl', event.target.value)} placeholder="https://example.com/v1" />
+            <input value={draft.baseUrl} onChange={(event) => updateDraft('baseUrl', event.target.value)} placeholder="https://api.provider.com/v1" />
           </label>
-          <label>
+          <label className="model-picker-field" data-tour="provider-model">
             默认模型
-            <input
-              value={draft.model}
-              onChange={(event) => updateDraft('model', event.target.value)}
-              placeholder="先刷新模型目录，或手动输入服务商支持的模型"
-            />
-            {providerModelLabel(draft.model) !== draft.model && <small className="model-purpose-note">用途：{providerModelLabel(draft.model)}。输入框内保留实际模型标识。</small>}
+            <div className="model-picker-input">
+              <div className="model-combobox-wrap">
+                <input role="combobox" aria-expanded={modelOpen} aria-controls="model-options" value={modelQuery} onFocus={() => { setModelOpen(true); setModelSearchActive(false) }} onChange={(event) => { setModelOpen(true); setModelSearchActive(true); setModelQuery(event.target.value); updateDraft('model', event.target.value) }} onKeyDown={(event) => { if (event.key === 'Escape') { setModelOpen(false); setModelSearchActive(false) }; if (event.key === 'Enter' && filteredModels[0]) { setModelQuery(filteredModels[0].id); updateDraft('model', filteredModels[0].id); setModelOpen(false); setModelSearchActive(false) } }} placeholder="输入 5.6 搜索模型" />
+                <button className="model-open-button" type="button" aria-label={modelOpen ? '收起模型列表' : '展开模型列表'} onMouseDown={(event) => event.preventDefault()} onClick={() => setModelOpen((open) => { setModelSearchActive(false); return !open })}><ChevronDown size={16} /></button>
+                {modelOpen && <div id="model-options" className="model-suggestions scroll-region" role="listbox" aria-label="可选模型">
+                  {filteredModels.length > 0 ? filteredModels.map((model) => <button key={model.id} type="button" role="option" aria-selected={model.id === draft.model} onClick={() => { setModelQuery(model.id); updateDraft('model', model.id); setModelOpen(false); setModelSearchActive(false); void onSelectModel(model.id) }}><strong>{model.id}</strong></button>) : <span className="model-empty">没有匹配的模型，可直接手动输入。</span>}
+                </div>}
+              </div>
+              <button className="ghost-button model-refresh-button" type="button" aria-label="刷新模型目录" title="刷新模型目录" disabled={!selectedProfile || busy !== null} onClick={onRefreshModels}><RefreshCcw size={16} /></button>
+            </div>
+            {providerModelLabel(draft.model) !== draft.model && <small className="model-purpose-note">用途：{providerModelLabel(draft.model)}。保存后会作为 Codex 默认模型。</small>}
           </label>
-          <label>
+          <label data-tour="provider-api-key">
             访问密钥
             <div className="key-field">
               <KeyRound size={15} />
               <input
-                value={draft.apiKey}
-                onChange={(event) => updateDraft('apiKey', event.target.value)}
+                value={keyValue}
+                onChange={(event) => {
+                  setRevealedKey(null)
+                  updateDraft('apiKey', event.target.value)
+                }}
                 placeholder={hasSavedKey ? '••••••••••••' : '粘贴访问密钥'}
                 type={keyVisible ? 'text' : 'password'}
                 aria-label={hasSavedKey ? '已保存访问密钥，输入新密钥即可替换' : '访问密钥'}
@@ -1161,14 +1580,14 @@ function ProviderWorkspace({
               <button
                 className="icon-button key-visibility-button"
                 type="button"
-                onClick={() => setKeyVisible((visible) => !visible)}
-                title={keyVisible ? '隐藏本次输入的密钥' : '显示本次输入的密钥'}
-                aria-label={keyVisible ? '隐藏本次输入的密钥' : '显示本次输入的密钥'}
+                onClick={() => void toggleKeyVisibility()}
+                disabled={busy !== null || (!draft.apiKey && !selectedProfile?.hasApiKey)}
+                title={keyVisible ? '隐藏访问密钥' : '显示访问密钥'}
+                aria-label={keyVisible ? '隐藏访问密钥' : '显示访问密钥'}
               >
                 {keyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
-            {hasSavedKey && <small className="key-saved-note">已保存。重新输入可替换；已保存内容不会回传到界面。</small>}
           </label>
           <label className="wide">
             备注
@@ -1176,7 +1595,7 @@ function ProviderWorkspace({
           </label>
         </div>
         <div className="command-row">
-          <button className="primary-button" type="button" disabled={!draft.name || !draft.baseUrl || busy !== null} onClick={() => void saveCurrentProfile()}>
+          <button className="primary-button" type="button" disabled={!draft.name || !draft.baseUrl || busy !== null} onClick={() => void saveCurrentProfile()} data-tour="save-provider">
             <Save size={16} />
             保存更改
           </button>
@@ -1202,11 +1621,280 @@ function ProviderWorkspace({
             <Trash2 size={16} />
             删除服务商
           </button>
+          {feedbackAvailable && <button className="ghost-button feedback-action" type="button" onClick={onOpenFeedback} disabled={busy !== null}>
+            <MessageSquare size={16} />
+            报告兼容问题
+          </button>}
         </div>
       </section>
 
     </div>
   )
+}
+
+function ConnectionDock({
+  profile,
+  catalog,
+  environment,
+  hasUnsavedChanges,
+  requiredFailures,
+  riskCount,
+  busy,
+  canSwitch,
+  preview,
+  onSave,
+  onRefreshModels,
+  onVerify,
+  onSwitch,
+  onOpenSetup,
+  onOpenGuide,
+  availabilityChecks,
+  profileConfigChecks,
+  configChecks,
+}: {
+  profile: ProviderProfile | undefined
+  catalog: ModelCatalog | undefined
+  environment: AppState['connectionEnvironment']
+  hasUnsavedChanges: boolean
+  requiredFailures: number
+  riskCount: number
+  busy: string | null
+  canSwitch: boolean
+  preview: boolean
+  onSave: () => void
+  onRefreshModels: () => void
+  onVerify: () => void
+  onSwitch: () => void
+  onOpenSetup: () => void
+  onOpenGuide: () => void
+  availabilityChecks: ValidationCheck[]
+  profileConfigChecks: ValidationCheck[]
+  configChecks: ValidationCheck[]
+}) {
+  const isCurrent = Boolean(profile?.active)
+  const environmentReady = environment.status === 'ready'
+  const modelReady = Boolean(profile?.model)
+  const testAction = !environmentReady
+    ? { label: '运行可用性测试', disabled: true, onClick: onVerify }
+    : !profile
+      ? { label: '运行可用性测试', disabled: true, onClick: onVerify }
+      : hasUnsavedChanges
+        ? { label: '请先保存配置', disabled: true, onClick: onSave }
+        : !modelReady
+          ? { label: '请先选择默认模型', disabled: true, onClick: onRefreshModels }
+          : { label: '运行可用性测试', disabled: busy !== null || preview, onClick: onVerify }
+  const switchAction = !environmentReady
+    ? { label: '检查并切换', disabled: true, onClick: onSwitch }
+    : !profile
+      ? { label: '检查并切换', disabled: true, onClick: onSwitch }
+      : hasUnsavedChanges
+        ? { label: '保存配置后切换', disabled: true, onClick: onSave }
+        : !modelReady
+          ? { label: '选择模型后切换', disabled: true, onClick: onRefreshModels }
+          : isCurrent
+            ? { label: '当前正在使用', disabled: true, onClick: onSwitch }
+            : { label: '检查并切换', disabled: !canSwitch, onClick: onSwitch }
+  const availability = !profile ? '未选择' : profile.verificationStatus === 'not_checked' ? '尚未检查' : profile.verified ? '已通过' : '需要留意'
+  const renderChecks = (title: string, checks: ValidationCheck[]) => <section className="dock-check-group"><h4>{title}</h4><div className="dock-check-list">{checks.map((check) => { const visual = getCheckVisual(check); return <div className={`dock-check-row ${visual.className}`} key={check.id}>{visual.icon}<div><strong>{check.label}</strong><span>{check.detail}</span></div></div> })}</div></section>
+  return <aside id="connection-dock" className="connection-dock scroll-region" aria-label="连接与切换" data-tour="connection-dock">
+    <div className="connection-dock-heading"><div><span>连接与切换</span><strong>{profile?.name ?? '未选择服务商'}</strong></div><button className="icon-button" type="button" onClick={onOpenGuide} aria-label="查看使用步骤" title="查看使用步骤"><CircleHelp size={16} /></button></div>
+    {!environmentReady && <section className="dock-setup-callout" data-tour="environment-setup-action">
+      <strong>先准备连接环境</strong>
+      <span>这一步会先创建恢复点，再只统一 Signalman 管理的连接字段。</span>
+      <button className="primary-button" type="button" onClick={onOpenSetup} disabled={busy !== null}><ShieldCheck size={16} />一键准备连接环境</button>
+    </section>}
+    <section className="dock-action-stack" aria-label="检查与切换操作">
+      <button className={`primary-button dock-primary ${isCurrent ? 'current' : ''}`} type="button" disabled={switchAction.disabled || busy !== null} onClick={switchAction.onClick} data-tour="switch-preflight"><PlugZap size={16} />{switchAction.label}</button>
+      <button className="ghost-button dock-secondary" type="button" disabled={testAction.disabled || busy !== null} onClick={testAction.onClick} data-tour="run-availability"><Activity size={15} />{testAction.label}</button>
+    </section>
+    <dl className="dock-status-list">
+      <div className={environmentReady ? 'ok' : 'warning'}><dt>连接环境</dt><dd>{environmentReady ? '已准备' : '需要准备'}</dd></div>
+      <div className={hasUnsavedChanges ? 'warning' : 'ok'}><dt>配置</dt><dd>{hasUnsavedChanges ? '尚未保存' : profile ? '已保存' : '—'}</dd></div>
+      <div className={modelReady ? 'ok' : 'warning'}><dt>默认模型</dt><dd>{modelReady ? providerModelLabel(profile?.model ?? '') : '尚未选择'}</dd></div>
+      <div className={profile?.verified ? 'ok' : 'warning'}><dt>可用性</dt><dd>{availability}</dd></div>
+    </dl>
+    {catalog?.status && catalog.status !== 'ok' && <p className="dock-note">模型目录：{catalog.statusDetail}</p>}
+    {requiredFailures > 0 && environmentReady && <p className="dock-note warning">有 {requiredFailures} 项安全阻止；请查看完整诊断。</p>}
+    {riskCount > 0 && requiredFailures === 0 && environmentReady && <p className="dock-note">存在 {riskCount} 项使用风险，检查后仍可由你确认继续。</p>}
+    <div className="dock-diagnostics" aria-label="完整检查结果">
+      {renderChecks('服务商可用性', availabilityChecks)}
+      {renderChecks('当前配置', profileConfigChecks)}
+      {renderChecks('Codex 运行设置', configChecks)}
+    </div>
+    <button className="dock-detail-link" type="button" onClick={onOpenGuide}>查看使用步骤</button>
+  </aside>
+}
+
+function ConnectionEnvironmentDialog({ environment, busy, onClose, onConfirm }: { environment: AppState['connectionEnvironment']; busy: boolean; onClose: () => void; onConfirm: (layerId: string) => void }) {
+  const [layerId, setLayerId] = useState(environment.selectedLayerId ?? environment.layers[0]?.id ?? '')
+  const selectedLayer = environment.layers.find((layer) => layer.id === layerId)
+  return <ModalDialog className="connection-environment-dialog" labelledBy="connection-environment-title" onClose={onClose}>
+    <div className="section-heading-row"><div><span className="eyebrow">开始使用</span><h2 id="connection-environment-title">准备连接环境</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="关闭准备连接环境"><X size={16} /></button></div>
+    <p>此操作会先创建恢复点，再只统一 Signalman 必需的服务商和 Responses 设置。项目、MCP、插件、hooks、历史记录和其他未知设置保持不变。</p>
+    {environment.layers.length > 1 && <label className="environment-layer-select">要管理的配置层<select value={layerId} onChange={(event) => setLayerId(event.target.value)}>{environment.layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.label}</option>)}</select></label>}
+    {selectedLayer && <div className="environment-preview"><strong>本次选择：{selectedLayer.label}</strong><span>{selectedLayer.detail}</span><ul><li>会设置 <code>model_provider = custom</code></li><li>会保持 <code>wire_api = responses</code></li><li>会创建可恢复的备份并在写入后回读</li></ul></div>}
+    <div className="command-row"><button className="ghost-button" type="button" onClick={onClose} disabled={busy}>取消</button><button className="primary-button" type="button" disabled={!layerId || busy} onClick={() => onConfirm(layerId)} data-dialog-initial-focus><ShieldCheck size={16} />一键准备连接环境</button></div>
+  </ModalDialog>
+}
+
+function FeedbackDialog({ state, selectedProfile, onClose, onCopied, onSubmitted }: { state: AppState; selectedProfile: ProviderProfile | undefined; onClose: () => void; onCopied: () => void; onSubmitted: (receipt: string) => void }) {
+  const [consented, setConsented] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [diagnosticId] = useState(() => globalThis.crypto?.randomUUID?.() ?? `local-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+  const relayUrl = import.meta.env.VITE_FEEDBACK_RELAY_URL?.trim()
+  const catalog = state.modelCatalogs.find((item) => item.providerId === selectedProfile?.id)
+  const payload = JSON.stringify({
+    schema: 'signalman-compatibility-feedback/v1',
+    diagnosticId,
+    app: 'Signalman AI',
+    build: __CODEX_BUILD_SHA__,
+    runtime: state.runtimeMode,
+    provider: selectedProfile ? { name: selectedProfile.name.slice(0, 80), baseUrlHost: (() => { try { return new URL(selectedProfile.baseUrl).hostname } catch { return 'invalid' } })(), model: selectedProfile.model.slice(0, 120), status: selectedProfile.verificationStatus, stage: selectedProfile.lastVerificationStage, httpStatus: selectedProfile.lastVerificationHttpStatus, providerCode: selectedProfile.lastVerificationProviderCode } : null,
+    catalog: catalog ? { status: catalog.status, httpStatus: catalog.httpStatus, providerCode: catalog.providerCode, requestId: catalog.requestId, retryAfterSeconds: catalog.retryAfterSeconds } : null,
+    checks: [...state.checks].filter((check) => !check.ok).map((check) => ({ id: check.id, severity: check.severity })),
+    createdAt: new Date().toISOString(),
+  }, null, 2)
+  async function copyPayload() {
+    await navigator.clipboard?.writeText(payload)
+    onCopied()
+    onClose()
+  }
+  async function submitPayload() {
+    if (!relayUrl || !consented) return
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const response = await fetch(relayUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const body = await response.json().catch(() => ({})) as { receiptId?: string }
+      onSubmitted(body.receiptId?.slice(0, 80) || '已接收')
+      onClose()
+    } catch (error) {
+      setSubmitError(`在线提交暂时不可用（${errorMessage(error, '网络错误')}）。你仍可导出脱敏反馈。`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  return <ModalDialog className="feedback-dialog" labelledBy="feedback-title" onClose={onClose}>
+    <div className="section-heading-row"><div><span className="eyebrow">问题反馈</span><h2 id="feedback-title">把这次问题告诉维护者</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="关闭反馈"><X size={16} /></button></div>
+    <p>内容只包含版本、服务商名称、接口域名、模型和失败状态，不包含访问密钥、配置正文、文件路径、响应原文、Cookie、日志或截图。</p>
+    <pre className="feedback-preview">{payload}</pre>
+    {relayUrl ? <label className="feedback-consent"><input type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)} />我确认提交以上脱敏信息给 Signalman 维护者</label> : <p className="feedback-relay-unavailable">在线反馈尚未配置。可先导出脱敏内容后发送给维护者。</p>}
+    {submitError && <p className="feedback-submit-error">{submitError}</p>}
+    <div className="command-row"><button className="ghost-button" type="button" onClick={onClose}>取消</button><button className="ghost-button" type="button" onClick={() => void copyPayload()}><Copy size={16} />导出脱敏内容</button>{relayUrl && <button className="primary-button" type="button" disabled={!consented || submitting} onClick={() => void submitPayload()}><MessageSquare size={16} />{submitting ? '正在提交' : '提交给维护者'}</button>}</div>
+  </ModalDialog>
+}
+
+type TourStep = { title: string; detail: string; target: string }
+type TourRect = { top: number; left: number; right: number; bottom: number; width: number; height: number }
+
+function GettingStartedDialog({ environment, onClose, onOpenProviders }: { environment: AppState['connectionEnvironment']; onClose: () => void; onOpenProviders: () => void }) {
+  const allSteps: TourStep[] = [
+    { title: '先统一连接环境', detail: '新安装的电脑可能有不同的 Codex 配置。先点“一键准备连接环境”，选择配置层并创建恢复点，之后才开始检查服务商。', target: 'environment-setup-action' },
+    { title: '添加服务商', detail: '在左侧点击加号，新增一个服务商。已有配置可以直接点选，不必重复添加。', target: 'provider-add' },
+    { title: '填写服务商名称', detail: '给这条连接起一个容易辨认的名字，例如“公司中转站”。', target: 'provider-name' },
+    { title: '填写接口地址', detail: '粘贴服务商提供的 OpenAI 兼容接口地址，通常以 /v1 结尾。', target: 'provider-base-url' },
+    { title: '填写访问密钥', detail: '粘贴访问密钥。默认只显示星号，点击眼睛可以在本机临时查看，密钥不会进入反馈内容。', target: 'provider-api-key' },
+    { title: '选择默认模型', detail: '点开模型框，输入“5.6”可筛选 GPT-5.6 系列，也可以滚动选择。找不到模型时先保存配置，再点刷新。', target: 'provider-model' },
+    { title: '保存配置', detail: '确认名称、接口、模型和密钥后，点击保存更改。保存后右侧状态会更新。', target: 'save-provider' },
+    { title: '运行可用性测试', detail: '在右侧顶部运行测试。这里会实际请求当前服务商，并把超时、限流、鉴权等结果分开显示。', target: 'run-availability' },
+    { title: '检查并切换', detail: '最后点检查并切换。它会再次检查当前配置；有风险时会明确告诉你，安全阻止不会被绕过。', target: 'switch-preflight' },
+  ]
+  const steps = environment.status === 'ready' ? allSteps.slice(1) : allSteps
+  const [step, setStep] = useState(0)
+  const current = steps[Math.min(step, steps.length - 1)]
+  const [rect, setRect] = useState<TourRect | null>(null)
+  const [cardPosition, setCardPosition] = useState<{ top: number; left: number } | null>(null)
+  const [targetMissing, setTargetMissing] = useState(false)
+  const cardRef = useRef<HTMLElement | null>(null)
+
+  useLayoutEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    let missingTimer: number | undefined
+    let frame: number | undefined
+    let observer: ResizeObserver | undefined
+    const measure = () => {
+      const element = document.querySelector<HTMLElement>(`[data-tour="${current.target}"]`)
+      if (!element) {
+        setRect(null)
+        setTargetMissing(false)
+        if (missingTimer === undefined) missingTimer = window.setTimeout(() => setTargetMissing(true), 800)
+        return
+      }
+      if (missingTimer !== undefined) window.clearTimeout(missingTimer)
+      missingTimer = undefined
+      setTargetMissing(false)
+      const first = element.getBoundingClientRect()
+      if (first.top < 16 || first.bottom > window.innerHeight - 16) {
+        element.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: media.matches ? 'auto' : 'smooth' })
+      }
+      const read = () => {
+        const next = element.getBoundingClientRect()
+        setRect({ top: next.top, left: next.left, right: next.right, bottom: next.bottom, width: next.width, height: next.height })
+      }
+      read()
+      observer?.disconnect()
+      observer = new ResizeObserver(read)
+      observer.observe(element)
+    }
+    const schedule = () => { if (frame !== undefined) window.cancelAnimationFrame(frame); frame = window.requestAnimationFrame(measure) }
+    measure()
+    window.addEventListener('resize', schedule)
+    window.addEventListener('scroll', schedule, true)
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') onClose() })
+    return () => {
+      if (missingTimer !== undefined) window.clearTimeout(missingTimer)
+      if (frame !== undefined) window.cancelAnimationFrame(frame)
+      observer?.disconnect()
+      window.removeEventListener('resize', schedule)
+      window.removeEventListener('scroll', schedule, true)
+    }
+  }, [current.target, onClose])
+
+  useLayoutEffect(() => {
+    const update = () => {
+      const card = cardRef.current
+      if (!card) return
+      const margin = 18
+      const cardWidth = card.offsetWidth
+      const cardHeight = card.offsetHeight
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      if (!rect) {
+        setCardPosition({ top: Math.max(margin, (viewportHeight - cardHeight) / 2), left: Math.max(margin, (viewportWidth - cardWidth) / 2) })
+        return
+      }
+      const below = rect.bottom + 16
+      const above = rect.top - cardHeight - 16
+      const top = below + cardHeight <= viewportHeight - margin ? below : above >= margin ? above : Math.min(viewportHeight - cardHeight - margin, Math.max(margin, below))
+      const left = Math.min(viewportWidth - cardWidth - margin, Math.max(margin, rect.left))
+      setCardPosition({ top, left })
+    }
+    update()
+    window.addEventListener('resize', update)
+    return () => { window.removeEventListener('resize', update) }
+  }, [rect, step])
+
+  function nextStep() {
+    onOpenProviders()
+    if (step >= steps.length - 1) onClose()
+    else setStep((value) => value + 1)
+  }
+
+  return <div className="tour-layer" role="dialog" aria-modal="false" aria-labelledby="getting-started-title">
+    <div className="tour-scrim" aria-hidden="true" />
+    {rect && <div className="tour-spotlight" style={{ top: rect.top - 8, left: rect.left - 8, width: rect.width + 16, height: rect.height + 16 }} />}
+    <section ref={cardRef} className={`tour-card ${cardPosition || targetMissing ? '' : 'is-unpositioned'}`} style={cardPosition ? { top: cardPosition.top, left: cardPosition.left } : undefined}>
+      <div className="tour-arrow" aria-hidden="true" />
+      <div className="getting-started-progress" aria-label={`第 ${step + 1} 步，共 ${steps.length} 步`}>{steps.map((_, index) => <span key={index} className={index <= step ? 'active' : ''} />)}</div>
+      <div className="tour-card-heading"><span className="tour-step-index">{step + 1}</span><div><span className="eyebrow">开始使用 · {step + 1}/{steps.length}</span><h2 id="getting-started-title">{current.title}</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="关闭使用说明"><X size={16} /></button></div>
+      <p>{current.detail}</p>
+      {step === 0 && <p className="guide-status">当前状态：{environment.detail}</p>}
+      {targetMissing && <p className="guide-status guide-status-warning">当前页面暂时没有这个控件。你可以先切换到服务商页，教学会在控件出现后继续定位。</p>}
+      <div className="command-row"><button className="ghost-button" type="button" onClick={onClose}>稍后再说</button>{step > 0 && <button className="ghost-button" type="button" onClick={() => setStep((value) => value - 1)}>上一步</button>}<button className="primary-button" type="button" onClick={nextStep}>{step < steps.length - 1 ? '下一步' : '完成并开始使用'}</button></div>
+    </section>
+  </div>
 }
 
 function ModelsWorkspace({
@@ -1447,6 +2135,7 @@ function ConfigurationProtectionWorkspace({
   busy,
   onRestoreRequested,
   onBackupRequested,
+  onOpenSetup,
 }: {
   protection: ConfigurationProtection
   backups: BackupItem[]
@@ -1454,6 +2143,7 @@ function ConfigurationProtectionWorkspace({
   busy: string | null
   onRestoreRequested: (backup: BackupItem) => void
   onBackupRequested: (confirmation?: string) => void
+  onOpenSetup: () => void
 }) {
   const backupTitle: Record<BackupItem['kind'], string> = {
     initial_install: '首次启动基线备份',
@@ -1490,6 +2180,10 @@ function ConfigurationProtectionWorkspace({
             <p>{protection.baselineDetail}</p>
           </div>
           <ShieldCheck size={34} aria-hidden="true" />
+        </div>
+        <div className="reprepare-environment-row">
+          <div><strong>连接环境</strong><span>重新扫描配置层并创建恢复点，只准备 Signalman 管理的连接设置。</span></div>
+          <button className="ghost-button" type="button" onClick={onOpenSetup} disabled={busy !== null}><RefreshCcw size={16} />重新准备连接环境</button>
         </div>
         <div className="protection-scope">
           <div>
@@ -1712,17 +2406,23 @@ function SwitchConfirmDialog({
 }) {
   const [riskAcknowledged, setRiskAcknowledged] = useState(false)
   const hasRisk = Boolean(preflight.riskDetail)
+  const availabilityPassed = preflight.availabilityStatus === 'verified'
+  const availabilityAttempted = !['not_checked', 'missing_key', 'invalid_profile'].includes(preflight.availabilityStatus)
   return (
     <ModalDialog className="switch-confirm-dialog" labelledBy="switch-dialog-title" onClose={onCancel}>
       <div className="confirm-dialog-icon"><GitCompareArrows size={20} /></div>
       <div>
         <span className="eyebrow">切换影响确认</span>
         <h2 id="switch-dialog-title">确认切换到 {preflight.targetName}？</h2>
-        <p>{preflight.riskDetail ? '本次可以安全写入配置，但仍有使用风险。确认时会再次核对当前配置没有变化，再创建新的恢复点；不会显示访问密钥或完整配置内容。' : '该服务商最近一次连接测试已通过。确认时会再次核对当前配置没有变化，再创建新的恢复点；不会显示访问密钥或完整配置内容。'}</p>
+        <p>{availabilityPassed ? '切换前已重新完成可用性测试。确认时会再次核对当前配置没有变化，再创建新的恢复点；不会显示访问密钥或完整配置内容。' : '切换前已执行可用性测试，但本次没有确认目标服务商可用。确认时会再次核对当前配置没有变化；继续切换需要你明确承担使用风险。'}</p>
         <dl className="switch-confirm-facts">
           <div><dt>目标模型</dt><dd>{preflight.targetModel}</dd></div>
           <div><dt>恢复点</dt><dd>{preflight.backupDetail}</dd></div>
           <div><dt>保护检查</dt><dd>{preflight.protectedDetail}</dd></div>
+          <div className={availabilityPassed ? 'preflight-availability passed' : 'preflight-availability warning'}>
+            <dt>本次可用性测试</dt>
+            <dd><strong>{availabilityPassed ? '已通过' : availabilityAttempted ? '已执行但未确认' : '未能发起'}</strong><span>{preflight.availabilityDetail}</span><small>检查时间：{preflight.availabilityCheckedAt}</small></dd>
+          </div>
           {preflight.riskDetail && <div><dt>使用风险</dt><dd>{preflight.riskDetail}</dd></div>}
         </dl>
         {hasRisk && (
@@ -1861,8 +2561,8 @@ function LabWorkspace({
       <section className="surface-panel lab-ranking" aria-labelledby="lab-ranking-title">
         <div className="section-heading-row">
           <div>
-            <h3 id="lab-ranking-title">性价比排名</h3>
-            <p className="section-description">只比较同一个固定测试模型。成本取每个服务商的多次冷启动中位数，避免单次波动影响排名。</p>
+            <h3 id="lab-ranking-title">{ranking.length >= 2 ? '服务商对比' : '本次成本结果'}</h3>
+            <p className="section-description">{ranking.length >= 2 ? '只比较同一个固定测试模型。多次记录时取中位数；样本少于 3 次会明确提示，但不会阻止比较。' : '保存一条样本后立即显示结果。再添加一个服务商，即可查看横向对比。'}</p>
           </div>
         </div>
         <div className="lab-benchmark-control">
@@ -1870,9 +2570,9 @@ function LabWorkspace({
             {BENCHMARK_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
           </select></label>
         </div>
-        {ranking.length < 2 ? <p className="lab-empty">先为至少两个服务商保存“{benchmarkModelLabel(benchmarkModel || '固定模型')}”的费用样本，才能生成排名。</p> : (
+        {ranking.length === 0 ? <p className="lab-empty">先运行固定测试并保存第一条费用样本。保存后，这里会马上显示本次人民币成本。</p> : (
           <div className="lab-ranking-list" role="table" aria-label="性价比排名">
-            <div className="lab-ranking-head ranking-grid" role="row">
+            {ranking.length >= 2 && <div className="lab-ranking-head ranking-grid" role="row">
               <span className="ranking-cell ranking-cell--position">排名</span>
               <span className="ranking-cell ranking-cell--provider">服务商</span>
               <span className="ranking-cell ranking-cell--cost">估算成本 <FieldHint text={`按“每 ${displayMultiplier.toLocaleString()} 次”固定测试估算的人民币成本。`} /></span>
@@ -1880,18 +2580,18 @@ function LabWorkspace({
               <span className="ranking-cell ranking-cell--score">评分 <FieldHint text="本表中成本最低的服务商为 100 分；其余服务商按成本比例折算，分数越高代表本次比较越划算。" /></span>
               <span className="ranking-cell ranking-cell--samples">样本 <FieldHint text="参与中位数计算的已保存冷启动样本数量。" /></span>
               <span className="ranking-cell ranking-cell--manage">管理</span>
-            </div>
+            </div>}
             {ranking.map((item, index) => {
               const medianCny = scaledToDecimal(item.median)
               const officialRatio = item.officialMedian && item.officialMedian > 0n ? Number((item.median * 1000n) / item.officialMedian) / 10 : null
               const providerHistoryOpen = historyProviderId === item.provider.id
               return <div className="lab-ranking-group" key={item.provider.id}>
               <div className="lab-ranking-row ranking-grid" role="row">
-                <span className="ranking-cell ranking-cell--position ranking-position">{index + 1}</span>
+                <span className="ranking-cell ranking-cell--position ranking-position">{ranking.length >= 2 ? index + 1 : <Activity size={14} />}</span>
                 <div className="ranking-cell ranking-cell--provider"><strong>{item.provider.name}</strong><small>{benchmarkModelLabel(benchmarkModel)} · 最近 {item.samples[0]?.updatedAt}</small></div>
                 <div className="ranking-cell ranking-cell--cost ranking-cost"><strong>{formatCny((Number(medianCny) * displayMultiplier).toString())}</strong><small>单次 {formatCny(medianCny, 8)}</small></div>
                 <div className="ranking-cell ranking-cell--official ranking-official">{officialRatio === null ? <span>—</span> : <strong>{officialRatio}%</strong>}</div>
-                <div className="ranking-cell ranking-cell--score ranking-score"><strong>{scoreFor(item.median) ?? '—'}{scoreFor(item.median) ? ' 分' : ''}</strong><span>越高越划算</span></div>
+                <div className="ranking-cell ranking-cell--score ranking-score"><strong>{ranking.length >= 2 ? `${scoreFor(item.median) ?? '—'}${scoreFor(item.median) ? ' 分' : ''}` : '初步结果'}</strong><span>{item.samples.length >= 3 ? '推荐样本数已满足' : `已测 ${item.samples.length}/3 次`}</span></div>
                 <span className="ranking-cell ranking-cell--samples ranking-samples">{item.samples.length} 次</span>
                 <button className="ghost-button ranking-cell ranking-cell--manage ranking-manage" type="button" onClick={() => setHistoryProviderId(providerHistoryOpen ? null : item.provider.id)}>{providerHistoryOpen ? '收起' : '管理'}</button>
               </div>
