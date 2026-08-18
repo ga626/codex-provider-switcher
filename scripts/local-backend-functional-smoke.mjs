@@ -349,6 +349,7 @@ try {
   const initial = await api('/api/state')
   const initialActivityCount = initial.activity.length
   assert(initial.profiles.length === 0, 'a new product install must not include a preconfigured provider')
+  assert(initial.connectionEnvironment?.status === 'needs_setup', 'a first product launch must ask the user to prepare its configuration layer')
   const initialBackup = initial.backups.find((item) => item.kind === 'initial_install')
   assert(initialBackup, 'first application launch did not create an installation baseline backup')
   assert(initialBackup.files >= 3, 'installation baseline backup did not include manifest and protected files')
@@ -424,6 +425,32 @@ try {
   assert(verified.activity[0]?.title === '服务商可用性测试通过', 'provider availability test did not update activity')
   assert(await readFile(configPath, 'utf8') === originalConfig, 'verification changed config.toml')
   assert(await readFile(authPath, 'utf8') === originalAuth, 'verification changed auth.json')
+
+  const preparedEnvironment = await api('/api/config/prepare-environment', { layerId: 'user-config' })
+  assert(preparedEnvironment.connectionEnvironment?.status === 'ready', 'connection environment was not marked ready after explicit setup')
+  assert(preparedEnvironment.connectionEnvironment?.selectedLayerId === 'user-config', 'connection environment did not retain the selected layer')
+  assert(await readFile(configPath, 'utf8') === originalConfig, 'environment setup changed an already compatible config.toml')
+
+  // A genuinely new install may have neither file yet. Preparation should
+  // create the minimum safe Codex config and an empty auth object, while a
+  // later validation failure must leave those missing files missing.
+  await rm(configPath, { force: true })
+  await rm(authPath, { force: true })
+  const blankPrepared = await api('/api/config/prepare-environment', { layerId: 'user-config' })
+  const blankConfig = await readFile(configPath, 'utf8')
+  const blankAuth = await readFile(authPath, 'utf8')
+  assert(blankPrepared.connectionEnvironment?.status === 'ready', 'blank config/auth preparation did not complete')
+  assert(blankConfig.includes('model_provider = "custom"'), 'blank config preparation did not create the custom provider selector')
+  assert(blankConfig.includes('wire_api = "responses"'), 'blank config preparation did not create the Responses wire setting')
+  assert(JSON.parse(blankAuth) && typeof JSON.parse(blankAuth) === 'object', 'blank auth preparation did not create a JSON object')
+  await rm(configPath, { force: true })
+  await writeFile(authPath, '{not valid json', 'utf8')
+  const blankFailure = await expectApiFailure('/api/config/prepare-environment', { layerId: 'user-config' })
+  assert(blankFailure.includes('JSON'), 'blank preparation failure did not identify the invalid auth JSON')
+  await assertMissingFile(configPath, 'failed blank preparation left a newly created config.toml behind')
+  assert(await readFile(authPath, 'utf8') === '{not valid json', 'failed blank preparation changed an invalid auth.json')
+  await writeFile(configPath, originalConfig, 'utf8')
+  await writeFile(authPath, originalAuth, 'utf8')
 
   const calibrated = await api('/api/lab/cost-calibration', {
     input: {
@@ -506,7 +533,12 @@ try {
   assert(switchedAuth.OPENAI_API_KEY === profile.apiKey, 'switch did not bind the profile key to the candidate Codex auth target')
   assert(switchedAuth.preserved === 'yes', 'switch removed unrelated auth data')
   const switchBackup = switched.backups.find((item) => item.kind === 'before_switch')
-  assert(switched.backups.length === 3, 'switch did not retain the installation and daily backups while creating one switch backup')
+  assert(
+    switched.backups.length >= 3
+      && switched.backups.some((item) => item.kind === 'initial_install')
+      && switched.backups.some((item) => item.kind === 'daily'),
+    'switch did not retain the installation and daily backups while creating its recovery point'
+  )
   assert(switchBackup?.files >= 3, 'switch backup did not include a manifest')
   assert(
     switchBackup?.fileCategories?.includes('Codex 设置') && switchBackup?.fileCategories?.includes('本机登录信息'),
@@ -652,9 +684,8 @@ try {
   await writeFile(join(codexDir, 'friend.config.toml'), 'model = "profile-model"\r\n', 'utf8')
   const profileLayerState = await api('/api/state')
   const profileLayerCheck = profileLayerState.checks.find((item) => item.id === 'configuration-layer')
-  assert(profileLayerCheck && !profileLayerCheck.ok && profileLayerCheck.severity === 'required', 'profile configuration was not reported as a write-target blocker')
-  const profileLayerMessage = await expectApiFailure('/api/profiles/prepare-switch', { profileId: profile.id })
-  assert(profileLayerMessage.includes('无法确认当前实际生效的写入目标'), 'profile configuration did not block an ambiguous write target')
+  assert(profileLayerCheck?.ok, 'an explicitly selected configuration layer must remain valid when another profile appears later')
+  assert(profileLayerState.connectionEnvironment?.selectedLayerId === 'user-config', 'a newly discovered profile must not silently replace the selected configuration layer')
   await rm(join(codexDir, 'friend.config.toml'))
 
   const endpointMismatch = { ...profile, id: 'endpoint-mismatch', name: 'Endpoint mismatch', apiKey: 'sk-endpoint-mismatch' }

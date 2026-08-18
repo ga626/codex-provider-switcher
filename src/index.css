@@ -21,6 +21,23 @@
   --red-soft: #ffe8e5;
   --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  /* Signalman UI contract: a deliberately small type and spacing vocabulary. */
+  --type-caption: 11px;
+  --type-label: 12px;
+  --type-body: 14px;
+  --type-body-strong: 14px;
+  --type-subtitle: 16px;
+  --type-title: 20px;
+  --type-page-title: 28px;
+  --lh-caption: 16px;
+  --lh-body: 20px;
+  --lh-subtitle: 22px;
+  --lh-title: 26px;
+  --control-height: 40px;
+  --control-height-compact: 32px;
+  --control-addon-width: 40px;
+  --panel-padding: 16px;
+  --panel-padding-large: 20px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;

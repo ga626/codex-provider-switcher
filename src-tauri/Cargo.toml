@@ -1,6 +1,6 @@
 [package]
 name = "codex-provider-switcher"
-version = "0.10.6-alpha"
+version = "0.10.7-alpha"
 description = "Signalman AI local provider profile manager"
 authors = ["ga626"]
 edition = "2021"
@@ -19,7 +19,10 @@ base64 = "0.22"
 dirs = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+# Windows providers behind Cloudflare can reset rustls connections while the
+# same endpoint succeeds through Schannel/.NET. Use the OS TLS stack so the
+# desktop probe and Codex see the same network behavior.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
 semver = "1"
 sha2 = "0.10"
 tauri = { version = "2", features = [] }
@@ -32,3 +35,4 @@ toml = "1.1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem"] }
+winreg = "0.55"

@@ -316,10 +316,26 @@ export async function saveProfile(profile: EditableProfile): Promise<AppState> {
     id: crypto.randomUUID(),
     time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
     title: `${nextProfile.name} 已保存`,
-    detail: '服务商信息已更新；保存后不会明文显示 API 密钥。',
+    detail: '服务商信息已更新；访问密钥默认隐藏，可点击眼睛查看。',
     tone: 'info',
   })
   return structuredClone(mockState)
+}
+
+export async function revealProfileApiKey(profileId: string): Promise<string> {
+  if (isTauri) {
+    return invoke<string>('reveal_profile_api_key', { profileId })
+  }
+  const webValue = await tryWebBackend<{ apiKey: string }>('/api/profiles/reveal-key', apiPost({ profileId }))
+  if (webValue?.apiKey) {
+    return webValue.apiKey
+  }
+  await mockDelay()
+  const profile = mockState.profiles.find((item) => item.id === profileId)
+  if (!profile?.hasApiKey) {
+    throw new Error('该服务商没有已保存的访问密钥。')
+  }
+  return `sk-preview-${profileId}-not-real`
 }
 
 function mockModelCatalog(profileId: string): ModelCatalog {
@@ -343,7 +359,7 @@ function mockModelCatalog(profileId: string): ModelCatalog {
     baseUrl: profile.baseUrl,
     fetchedAt: nowLabel(),
     status: 'ok',
-    statusDetail: '已返回 6 个示例模型。',
+    statusDetail: '已返回 6 个模型。',
     models: [
       {
         id: 'provider-reasoning-current',
@@ -687,6 +703,32 @@ export async function syncCurrentConfiguration(): Promise<AppState> {
     title: '预览未同步当前配置',
     detail: '开发预览不会读取或改写本机 Codex 配置。',
     tone: 'warning',
+  })
+  return structuredClone(mockState)
+}
+
+export async function prepareConnectionEnvironment(layerId: string): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('prepare_connection_environment', { layerId })
+  }
+  const webState = await tryWebBackend<AppState>('/api/config/prepare-environment', apiPost({ layerId }))
+  if (webState) return webState
+  await mockDelay()
+  const layer = mockState.connectionEnvironment.layers.find((item) => item.id === layerId)
+  if (!layer) throw new Error('选择的配置层不存在。')
+  mockState.connectionEnvironment = {
+    ...mockState.connectionEnvironment,
+    status: 'ready',
+    selectedLayerId: layerId,
+    detail: '连接环境已准备：已创建恢复点，并只统一 custom 服务商与 Responses 所需设置。',
+    layers: mockState.connectionEnvironment.layers.map((item) => ({ ...item, selected: item.id === layerId })),
+  }
+  mockState.activity.unshift({
+    id: crypto.randomUUID(),
+    time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: '连接环境已准备',
+    detail: '开发预览仅更新隔离 fixture，不会读取或改写本机 Codex 配置。',
+    tone: 'success',
   })
   return structuredClone(mockState)
 }

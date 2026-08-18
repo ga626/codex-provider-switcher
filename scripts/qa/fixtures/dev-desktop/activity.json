@@ -1,5 +1,5 @@
 [
-  { "id": "development-fixture-loaded", "time": "22:26", "title": "开发演示数据已加载", "detail": "这组示例服务商、模型和费用记录只用于隔离桌面验收。", "tone": "info" },
-  { "id": "development-fixture-check", "time": "22:13", "title": "配置安全检查完成", "detail": "演示配置不会读取或写入真实 Codex 文件。", "tone": "success" },
-  { "id": "development-fixture-backup", "time": "22:11", "title": "隔离恢复点已生成", "detail": "仅可恢复隔离开发目录中的演示数据。", "tone": "success" }
+  { "id": "development-fixture-loaded", "time": "22:26", "title": "配置已加载", "detail": "服务商、模型和费用记录已准备就绪。", "tone": "info" },
+  { "id": "development-fixture-check", "time": "22:13", "title": "配置安全检查完成", "detail": "当前配置已通过安全检查。", "tone": "success" },
+  { "id": "development-fixture-backup", "time": "22:11", "title": "恢复点已生成", "detail": "最近一次配置已保存，可随时恢复。", "tone": "success" }
 ]

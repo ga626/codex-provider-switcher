@@ -79,6 +79,18 @@ try {
     if ($desktopProcess.HasExited) {
         throw "Current-source desktop candidate exited during startup with code $($desktopProcess.ExitCode)."
     }
+    Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class SignalmanDailyWindowTitle {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool SetWindowText(IntPtr hWnd, string text);
+}
+'@
+    $desktopProcess.Refresh()
+    if ($desktopProcess.MainWindowHandle -ne [IntPtr]::Zero) {
+        [SignalmanDailyWindowTitle]::SetWindowText($desktopProcess.MainWindowHandle, "Signalman AI - DEV - DAILY - $buildSha") | Out-Null
+    }
     Write-Host "[PASS] Isolated development desktop started (PID $($desktopProcess.Id), revision $buildSha)."
 }
 finally {

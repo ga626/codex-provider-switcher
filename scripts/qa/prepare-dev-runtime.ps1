@@ -15,6 +15,7 @@ $runtimeCatalog = Join-Path $appDataDir "profiles.json"
 $runtimeActivity = Join-Path $appDataDir "activity.json"
 $fixtureConfig = Join-Path $codexHome "config.toml"
 $fixtureAuth = Join-Path $codexHome "auth.json"
+$runtimeEnvironment = Join-Path $appDataDir "connection-environment.json"
 
 foreach ($fixturePath in @($fixtureCatalog, $fixtureActivity)) {
     if (-not (Test-Path -LiteralPath $fixturePath -PathType Leaf)) {
@@ -42,7 +43,7 @@ model_provider = "custom"
 disable_response_storage = true
 
 [model_providers.custom]
-name = "示例服务商 A"
+name = "服务商 A"
 base_url = "https://provider-a.example/v1"
 wire_api = "responses"
 requires_openai_auth = false
@@ -67,6 +68,9 @@ if (-not (Test-Path -LiteralPath $runtimeCatalog -PathType Leaf)) {
 }
 if (-not (Test-Path -LiteralPath $runtimeActivity -PathType Leaf)) {
     Copy-Item -LiteralPath $fixtureActivity -Destination $runtimeActivity
+}
+if (-not (Test-Path -LiteralPath $runtimeEnvironment -PathType Leaf)) {
+    [System.IO.File]::WriteAllText($runtimeEnvironment, '{"selected_layer_id":"user-config","setup_completed":true}', $utf8WithoutBom)
 }
 
 [pscustomobject]@{
