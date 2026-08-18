@@ -9,7 +9,9 @@
       "scope": "Non-Windows Tauri GTK dependency branch retained in Cargo.lock",
       "release_impact": "Not linked into the Windows x86_64 release target",
       "evidence_command": "cargo tree --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc -i glib",
-      "review_by": "2026-08-16",
+      "review_by": "2026-09-19",
+      "reviewed_at": "2026-08-19",
+      "review_basis": "GitHub Dependabot alert #1 remains open; the Windows x86_64 dependency tree still has no glib edge, so this is a non-Windows GTK branch risk and not part of the shipped target.",
       "required_follow_up": "Re-evaluate when Tauri or its runtime dependency graph changes; upgrade through a separately validated compatibility PR."
     }
   ]
