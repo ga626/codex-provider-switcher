@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { initialState } from './mockData'
+import type { DownloadEvent } from '@tauri-apps/plugin-updater'
 import type { AppState, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, ResponseProbeObservation, SwitchPreflight, UpdateInfo } from './types'
 
 const isTauri = '__TAURI_INTERNALS__' in window
@@ -13,7 +14,13 @@ export const isGitHubReleaseBuild = __CODEX_RELEASE_CHANNEL__ === 'stable'
 
 let mockState: AppState = structuredClone(initialState)
 let webBackendAvailable: boolean | null = null
-let pendingTauriUpdate: { version: string; date?: string | null; downloadAndInstall: () => Promise<void> } | null = null
+let pendingTauriUpdate: { version: string; date?: string | null; downloadAndInstall: (onEvent?: (event: DownloadEvent) => void) => Promise<void> } | null = null
+
+export type UpdateInstallProgress = {
+  phase: 'downloading' | 'installing'
+  downloadedBytes: number
+  totalBytes?: number
+}
 
 function isTrustedProjectReleaseUrl(value: string) {
   try {
@@ -211,6 +218,7 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
         latestVersion: __APP_VERSION__,
         available: false,
         releaseUrl: storeProductUrl,
+        checkedAt: new Date().toISOString(),
       }
     }
     if (!isGitHubReleaseBuild) {
@@ -220,10 +228,15 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
         latestVersion: __APP_VERSION__,
         available: false,
         releaseUrl: 'https://github.com/ga626/codex-provider-switcher/releases',
+        checkedAt: new Date().toISOString(),
       }
     }
     const { check } = await import('@tauri-apps/plugin-updater')
-    const update = await check()
+    const transport = await invoke<{ proxy?: string; timeoutMs: number }>('update_transport_options')
+    const update = await check({
+      timeout: transport.timeoutMs,
+      ...(transport.proxy ? { proxy: transport.proxy } : {}),
+    })
     if (!update) {
       pendingTauriUpdate = null
       return {
@@ -231,6 +244,7 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
         latestVersion: __APP_VERSION__,
         available: false,
         releaseUrl: 'https://github.com/ga626/codex-provider-switcher/releases',
+        checkedAt: new Date().toISOString(),
       }
     }
     pendingTauriUpdate = update
@@ -240,24 +254,36 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
       available: true,
       releaseUrl: 'https://github.com/ga626/codex-provider-switcher/releases',
       publishedAt: update.date ?? undefined,
+      checkedAt: new Date().toISOString(),
     }
   }
   const webResult = await tryWebBackend<UpdateInfo>('/api/update/check')
-  if (webResult) {
-    return webResult
-  }
+  if (webResult) return { ...webResult, checkedAt: new Date().toISOString() }
   await mockDelay()
   return {
     currentVersion: __APP_VERSION__,
     latestVersion: __APP_VERSION__,
     available: false,
     releaseUrl: 'https://github.com/ga626/codex-provider-switcher/releases',
+    checkedAt: new Date().toISOString(),
   }
 }
 
-export async function openUpdate(url: string): Promise<void> {
+export async function openUpdate(url: string, onProgress?: (progress: UpdateInstallProgress) => void): Promise<void> {
   if (isTauri && pendingTauriUpdate) {
-    await pendingTauriUpdate.downloadAndInstall()
+    let downloadedBytes = 0
+    let totalBytes: number | undefined
+    await pendingTauriUpdate.downloadAndInstall((event) => {
+      if (event.event === 'Started') {
+        totalBytes = event.data.contentLength
+        onProgress?.({ phase: 'downloading', downloadedBytes, totalBytes })
+      } else if (event.event === 'Progress') {
+        downloadedBytes += event.data.chunkLength
+        onProgress?.({ phase: 'downloading', downloadedBytes, totalBytes })
+      } else {
+        onProgress?.({ phase: 'installing', downloadedBytes, totalBytes })
+      }
+    })
     const { relaunch } = await import('@tauri-apps/plugin-process')
     await relaunch()
     return
@@ -707,11 +733,11 @@ export async function syncCurrentConfiguration(): Promise<AppState> {
   return structuredClone(mockState)
 }
 
-export async function prepareConnectionEnvironment(layerId: string): Promise<AppState> {
+export async function prepareConnectionEnvironment(layerId: string, onboarding = false): Promise<AppState> {
   if (isTauri) {
-    return invoke<AppState>('prepare_connection_environment', { layerId })
+    return invoke<AppState>('prepare_connection_environment', { layerId, onboarding })
   }
-  const webState = await tryWebBackend<AppState>('/api/config/prepare-environment', apiPost({ layerId }))
+  const webState = await tryWebBackend<AppState>('/api/config/prepare-environment', apiPost({ layerId, onboarding }))
   if (webState) return webState
   await mockDelay()
   const layer = mockState.connectionEnvironment.layers.find((item) => item.id === layerId)
@@ -719,6 +745,7 @@ export async function prepareConnectionEnvironment(layerId: string): Promise<App
   mockState.connectionEnvironment = {
     ...mockState.connectionEnvironment,
     status: 'ready',
+    onboardingCompleted: onboarding ? false : mockState.connectionEnvironment.onboardingCompleted,
     selectedLayerId: layerId,
     detail: '连接环境已准备：已创建恢复点，并只统一 custom 服务商与 Responses 所需设置。',
     layers: mockState.connectionEnvironment.layers.map((item) => ({ ...item, selected: item.id === layerId })),
@@ -730,5 +757,19 @@ export async function prepareConnectionEnvironment(layerId: string): Promise<App
     detail: '开发预览仅更新隔离 fixture，不会读取或改写本机 Codex 配置。',
     tone: 'success',
   })
+  return structuredClone(mockState)
+}
+
+export async function completeOnboarding(): Promise<AppState> {
+  if (isTauri) {
+    return invoke<AppState>('complete_onboarding')
+  }
+  const webState = await tryWebBackend<AppState>('/api/config/complete-onboarding', apiPost())
+  if (webState) return webState
+  await mockDelay()
+  mockState.connectionEnvironment = {
+    ...mockState.connectionEnvironment,
+    onboardingCompleted: true,
+  }
   return structuredClone(mockState)
 }

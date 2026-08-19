@@ -82,10 +82,13 @@ try {
   await desktop.getByText(/不包含访问密钥、配置正文、文件路径、响应原文/).waitFor()
   await desktop.getByText('在线反馈尚未配置').waitFor()
   await desktop.getByRole('button', { name: '关闭反馈' }).click()
-  await desktop.getByRole('button', { name: '查看使用说明' }).click()
-  await desktop.getByRole('heading', { name: '添加服务商' }).waitFor()
+  await desktop.getByRole('button', { name: '使用说明', exact: true }).click()
+  const guideHub = desktop.getByRole('dialog', { name: '选择要了解的功能' })
+  await guideHub.waitFor()
+  await guideHub.locator('.guide-chapter-card').filter({ hasText: '初始化配置' }).getByRole('button', { name: '开始' }).click()
+  await desktop.getByRole('heading', { name: '新增服务商' }).waitFor()
   if (await desktop.locator('.getting-started-progress').getAttribute('aria-label') !== '第 1 步，共 8 步') {
-    throw new Error('The ready-state guide did not begin at the first actionable provider step')
+    throw new Error('The ready-state initialization guide did not skip the completed environment-preparation step')
   }
   await desktop.getByRole('button', { name: '稍后再说' }).click()
   const leftSplitter = desktop.getByRole('separator', { name: '调整服务商列表宽度' })

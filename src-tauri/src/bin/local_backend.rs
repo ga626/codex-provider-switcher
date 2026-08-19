@@ -1,7 +1,7 @@
 use codex_switcher_tauri_lib::{
-    check_for_update_core, create_manual_backup_core, delete_profile_core,
+    check_for_update_core, complete_onboarding_core, create_manual_backup_core, delete_profile_core,
     load_state_core, reveal_profile_api_key_core,
-    prepare_switch_core, prepare_connection_environment_core, refresh_models_core, reorder_profiles_core, restore_backup_core,
+    prepare_switch_core, prepare_connection_environment_core_with_onboarding, refresh_models_core, reorder_profiles_core, restore_backup_core,
     restore_latest_backup_core, run_response_probe_for_model_core, save_cost_calibration_core,
     delete_cost_calibration_core,
     save_profile_core, set_backup_policy_core,
@@ -372,14 +372,17 @@ fn handle_api(
         }
         ("POST", "/api/config/sync-current") => sync_current_configuration_core().map(state_json),
         ("POST", "/api/config/prepare-environment") => {
-            let layer_id = request_json(body)?
+            let request = request_json(body)?;
+            let layer_id = request
                 .get("layerId")
                 .and_then(Value::as_str)
                 .filter(|value| !value.trim().is_empty())
                 .ok_or_else(|| SwitcherError::Message("请选择要管理的配置层。".to_string()))?
                 .to_string();
-            prepare_connection_environment_core(layer_id).map(state_json)
+            let onboarding = request.get("onboarding").and_then(Value::as_bool).unwrap_or(false);
+            prepare_connection_environment_core_with_onboarding(layer_id, onboarding).map(state_json)
         }
+        ("POST", "/api/config/complete-onboarding") => complete_onboarding_core().map(state_json),
         ("POST", "/api/auto-start") => {
             let enabled = request_json(body)?
                 .get("enabled")
