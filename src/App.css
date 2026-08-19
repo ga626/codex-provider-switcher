@@ -803,6 +803,10 @@ h2 {
   line-height: 1.45;
 }
 
+.settings-update-row small.settings-update-error {
+  color: var(--red);
+}
+
 .settings-update-button {
   flex: 0 0 auto;
   min-width: 132px;
@@ -1668,7 +1672,7 @@ select {
 .tour-layer { position: fixed; z-index: 100; inset: 0; pointer-events: none; }
 .tour-scrim { position: absolute; inset: 0; pointer-events: none; background: rgba(17, 29, 44, .56); }
 .tour-spotlight { position: absolute; z-index: 1; pointer-events: none; border: 2px solid #73d6cc; border-radius: 10px; box-shadow: 0 0 0 9999px rgba(17, 29, 44, .56), 0 0 0 5px rgba(115, 214, 204, .18); transition: top .16s ease, left .16s ease, width .16s ease, height .16s ease; }
-.tour-card { position: absolute; z-index: 2; width: min(380px, calc(100vw - 36px)); max-height: min(430px, calc(100vh - 36px)); overflow: auto; padding: 18px; pointer-events: auto; color: var(--text); background: var(--panel); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 20px 48px rgba(16, 31, 48, .28); }
+.tour-card { position: fixed; z-index: 2; width: min(380px, calc(100vw - 36px)); max-height: min(430px, calc(100vh - 36px)); overflow: auto; padding: 18px; pointer-events: auto; color: var(--text); background: var(--panel); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 20px 48px rgba(16, 31, 48, .28); }
 .tour-card.is-unpositioned { top: 50%; left: 50%; visibility: hidden; transform: translate(-50%, -50%); }
 .tour-arrow { position: absolute; top: -7px; left: 28px; width: 14px; height: 14px; background: var(--panel); border-top: 1px solid var(--border-strong); border-left: 1px solid var(--border-strong); transform: rotate(45deg); }
 .tour-card-heading { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: start; }
@@ -1676,6 +1680,17 @@ select {
 .tour-card h2 { margin-top: 2px; font-size: 17px; }
 .tour-card > p { margin: 14px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .tour-card .command-row { margin-top: 18px; }
+.workspace-guide-button { flex: 0 0 auto; }
+.confirm-dialog.guide-hub-dialog { width: min(640px, calc(100vw - 48px)); display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; max-height: calc(100vh - 48px); overflow: auto; }
+.guide-hub-dialog .section-heading-row, .guide-hub-dialog > p, .guide-hub-dialog .guide-chapter-list { grid-column: 1; }
+.guide-hub-intro { margin: 0; color: var(--muted); }
+.guide-chapter-list { display: grid; gap: 8px; }
+.guide-chapter-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 13px 14px; background: var(--panel-soft); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.guide-chapter-card > div { min-width: 0; display: grid; gap: 4px; }
+.guide-chapter-card strong { font-size: var(--type-body); }
+.guide-chapter-card span, .guide-chapter-card small { color: var(--muted); font-size: var(--type-caption); line-height: var(--lh-body); }
+.guide-chapter-card small { color: var(--accent); }
+.guide-tour-actions { flex-wrap: wrap; }
 .confirm-dialog.feedback-dialog { width: min(640px, calc(100vw - 48px)); display: grid; grid-template-columns: minmax(0, 1fr); }
 .feedback-dialog .section-heading-row, .feedback-dialog > p, .feedback-dialog .feedback-preview { grid-column: 1; }
 .feedback-preview { max-height: 220px; overflow: auto; margin: 14px 0 0; padding: 12px; color: var(--muted); background: var(--panel-soft); border: 1px solid var(--border); border-radius: 7px; font: 11px/1.5 var(--mono); white-space: pre-wrap; }
@@ -3413,6 +3428,7 @@ select {
   margin-top: 1px;
   color: var(--accent);
 }
+.lab-intro .workspace-guide-button { margin-left: auto; }
 
 .lab-intro h3 {
   margin: 0;

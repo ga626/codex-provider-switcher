@@ -174,6 +174,7 @@ export type ConnectionEnvironmentLayer = {
 export type ConnectionEnvironment = {
   status: 'needs_setup' | 'ready' | 'needs_selection' | 'error'
   selectedLayerId?: string
+  onboardingCompleted: boolean
   detail: string
   layers: ConnectionEnvironmentLayer[]
 }
@@ -185,6 +186,8 @@ export type UpdateInfo = {
   releaseUrl: string
   downloadUrl?: string
   publishedAt?: string
+  checkedAt?: string
+  notes?: string
 }
 
 export type AppState = {

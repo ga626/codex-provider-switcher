@@ -414,6 +414,7 @@ pub struct ConnectionEnvironmentLayer {
 pub struct ConnectionEnvironment {
     pub status: String,
     pub selected_layer_id: Option<String>,
+    pub onboarding_completed: bool,
     pub detail: String,
     pub layers: Vec<ConnectionEnvironmentLayer>,
 }
@@ -424,6 +425,15 @@ struct StoredConnectionEnvironment {
     selected_layer_id: Option<String>,
     #[serde(default)]
     setup_completed: bool,
+    #[serde(default)]
+    onboarding_completed: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTransportOptions {
+    pub proxy: Option<String>,
+    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -627,6 +637,16 @@ fn configure_http_client(builder: reqwest::blocking::ClientBuilder) -> reqwest::
     match reqwest::Proxy::all(&proxy_url) {
         Ok(proxy) => builder.proxy(proxy),
         Err(_) => builder,
+    }
+}
+
+#[tauri::command]
+fn update_transport_options() -> UpdateTransportOptions {
+    // The updater plugin is separate from reqwest. Pass the Windows system
+    // proxy only for this request; never persist or return it through app state.
+    UpdateTransportOptions {
+        proxy: windows_user_proxy(),
+        timeout_ms: 10_000,
     }
 }
 
@@ -2368,6 +2388,10 @@ fn connection_environment_state() -> ConnectionEnvironment {
             ConnectionEnvironment {
                 status: status.to_string(),
                 selected_layer_id: record.selected_layer_id.clone(),
+                // Existing installations completed setup before this field
+                // existed. Treat them as onboarded to avoid re-showing the
+                // first-run flow after a normal upgrade.
+                onboarding_completed: record.onboarding_completed || record.setup_completed,
                 detail,
                 layers: layers.into_iter().map(|(id, path, label)| ConnectionEnvironmentLayer {
                     selected: record.selected_layer_id.as_ref().is_some_and(|selected| selected == &id),
@@ -2380,6 +2404,7 @@ fn connection_environment_state() -> ConnectionEnvironment {
         Err(error) => ConnectionEnvironment {
             status: "error".to_string(),
             selected_layer_id: record.selected_layer_id,
+            onboarding_completed: record.onboarding_completed || record.setup_completed,
             detail: format!("无法读取 Codex 配置层：{error}"),
             layers: Vec::new(),
         },
@@ -4456,17 +4481,37 @@ fn build_connection_environment_config(original: &str) -> Result<String, Switche
 }
 
 #[tauri::command]
-fn prepare_connection_environment(layer_id: String) -> Result<AppState, SwitcherError> {
-    prepare_connection_environment_core(layer_id)
+fn prepare_connection_environment(
+    layer_id: String,
+    onboarding: Option<bool>,
+) -> Result<AppState, SwitcherError> {
+    prepare_connection_environment_core_with_onboarding(layer_id, onboarding.unwrap_or(false))
+}
+
+#[tauri::command]
+fn complete_onboarding() -> Result<AppState, SwitcherError> {
+    complete_onboarding_core()
 }
 
 pub fn prepare_connection_environment_core(layer_id: String) -> Result<AppState, SwitcherError> {
+    prepare_connection_environment_core_with_onboarding(layer_id, false)
+}
+
+pub fn prepare_connection_environment_core_with_onboarding(
+    layer_id: String,
+    onboarding: bool,
+) -> Result<AppState, SwitcherError> {
     let candidates = configuration_layer_candidates()?;
     if !candidates.iter().any(|(id, _, _)| id == &layer_id) {
         return Err(SwitcherError::Message("选择的 Codex 配置层已不存在，请重新检查。".to_string()));
     }
     let previous = load_connection_environment_record();
-    let selected = StoredConnectionEnvironment { selected_layer_id: Some(layer_id.clone()), setup_completed: false };
+    let onboarding_completed = !onboarding && (previous.onboarding_completed || previous.setup_completed);
+    let selected = StoredConnectionEnvironment {
+        selected_layer_id: Some(layer_id.clone()),
+        setup_completed: false,
+        onboarding_completed,
+    };
     save_connection_environment_record(&selected)?;
     let config = config_path()?;
     let auth = auth_path()?;
@@ -4495,7 +4540,11 @@ pub fn prepare_connection_environment_core(layer_id: String) -> Result<AppState,
                 "认证文件不是 JSON 对象，已停止准备连接环境。".to_string(),
             ));
         }
-        let completed = StoredConnectionEnvironment { selected_layer_id: Some(layer_id), setup_completed: true };
+        let completed = StoredConnectionEnvironment {
+            selected_layer_id: Some(layer_id),
+            setup_completed: true,
+            onboarding_completed,
+        };
         save_connection_environment_record(&completed)?;
         Ok(())
     })();
@@ -4510,6 +4559,23 @@ pub fn prepare_connection_environment_core(layer_id: String) -> Result<AppState,
         "已创建恢复点，并只统一 custom 服务商与 Responses 所需设置；项目、MCP、插件和历史记录保持不变。",
         "success",
     )
+}
+
+pub fn complete_onboarding_core() -> Result<AppState, SwitcherError> {
+    let mut record = load_connection_environment_record();
+    let selected_valid = record.selected_layer_id.as_ref().is_some_and(|selected| {
+        configuration_layer_candidates()
+            .map(|layers| layers.iter().any(|(id, _, _)| id == selected))
+            .unwrap_or(false)
+    });
+    if !record.setup_completed || !selected_valid {
+        return Err(SwitcherError::Message(
+            "连接环境尚未准备完成，暂时不能结束首次使用流程。".to_string(),
+        ));
+    }
+    record.onboarding_completed = true;
+    save_connection_environment_record(&record)?;
+    app_state()
 }
 
 fn build_next_auth(original: &str, profile: &StoredProfile) -> Result<String, SwitcherError> {
@@ -5611,6 +5677,8 @@ pub fn run() {
             reorder_profiles,
             reveal_profile_api_key,
             prepare_connection_environment,
+            complete_onboarding,
+            update_transport_options,
             prepare_switch,
             switch_profile,
             verify_profile,

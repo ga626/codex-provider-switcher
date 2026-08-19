@@ -37,6 +37,7 @@ import './App.css'
 import {
   deleteProfile,
   checkForUpdate,
+  completeOnboarding,
   createManualBackup,
   deleteCostCalibration,
   isGitHubReleaseBuild,
@@ -60,11 +61,43 @@ import {
   verifyProfile,
 } from './adapter'
 import type { AppState, BackupItem, ConfigurationProtection, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, ResponseProbeObservation, SwitchPreflight, UpdateInfo, ValidationCheck } from './types'
+import type { UpdateInstallProgress } from './adapter'
 
 type ViewId = 'providers' | 'models' | 'switch-check' | 'protection' | 'timeline' | 'lab'
+type GuideChapterId = 'initialization' | 'providers' | 'protection' | 'timeline' | 'lab' | 'overview'
 type NoticeTone = 'success' | 'warning' | 'danger' | 'info'
 type NoticeState = { message: string; tone: NoticeTone }
 type FirstRunPhase = 'consent' | 'preparing' | 'review' | 'ready' | 'failed'
+type GuideProgress = Record<GuideChapterId, { lastStep: number; completedAt?: string; dismissedAt?: string }>
+
+const GUIDE_PROGRESS_KEY = 'signalman-ai-guide-progress-v1'
+
+const guideChapterForView = (view: ViewId): GuideChapterId => {
+  if (view === 'protection') return 'protection'
+  if (view === 'timeline') return 'timeline'
+  if (view === 'lab') return 'lab'
+  return 'providers'
+}
+
+function readGuideProgress(): GuideProgress {
+  const empty = (): GuideProgress => ({
+    initialization: { lastStep: 0 },
+    providers: { lastStep: 0 },
+    protection: { lastStep: 0 },
+    timeline: { lastStep: 0 },
+    lab: { lastStep: 0 },
+    overview: { lastStep: 0 },
+  })
+  try {
+    const stored = window.localStorage.getItem(GUIDE_PROGRESS_KEY)
+    if (!stored) return empty()
+    const parsed = JSON.parse(stored) as Partial<GuideProgress>
+    const fallback = empty()
+    return Object.fromEntries(Object.keys(fallback).map((id) => [id, { ...fallback[id as GuideChapterId], ...parsed[id as GuideChapterId] }])) as GuideProgress
+  } catch {
+    return empty()
+  }
+}
 const FIRST_RUN_FEED = [
   { title: '读取配置位置', detail: '确认当前电脑上要管理的 Codex 配置层' },
   { title: '检查配置文件', detail: '确认配置文件可以读取，避免覆盖未知内容' },
@@ -119,6 +152,38 @@ function errorMessage(error: unknown, fallback: string) {
     if (typeof message === 'string' && message.trim()) return message
   }
   return fallback
+}
+
+function updateFailureMessage(error: unknown, fallback: string) {
+  const detail = errorMessage(error, fallback).toLowerCase()
+  if (detail.includes('timeout') || detail.includes('timed out')) {
+    return '检查更新超时。请确认网络可用；如果 GitHub 需要代理，请在 Windows 中开启系统代理后重试。'
+  }
+  if (detail.includes('proxy') || detail.includes('connection') || detail.includes('network') || detail.includes('dns')) {
+    return '暂时无法连接 GitHub 更新服务。请检查网络；如果你使用代理，请确认已在 Windows 中开启系统代理后重试。'
+  }
+  if (detail.includes('signature') || detail.includes('manifest')) {
+    return '更新包验证未通过，已停止安装。请稍后重试或前往项目发布页确认版本。'
+  }
+  if (detail.includes('http')) {
+    return 'GitHub 更新服务暂时未返回有效结果。请稍后重试。'
+  }
+  return fallback
+}
+
+function updateCheckTime(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function updateProgressLabel(progress: UpdateInstallProgress | null) {
+  if (!progress) return ''
+  if (progress.phase === 'installing') return '下载完成，正在安装并准备重启…'
+  if (!progress.totalBytes) return progress.downloadedBytes > 0 ? '正在下载更新包…' : '正在连接更新包…'
+  const percent = Math.min(100, Math.round((progress.downloadedBytes / progress.totalBytes) * 100))
+  return `正在下载更新包：${percent}%`
 }
 
 function getCheckVisual(check: { ok: boolean; severity: 'required' | 'warning' | 'info' }) {
@@ -459,13 +524,17 @@ function App() {
   const [notice, setNotice] = useState<NoticeState | null>(null)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
+  const [updateProgress, setUpdateProgress] = useState<UpdateInstallProgress | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
   const [restoreConfirm, setRestoreConfirm] = useState<BackupItem | null>(null)
   const [switchConfirm, setSwitchConfirm] = useState<SwitchPreflight | null>(null)
   const [manualModelConfirm, setManualModelConfirm] = useState<string | null>(null)
   const [syncConfirm, setSyncConfirm] = useState(false)
   const [restartNotice, setRestartNotice] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [guideOpen, setGuideOpen] = useState(false)
+  const [guideHubOpen, setGuideHubOpen] = useState(false)
+  const [guideChapter, setGuideChapter] = useState<GuideChapterId | null>(null)
+  const [guideProgress, setGuideProgress] = useState<GuideProgress>(readGuideProgress)
   const [setupDialogOpen, setSetupDialogOpen] = useState(false)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [firstRun, setFirstRun] = useState<boolean | null>(null)
@@ -478,6 +547,7 @@ function App() {
   const [resizingPane, setResizingPane] = useState<'left' | 'right' | null>(null)
   const resizeStart = useRef<{ x: number; left: number; right: number } | null>(null)
   const initialGuideHandled = useRef(false)
+  const guideTriggerRef = useRef<HTMLElement | null>(null)
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -561,8 +631,9 @@ function App() {
           setDraft(toEditable(selected))
         }
         setError(null)
-        setFirstRun(next.connectionEnvironment.status !== 'ready')
-        setFirstRunPhase(next.connectionEnvironment.status === 'ready' ? 'ready' : 'consent')
+        const needsFirstRun = next.connectionEnvironment.status !== 'ready' || !next.connectionEnvironment.onboardingCompleted
+        setFirstRun(needsFirstRun)
+        setFirstRunPhase(needsFirstRun && next.connectionEnvironment.status === 'ready' ? 'ready' : 'consent')
       } catch (err) {
         setError(errorMessage(err, '加载切换器状态失败。'))
       } finally {
@@ -582,6 +653,14 @@ function App() {
     const timeout = window.setTimeout(() => setNotice(null), 5000)
     return () => window.clearTimeout(timeout)
   }, [notice])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(GUIDE_PROGRESS_KEY, JSON.stringify(guideProgress))
+    } catch {
+      // Guide progress is a convenience feature. A blocked local store must not affect the app.
+    }
+  }, [guideProgress])
 
   useEffect(() => {
     let activeRegion: HTMLElement | null = null
@@ -695,7 +774,7 @@ function App() {
       // The backend operation is real; the visible feed gives it enough time
       // to be understood instead of flashing straight to the result screen.
       const [next] = await Promise.all([
-        prepareConnectionEnvironment(layerId),
+        prepareConnectionEnvironment(layerId, true),
         new Promise((resolve) => window.setTimeout(resolve, FIRST_RUN_FEED.length * 600 + 450)),
       ])
       setState(next)
@@ -718,7 +797,17 @@ function App() {
     }
   }
 
-  function enterSignalman() {
+  async function enterSignalman() {
+    setBusy('complete-onboarding')
+    try {
+      const next = await completeOnboarding()
+      setState(next)
+    } catch (err) {
+      setFirstRunError(errorMessage(err, '无法保存首次使用完成状态。请重试。'))
+      return
+    } finally {
+      setBusy(null)
+    }
     setFirstRunTransitioning(true)
     setFirstRun(false)
     setActiveView('providers')
@@ -726,9 +815,29 @@ function App() {
       setFirstRunTransitioning(false)
       if (!initialGuideHandled.current) {
         initialGuideHandled.current = true
-        setGuideOpen(true)
+        setGuideChapter('initialization')
       }
     }, 520)
+  }
+
+  function openGuideHub() {
+    guideTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setGuideHubOpen(true)
+  }
+
+  function openGuideChapter(chapter: GuideChapterId) {
+    guideTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : guideTriggerRef.current
+    setGuideHubOpen(false)
+    setGuideChapter(chapter)
+  }
+
+  function closeGuide() {
+    setGuideChapter(null)
+    window.requestAnimationFrame(() => guideTriggerRef.current?.focus())
+  }
+
+  function updateGuideProgress(chapter: GuideChapterId, next: Partial<GuideProgress[GuideChapterId]>) {
+    setGuideProgress((current) => ({ ...current, [chapter]: { ...current[chapter], ...next } }))
   }
 
   async function saveEditableProfile(nextDraft: EditableProfile, busyLabel: string) {
@@ -829,13 +938,14 @@ function App() {
     }
     if (isStoreManagedBuild) {
       setUpdateBusy(true)
+      setUpdateError(null)
       try {
         const next = await checkForUpdate()
         setUpdateInfo(next)
         await openUpdate(next.releaseUrl)
         setError(null)
       } catch (err) {
-      setError(errorMessage(err, '无法打开 Microsoft Store。'))
+        setUpdateError(errorMessage(err, '无法打开 Microsoft Store。'))
       } finally {
         setUpdateBusy(false)
       }
@@ -845,22 +955,28 @@ function App() {
       return
     }
     if (updateInfo?.available) {
+      setUpdateBusy(true)
+      setUpdateError(null)
+      setUpdateProgress({ phase: 'downloading', downloadedBytes: 0 })
       try {
-        await openUpdate(updateInfo.downloadUrl ?? updateInfo.releaseUrl)
-        setError(null)
+        await openUpdate(updateInfo.downloadUrl ?? updateInfo.releaseUrl, setUpdateProgress)
       } catch (err) {
-      setError(errorMessage(err, '无法打开更新下载。'))
+        setUpdateError(updateFailureMessage(err, '下载更新失败。'))
+      } finally {
+        setUpdateBusy(false)
+        setUpdateProgress(null)
       }
       return
     }
 
     setUpdateBusy(true)
+    setUpdateProgress(null)
+    setUpdateError(null)
     try {
       const next = await checkForUpdate()
       setUpdateInfo(next)
-      setError(null)
     } catch (err) {
-      setError(errorMessage(err, '检查更新失败。'))
+      setUpdateError(updateFailureMessage(err, '检查更新失败。'))
     } finally {
       setUpdateBusy(false)
     }
@@ -979,7 +1095,7 @@ function App() {
             <p>服务商连接管理</p>
           </div>
         </div>
-        <nav className="top-navigation" aria-label="主导航">
+        <nav className="top-navigation" aria-label="主导航" data-guide-target="overview.navigation">
           {primaryNavItems.map((item) => (
             <button key={item.id} className={`top-nav-item ${activeView === item.id || (item.id === 'providers' && ['models', 'switch-check'].includes(activeView)) ? 'selected' : ''}`} type="button" aria-label={item.label} title={item.label} onClick={() => setActiveView(item.id)}>
               {item.icon}
@@ -989,12 +1105,15 @@ function App() {
         </nav>
         <div className="title-actions">
           {state.runtimeMode === 'browser_preview_mock' && <span className="preview-status" title="开发预览不会读取本机配置，也不会连接、验证或切换真实服务商。">预览 · 只读</span>}
-          <div className="provider-command-bar" aria-label="当前正在使用的服务商">
+          <div className="provider-command-bar" aria-label="当前正在使用的服务商" data-guide-target="overview.current">
             <span className="provider-current-label">正在使用</span>
             <strong>{currentFileProfile?.name ?? '未识别'}</strong>
             <span className="provider-current-model">{currentFileProfile?.model ? providerModelLabel(currentFileProfile.model) : '未设置模型'}</span>
           </div>
-          <button className="icon-button" type="button" onClick={() => setSettingsOpen(true)} title="应用设置" aria-label="应用设置">
+          <button className="icon-button" type="button" onClick={openGuideHub} title="使用说明" aria-label="打开使用说明" data-guide-target="overview.help">
+            <CircleHelp size={17} />
+          </button>
+          <button className="icon-button" type="button" onClick={() => setSettingsOpen(true)} title="应用设置" aria-label="应用设置" data-guide-target="overview.settings">
             <Settings size={17} />
           </button>
         </div>
@@ -1064,7 +1183,7 @@ function App() {
                 className="provider-add-transition-target"
                 data-transition-target="provider-add"
               >
-                <button type="button" onClick={startNewProfile} disabled={busy !== null} aria-label="新增服务商" data-tour="provider-add">
+                <button type="button" onClick={startNewProfile} disabled={busy !== null} aria-label="新增服务商" data-tour="provider-add" data-guide-target="providers.add">
                   <Plus size={15} />
                 </button>
               </span>
@@ -1072,7 +1191,7 @@ function App() {
 
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleProviderDragEnd}>
               <SortableContext items={state.profiles.map((profile) => profile.id)} strategy={verticalListSortingStrategy}>
-                <div className="provider-list scroll-region" role="listbox" aria-label="服务商列表" data-tour="provider-list">
+                <div className="provider-list scroll-region" role="listbox" aria-label="服务商列表" data-tour="provider-list" data-guide-target="providers.list">
                   {state.profiles.map((profile, index) => (
                     <SortableProviderRow
                       key={profile.id}
@@ -1098,6 +1217,7 @@ function App() {
             requiredFailures={requiredFailures}
             riskCount={riskCount}
             selectedModelCatalog={selectedModelCatalog}
+            onOpenGuide={() => openGuideChapter(guideChapterForView(activeView))}
           />
           <div className="workspace-scroll">
             {activeView === 'providers' && (
@@ -1152,7 +1272,7 @@ function App() {
               />
             )}
             {activeView === 'timeline' && <TimelineWorkspace state={state} />}
-            {activeView === 'lab' && <LabWorkspace state={state} selectedProfile={selectedProfile} busy={busy} runAction={runAction} />}
+            {activeView === 'lab' && <LabWorkspace state={state} selectedProfile={selectedProfile} busy={busy} runAction={runAction} onOpenGuide={() => openGuideChapter('lab')} />}
           </div>
         </section>
         {activeView === 'providers' && <>
@@ -1172,7 +1292,7 @@ function App() {
           onVerify={() => selectedProfile && void runAction('verify-profile', () => verifyProfile(selectedProfile.id))}
           onSwitch={() => void requestSwitch()}
           onOpenSetup={() => setSetupDialogOpen(true)}
-          onOpenGuide={() => setGuideOpen(true)}
+          onOpenGuide={() => openGuideChapter('providers')}
           availabilityChecks={availabilityChecks}
           profileConfigChecks={profileConfigChecks}
           configChecks={state.checks}
@@ -1187,7 +1307,7 @@ function App() {
           <span>本机资料仅保存在此设备</span>
         </div>
         <div className="statusbar-right">
-          <button className="statusbar-link" type="button" onClick={() => setGuideOpen(true)}>查看使用说明</button>
+          <button className="statusbar-link" type="button" onClick={openGuideHub} data-guide-target="overview.statusbar-help">使用说明</button>
           {state.runtimeMode === 'tauri_native' && <span className="build-identity statusbar-build" title={__CODEX_RELEASE_CHANNEL__ === 'development' ? '开发版使用隔离数据；稳定版和真实 Codex 配置不会被读取或修改。' : '用于确认当前运行的发布渠道'}>{buildIdentityLabel}</span>}
         </div>
       </footer>
@@ -1212,6 +1332,8 @@ function App() {
           buildChannelLabel={buildChannelLabel}
           updateInfo={updateInfo}
           updateBusy={updateBusy}
+          updateProgress={updateProgress}
+          updateError={updateError}
           updateSupported={state.runtimeMode === 'tauri_native' && (isStoreManagedBuild || isGitHubReleaseBuild)}
           storeManaged={isStoreManagedBuild}
           onClose={() => setSettingsOpen(false)}
@@ -1222,7 +1344,20 @@ function App() {
       )}
       {feedbackOpen && <FeedbackDialog state={state} selectedProfile={selectedProfile} onClose={() => setFeedbackOpen(false)} onCopied={() => setNotice({ message: '脱敏反馈已复制', tone: 'success' })} onSubmitted={(receipt) => setNotice({ message: `问题已提交给维护者：${receipt}`, tone: 'success' })} />}
       {setupDialogOpen && <ConnectionEnvironmentDialog environment={state.connectionEnvironment} busy={busy !== null} onClose={() => setSetupDialogOpen(false)} onConfirm={(layerId) => { setSetupDialogOpen(false); void runAction('prepare-connection-environment', () => prepareConnectionEnvironment(layerId)) }} />}
-      {guideOpen && <GettingStartedDialog environment={state.connectionEnvironment} onClose={() => setGuideOpen(false)} onOpenProviders={() => { setActiveView('providers') }} />}
+      {guideHubOpen && <GuideHubDialog
+        progress={guideProgress}
+        onClose={() => { setGuideHubOpen(false); window.requestAnimationFrame(() => guideTriggerRef.current?.focus()) }}
+        onStart={openGuideChapter}
+      />}
+      {guideChapter && <ProductGuideTour
+        chapter={guideChapter}
+        environment={state.connectionEnvironment}
+        progress={guideProgress[guideChapter]}
+        onClose={closeGuide}
+        onOpenView={setActiveView}
+        onProgress={(next) => updateGuideProgress(guideChapter, next)}
+        onContinueProviders={() => openGuideChapter('providers')}
+      />}
     </main>
   )
 }
@@ -1233,12 +1368,14 @@ function WorkspaceHeader({
   requiredFailures,
   riskCount,
   selectedModelCatalog,
+  onOpenGuide,
 }: {
   activeView: ViewId
   selectedProfile: ProviderProfile | undefined
   requiredFailures: number
   riskCount: number
   selectedModelCatalog: ModelCatalog | undefined
+  onOpenGuide: () => void
 }) {
   if (activeView === 'lab') return null
 
@@ -1277,6 +1414,7 @@ function WorkspaceHeader({
           <h2>服务商配置</h2>
           <p>{selectedProfile ? `正在编辑 ${selectedProfile.name}；保存、模型、检查和切换都在这里完成。` : '新增或选择一个服务商后，按右侧提示继续。'}</p>
         </div>
+        <button className="icon-button workspace-guide-button" type="button" onClick={onOpenGuide} aria-label="查看服务商使用说明" title="查看服务商使用说明" data-guide-target="providers.page-help"><CircleHelp size={16} /></button>
       </header>
     )
   }
@@ -1287,6 +1425,7 @@ function WorkspaceHeader({
         <h2>{copy[activeView].title}</h2>
         <p>{copy[activeView].note}</p>
       </div>
+      <button className="icon-button workspace-guide-button" type="button" onClick={onOpenGuide} aria-label={`查看${copy[activeView].title}使用说明`} title={`查看${copy[activeView].title}使用说明`} data-guide-target={`${guideChapterForView(activeView)}.page-help`}><CircleHelp size={16} /></button>
       {activeView === 'switch-check' && <span className={`workspace-badge ${selectedProfile && requiredFailures === 0 ? (riskCount > 0 ? 'warning' : 'ok') : 'warning'}`}>
         {!selectedProfile ? '未选择服务商' : requiredFailures > 0 ? `${requiredFailures} 项阻止切换` : riskCount > 0 ? `可切换，但有 ${riskCount} 项风险` : '可以切换'}
       </span>}
@@ -1512,14 +1651,14 @@ function ProviderWorkspace({
 
   return (
     <div className="workspace-stack">
-      {environment.status !== 'ready' && <section className={`environment-setup ${environment.status}`} data-tour="environment-setup">
+      {environment.status !== 'ready' && <section className={`environment-setup ${environment.status}`} data-tour="environment-setup" data-guide-target="providers.environment">
         <div>
           <span className="setup-step-number">1</span>
           <div className="setup-copy"><strong>先准备连接环境</strong>
           <p>{environment.detail}</p>
           </div>
         </div>
-        <button className="primary-button" type="button" disabled={busy !== null} onClick={onOpenSetup} data-tour="environment-setup-action"><ShieldCheck size={16} />一键准备连接环境</button>
+        <button className="primary-button" type="button" disabled={busy !== null} onClick={onOpenSetup} data-tour="environment-setup-action" data-guide-target="providers.environment"><ShieldCheck size={16} />一键准备连接环境</button>
       </section>}
       <section className="connection-banner">
         <div className="connection-status-icon"><PlugZap size={20} /></div>
@@ -1540,16 +1679,16 @@ function ProviderWorkspace({
           </div>
            <span className="section-meta">凭据仅保存在此设备</span>
         </div>
-        <div className="form-grid" data-tour="provider-form">
-          <label data-tour="provider-name">
+        <div className="form-grid" data-tour="provider-form" data-guide-target="providers.form">
+          <label data-tour="provider-name" data-guide-target="providers.name">
             服务商名称
             <input value={draft.name} onChange={(event) => updateDraft('name', event.target.value)} placeholder="输入服务商名称" />
           </label>
-          <label data-tour="provider-base-url">
+          <label data-tour="provider-base-url" data-guide-target="providers.endpoint">
             接口地址
             <input value={draft.baseUrl} onChange={(event) => updateDraft('baseUrl', event.target.value)} placeholder="https://api.provider.com/v1" />
           </label>
-          <label className="model-picker-field" data-tour="provider-model">
+          <label className="model-picker-field" data-tour="provider-model" data-guide-target="providers.model">
             默认模型
             <div className="model-picker-input">
               <div className="model-combobox-wrap">
@@ -1563,7 +1702,7 @@ function ProviderWorkspace({
             </div>
             {providerModelLabel(draft.model) !== draft.model && <small className="model-purpose-note">用途：{providerModelLabel(draft.model)}。保存后会作为 Codex 默认模型。</small>}
           </label>
-          <label data-tour="provider-api-key">
+          <label data-tour="provider-api-key" data-guide-target="providers.key">
             访问密钥
             <div className="key-field">
               <KeyRound size={15} />
@@ -1594,8 +1733,8 @@ function ProviderWorkspace({
             <textarea value={draft.note} onChange={(event) => updateDraft('note', event.target.value)} rows={3} placeholder="用于识别这条连接" />
           </label>
         </div>
-        <div className="command-row">
-          <button className="primary-button" type="button" disabled={!draft.name || !draft.baseUrl || busy !== null} onClick={() => void saveCurrentProfile()} data-tour="save-provider">
+        <div className="command-row" data-guide-target="providers.actions">
+          <button className="primary-button" type="button" disabled={!draft.name || !draft.baseUrl || busy !== null} onClick={() => void saveCurrentProfile()} data-tour="save-provider" data-guide-target="providers.save">
             <Save size={16} />
             保存更改
           </button>
@@ -1621,7 +1760,7 @@ function ProviderWorkspace({
             <Trash2 size={16} />
             删除服务商
           </button>
-          {feedbackAvailable && <button className="ghost-button feedback-action" type="button" onClick={onOpenFeedback} disabled={busy !== null}>
+          {feedbackAvailable && <button className="ghost-button feedback-action" type="button" onClick={onOpenFeedback} disabled={busy !== null} data-guide-target="providers.feedback">
             <MessageSquare size={16} />
             报告兼容问题
           </button>}
@@ -1704,8 +1843,8 @@ function ConnectionDock({
       <button className="primary-button" type="button" onClick={onOpenSetup} disabled={busy !== null}><ShieldCheck size={16} />一键准备连接环境</button>
     </section>}
     <section className="dock-action-stack" aria-label="检查与切换操作">
-      <button className={`primary-button dock-primary ${isCurrent ? 'current' : ''}`} type="button" disabled={switchAction.disabled || busy !== null} onClick={switchAction.onClick} data-tour="switch-preflight"><PlugZap size={16} />{switchAction.label}</button>
-      <button className="ghost-button dock-secondary" type="button" disabled={testAction.disabled || busy !== null} onClick={testAction.onClick} data-tour="run-availability"><Activity size={15} />{testAction.label}</button>
+      <button className={`primary-button dock-primary ${isCurrent ? 'current' : ''}`} type="button" disabled={switchAction.disabled || busy !== null} onClick={switchAction.onClick} data-tour="switch-preflight" data-guide-target="providers.switch"><PlugZap size={16} />{switchAction.label}</button>
+      <button className="ghost-button dock-secondary" type="button" disabled={testAction.disabled || busy !== null} onClick={testAction.onClick} data-tour="run-availability" data-guide-target="providers.availability"><Activity size={15} />{testAction.label}</button>
     </section>
     <dl className="dock-status-list">
       <div className={environmentReady ? 'ok' : 'warning'}><dt>连接环境</dt><dd>{environmentReady ? '已准备' : '需要准备'}</dd></div>
@@ -1789,7 +1928,7 @@ function FeedbackDialog({ state, selectedProfile, onClose, onCopied, onSubmitted
 type TourStep = { title: string; detail: string; target: string }
 type TourRect = { top: number; left: number; right: number; bottom: number; width: number; height: number }
 
-function GettingStartedDialog({ environment, onClose, onOpenProviders }: { environment: AppState['connectionEnvironment']; onClose: () => void; onOpenProviders: () => void }) {
+export function GettingStartedDialog({ environment, onClose, onOpenProviders }: { environment: AppState['connectionEnvironment']; onClose: () => void; onOpenProviders: () => void }) {
   const allSteps: TourStep[] = [
     { title: '先统一连接环境', detail: '新安装的电脑可能有不同的 Codex 配置。先点“一键准备连接环境”，选择配置层并创建恢复点，之后才开始检查服务商。', target: 'environment-setup-action' },
     { title: '添加服务商', detail: '在左侧点击加号，新增一个服务商。已有配置可以直接点选，不必重复添加。', target: 'provider-add' },
@@ -1893,6 +2032,232 @@ function GettingStartedDialog({ environment, onClose, onOpenProviders }: { envir
       {step === 0 && <p className="guide-status">当前状态：{environment.detail}</p>}
       {targetMissing && <p className="guide-status guide-status-warning">当前页面暂时没有这个控件。你可以先切换到服务商页，教学会在控件出现后继续定位。</p>}
       <div className="command-row"><button className="ghost-button" type="button" onClick={onClose}>稍后再说</button>{step > 0 && <button className="ghost-button" type="button" onClick={() => setStep((value) => value - 1)}>上一步</button>}<button className="primary-button" type="button" onClick={nextStep}>{step < steps.length - 1 ? '下一步' : '完成并开始使用'}</button></div>
+    </section>
+  </div>
+}
+
+type GuideStep = { id: string; title: string; detail: string; target: string; view?: ViewId }
+type GuideChapter = { title: string; summary: string; steps: GuideStep[] }
+
+const GUIDE_CHAPTERS: Record<GuideChapterId, GuideChapter> = {
+  initialization: {
+    title: '初始化配置', summary: '准备连接环境并跑通第一个服务商。', steps: [
+      { id: 'environment', title: '先准备连接环境', detail: '新电脑的 Codex 配置可能不同。先创建恢复点，再只统一 Signalman 管理的连接字段；项目、MCP、插件和历史记录不会被改动。', target: 'providers.environment', view: 'providers' },
+      { id: 'add', title: '新增服务商', detail: '点击加号新增一条连接；已有服务商直接从列表选择，不需要重复添加。', target: 'providers.add', view: 'providers' },
+      { id: 'name', title: '填写服务商名称', detail: '给这条连接起一个容易认出的名字，例如“公司中转站”。', target: 'providers.name', view: 'providers' },
+      { id: 'endpoint', title: '填写接口地址', detail: '粘贴服务商提供的 OpenAI 兼容接口地址，通常以 /v1 结尾。', target: 'providers.endpoint', view: 'providers' },
+      { id: 'key', title: '填写访问密钥', detail: '密钥默认隐藏；点击眼睛只会在本机临时显示，反馈内容不会包含密钥。', target: 'providers.key', view: 'providers' },
+      { id: 'model', title: '选择默认模型', detail: '输入“5.6”可筛选模型，也可以展开列表滚动选择。目录为空时先保存，再点刷新按钮。', target: 'providers.model', view: 'providers' },
+      { id: 'save', title: '保存配置', detail: '保存后，右侧检查会读取这条新配置。未保存的修改不能直接拿去测试或切换。', target: 'providers.save', view: 'providers' },
+      { id: 'availability', title: '运行可用性测试', detail: '这里会实际请求当前服务商，并分别显示超时、限流、鉴权或协议问题；它不会切换 Codex 配置。', target: 'providers.availability', view: 'providers' },
+      { id: 'switch', title: '检查并切换', detail: '最后执行检查并切换。安全阻止不能绕过；使用风险会明确说明，并在确认前让你选择是否继续。', target: 'providers.switch', view: 'providers' },
+    ],
+  },
+  providers: {
+    title: '服务商', summary: '管理已有连接、模型、测试和切换。', steps: [
+      { id: 'list', title: '服务商列表', detail: '点击条目开始编辑；可用拖动手柄或键盘调整显示顺序。', target: 'providers.list', view: 'providers' },
+      { id: 'add', title: '新增一条连接', detail: '加号会打开一条空白配置，不会覆盖现有服务商。', target: 'providers.add', view: 'providers' },
+      { id: 'form', title: '基础配置', detail: '名称、接口、默认模型和访问密钥在这里填写；备注只用于本机识别。', target: 'providers.form', view: 'providers' },
+      { id: 'model', title: '模型选择与刷新', detail: '模型框支持输入筛选和滚动选择；右侧刷新只请求当前服务商的模型目录。', target: 'providers.model', view: 'providers' },
+      { id: 'save', title: '保存与管理', detail: '保存后才会更新检查结果。这里还可以复制配置、设为默认或删除不再需要的服务商。', target: 'providers.actions', view: 'providers' },
+      { id: 'availability', title: '可用性测试', detail: '测试会请求当前服务商，不会改写 Codex 配置。结果会区分限流、鉴权、超时和响应格式。', target: 'providers.availability', view: 'providers' },
+      { id: 'switch', title: '检查并切换', detail: '切换前会重新核对当前配置并创建恢复点。安全检查和使用风险是两种不同状态。', target: 'providers.switch', view: 'providers' },
+      { id: 'feedback', title: '报告兼容问题', detail: '服务商异常且需要维护者适配时会出现此按钮。提交内容不含密钥、配置正文、文件路径或响应原文。', target: 'providers.feedback', view: 'providers' },
+    ],
+  },
+  protection: {
+    title: '安全与恢复', summary: '查看保护范围、备份和恢复入口。', steps: [
+      { id: 'baseline', title: '首次启动基线', detail: '这是首次写入前的恢复点，会永久保留，用于确认原始状态。', target: 'protection.baseline', view: 'protection' },
+      { id: 'environment', title: '重新准备连接环境', detail: '当连接设置需要重新扫描时使用。它会创建恢复点，只处理 Signalman 管理的连接字段。', target: 'protection.reprepare', view: 'protection' },
+      { id: 'scope', title: '保护范围', detail: '这里明确区分本工具管理的服务商、模型和接口地址，以及始终保持不变的 MCP、插件和项目设置。', target: 'protection.scope', view: 'protection' },
+      { id: 'backup', title: '立即备份当前状态', detail: '手动备份适合保存一个已验证可用的状态。达到数量上限时会先提示你将替换最早的一条。', target: 'protection.manual-backup', view: 'protection' },
+      { id: 'groups', title: '恢复点分类', detail: '首次基线、自动保护和手动保存分别说明来源和保留方式。', target: 'protection.groups', view: 'protection' },
+      { id: 'restore', title: '安全恢复', detail: '恢复前需要输入“恢复”确认。它只回退 Signalman 写入的字段，不覆盖你的 MCP、插件和项目设置。', target: 'protection.restore', view: 'protection' },
+    ],
+  },
+  timeline: {
+    title: '活动记录', summary: '查看最近的保存、检查、切换和恢复动作。', steps: [
+      { id: 'activity', title: '活动记录', detail: '每条记录显示发生时间、动作结果和必要说明，方便你确认最近一次操作做了什么。', target: 'timeline.list', view: 'timeline' },
+      { id: 'tone', title: '状态颜色', detail: '绿色表示完成，黄色表示需要留意，红色表示失败或阻止；请优先查看最靠前的一条。', target: 'timeline.item', view: 'timeline' },
+      { id: 'read-only', title: '只读排查入口', detail: '这里不会修改配置。遇到问题时先核对最近一条记录，再回到对应工作区处理。', target: 'timeline.list', view: 'timeline' },
+    ],
+  },
+  lab: {
+    title: '实验室', summary: '用同一固定测试记录费用并比较性价比。', steps: [
+      { id: 'model', title: '固定测试模型', detail: '排名只比较同一模型和同一固定测试请求；切换模型后会显示它自己的结果。', target: 'lab.model', view: 'lab' },
+      { id: 'ranking', title: '成本结果与排名', detail: '保存一条样本就会显示本次成本；有两个服务商后才会出现横向排名。', target: 'lab.ranking', view: 'lab' },
+      { id: 'official', title: '官方对照与评分', detail: '官方对照表示本次成本占官方估算成本的百分比；评分以本表最低成本为 100 分。', target: 'lab.ranking', view: 'lab' },
+      { id: 'samples', title: '管理原始样本', detail: '展开某个服务商可查看原始样本并删除错误记录。多次样本会取中位数，建议测 3 次但不强制。', target: 'lab.ranking', view: 'lab' },
+      { id: 'provider', title: '选择要测试的服务商', detail: '先选择服务商，再确认固定模型。测试不会切换 Codex 配置。', target: 'lab.provider', view: 'lab' },
+      { id: 'probe', title: '运行固定测试', detail: '系统会发送一条极短请求；如果响应里有可用费用信息，会自动填入测试额度。', target: 'lab.probe', view: 'lab' },
+      { id: 'cost', title: '填写费用字段', detail: '充值金额填写人民币；平台实际额度和测试额度只需来自同一个平台余额体系，不需要与其他服务商统一单位。', target: 'lab.cost-fields', view: 'lab' },
+      { id: 'save', title: '计算并保存', detail: '人民币成本按充值金额乘以测试额度再除以平台实际额度计算。保存后会立即更新上方结果。', target: 'lab.save', view: 'lab' },
+    ],
+  },
+  overview: {
+    title: '整体功能', summary: '认识工作区、状态栏、设置、更新和反馈入口。', steps: [
+      { id: 'navigation', title: '主工作区', detail: '顶部在服务商、安全与恢复、活动记录和实验室之间切换；模型目录和切换前检查属于服务商上下文。', target: 'overview.navigation' },
+      { id: 'current', title: '当前正在使用', detail: '这里显示当前 Codex 配置识别到的服务商和模型，不代表其他服务商已经被删除。', target: 'overview.current' },
+      { id: 'help', title: '使用说明目录', detail: '任何时候都可以从问号或状态栏打开目录，选择需要重看的章节。', target: 'overview.help' },
+      { id: 'settings', title: '应用设置', detail: '设置中包含开机启动、备份数量和检查更新；不会把你的本机资料上传到外部。', target: 'overview.settings' },
+      { id: 'status', title: '状态栏', detail: '状态栏显示当前操作、连接环境状态和本机资料边界。', target: 'overview.statusbar-help' },
+    ],
+  },
+}
+
+function GuideHubDialog({ progress, onClose, onStart }: { progress: GuideProgress; onClose: () => void; onStart: (chapter: GuideChapterId) => void }) {
+  const chapterIds = Object.keys(GUIDE_CHAPTERS) as GuideChapterId[]
+  return <ModalDialog className="guide-hub-dialog" labelledBy="guide-hub-title" onClose={onClose}>
+    <div className="section-heading-row">
+      <div><span className="eyebrow">使用说明</span><h2 id="guide-hub-title">选择要了解的功能</h2></div>
+      <button className="icon-button" type="button" onClick={onClose} aria-label="关闭使用说明" data-dialog-initial-focus><X size={16} /></button>
+    </div>
+    <p className="guide-hub-intro">初始化配置会在首次准备完成后自动打开。其他说明可按当前需要随时重看。</p>
+    <div className="guide-chapter-list">
+      {chapterIds.map((id) => {
+        const chapter = GUIDE_CHAPTERS[id]
+        const state = progress[id]
+        const status = state.completedAt ? '已看过' : state.dismissedAt ? `继续第 ${Math.min(state.lastStep + 1, chapter.steps.length)} 步` : '未开始'
+        return <section className="guide-chapter-card" key={id}>
+          <div><strong>{chapter.title}</strong><span>{chapter.summary}</span><small>{chapter.steps.length} 步 · {status}</small></div>
+          <button className="ghost-button" type="button" onClick={() => onStart(id)}>{state.completedAt ? '重新查看' : state.dismissedAt ? '继续' : '开始'}</button>
+        </section>
+      })}
+    </div>
+  </ModalDialog>
+}
+
+function ProductGuideTour({ chapter, environment, progress, onClose, onOpenView, onProgress, onContinueProviders }: {
+  chapter: GuideChapterId
+  environment: AppState['connectionEnvironment']
+  progress: GuideProgress[GuideChapterId]
+  onClose: () => void
+  onOpenView: (view: ViewId) => void
+  onProgress: (next: Partial<GuideProgress[GuideChapterId]>) => void
+  onContinueProviders: () => void
+}) {
+  const chapterDefinition = GUIDE_CHAPTERS[chapter]
+  const steps = chapter === 'initialization' && environment.status === 'ready' ? chapterDefinition.steps.slice(1) : chapterDefinition.steps
+  const [step, setStep] = useState(() => Math.min(progress.lastStep, Math.max(0, steps.length - 1)))
+  const [rect, setRect] = useState<TourRect | null>(null)
+  const [targetMissing, setTargetMissing] = useState(false)
+  const [cardPosition, setCardPosition] = useState<{ top: number; left: number } | null>(null)
+  const cardRef = useRef<HTMLElement | null>(null)
+  const current = steps[Math.min(step, steps.length - 1)]
+
+  useEffect(() => {
+    setStep(Math.min(progress.lastStep, Math.max(0, steps.length - 1)))
+  }, [chapter, progress.lastStep, steps.length])
+
+  useLayoutEffect(() => {
+    if (current.view) onOpenView(current.view)
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    let frame = 0
+    let missingTimer: number | undefined
+    let observer: ResizeObserver | undefined
+    const measure = () => {
+      const element = document.querySelector<HTMLElement>(`[data-guide-target="${current.target}"]`)
+      if (!element || element.offsetParent === null) {
+        setRect(null)
+        if (missingTimer === undefined) missingTimer = window.setTimeout(() => setTargetMissing(true), 450)
+        return
+      }
+      if (missingTimer !== undefined) window.clearTimeout(missingTimer)
+      missingTimer = undefined
+      setTargetMissing(false)
+      const bounds = element.getBoundingClientRect()
+      if (bounds.top < 18 || bounds.bottom > window.innerHeight - 18) element.scrollIntoView({ block: 'nearest', behavior: media.matches ? 'auto' : 'smooth' })
+      const read = () => {
+        const next = element.getBoundingClientRect()
+        setRect({ top: next.top, left: next.left, right: next.right, bottom: next.bottom, width: next.width, height: next.height })
+      }
+      read()
+      observer?.disconnect()
+      observer = new ResizeObserver(read)
+      observer.observe(element)
+    }
+    const schedule = () => { window.cancelAnimationFrame(frame); frame = window.requestAnimationFrame(measure) }
+    frame = window.requestAnimationFrame(measure)
+    window.addEventListener('resize', schedule)
+    window.addEventListener('scroll', schedule, true)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      if (missingTimer !== undefined) window.clearTimeout(missingTimer)
+      observer?.disconnect()
+      window.removeEventListener('resize', schedule)
+      window.removeEventListener('scroll', schedule, true)
+    }
+  }, [current.target, current.view, onOpenView])
+
+  useLayoutEffect(() => {
+    const update = () => {
+      const card = cardRef.current
+      if (!card) return
+      const margin = 18
+      const cardWidth = card.offsetWidth
+      const cardHeight = card.offsetHeight
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      if (!rect) {
+        setCardPosition({
+          top: Math.max(margin, (viewportHeight - cardHeight) / 2),
+          left: Math.max(margin, (viewportWidth - cardWidth) / 2),
+        })
+        return
+      }
+      const below = rect.bottom + 16
+      const above = rect.top - cardHeight - 16
+      const top = below + cardHeight <= viewportHeight - margin
+        ? below
+        : above >= margin
+          ? above
+          : Math.min(viewportHeight - cardHeight - margin, Math.max(margin, below))
+      const left = Math.min(viewportWidth - cardWidth - margin, Math.max(margin, rect.left))
+      setCardPosition({ top: Math.max(margin, top), left: Math.max(margin, left) })
+    }
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [rect, step, targetMissing, chapter])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); onProgress({ lastStep: step, dismissedAt: new Date().toISOString() }); onClose() } }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [onClose, onProgress, step])
+
+  useLayoutEffect(() => {
+    const card = cardRef.current
+    if (!card) return
+    card.focus()
+  }, [chapter, step])
+
+  const advance = () => {
+    if (step < steps.length - 1) {
+      const next = step + 1
+      setStep(next)
+      onProgress({ lastStep: next, dismissedAt: undefined })
+      return
+    }
+    onProgress({ lastStep: 0, completedAt: new Date().toISOString(), dismissedAt: undefined })
+    onClose()
+  }
+  const dismiss = () => { onProgress({ lastStep: step, dismissedAt: new Date().toISOString() }); onClose() }
+
+  return <div className="tour-layer" role="presentation">
+    <div className="tour-scrim" aria-hidden="true" />
+    {rect && <div className="tour-spotlight" style={{ top: rect.top - 8, left: rect.left - 8, width: rect.width + 16, height: rect.height + 16 }} />}
+    <section ref={cardRef} tabIndex={-1} className={`tour-card ${cardPosition || targetMissing ? '' : 'is-unpositioned'}`} style={cardPosition ? { top: cardPosition.top, left: cardPosition.left } : undefined} role="dialog" aria-modal="true" aria-labelledby="product-guide-title">
+      <div className="getting-started-progress" style={{ gridTemplateColumns: `repeat(${steps.length}, 1fr)` }} aria-label={`第 ${step + 1} 步，共 ${steps.length} 步`}>{steps.map((item, index) => <span key={item.id} className={index <= step ? 'active' : ''} />)}</div>
+      <div className="tour-card-heading"><span className="tour-step-index">{step + 1}</span><div><span className="eyebrow">{chapterDefinition.title} · {step + 1}/{steps.length}</span><h2 id="product-guide-title">{current.title}</h2></div><button className="icon-button" type="button" onClick={dismiss} aria-label="关闭使用说明"><X size={16} /></button></div>
+      <p>{current.detail}</p>
+      {targetMissing && <p className="guide-status guide-status-warning">当前状态下没有这个控件。你可以跳过此步，或稍后从使用说明目录重新打开。</p>}
+      <div className="command-row guide-tour-actions">
+        <button className="ghost-button" type="button" onClick={dismiss}>稍后再说</button>
+        {step > 0 && <button className="ghost-button" type="button" onClick={() => { const previous = step - 1; setStep(previous); onProgress({ lastStep: previous }) }}>上一步</button>}
+        {chapter === 'initialization' && step === steps.length - 1 && <button className="ghost-button" type="button" onClick={() => { onProgress({ lastStep: 0, completedAt: new Date().toISOString() }); onContinueProviders() }}>继续了解服务商</button>}
+        <button className="primary-button" type="button" onClick={advance}>{step < steps.length - 1 ? '下一步' : '完成并开始使用'}</button>
+      </div>
     </section>
   </div>
 }
@@ -2165,7 +2530,7 @@ function ConfigurationProtectionWorkspace({
       {items.length > 0 ? <div className="recovery-list">{items.map((backup) => (
         <div className="recovery-row" key={backup.id}>
           <div><strong>{backupTitle[backup.kind]}</strong><span>{backup.time} · {backup.files} 个文件</span><div className="recovery-categories">{backup.fileCategories.map((category) => <span key={category}>{category}</span>)}</div></div>
-          <button className="danger-button" type="button" onClick={() => onRestoreRequested(backup)} disabled={busy !== null} title={backup.restoreDetail}><RotateCcw size={16} />安全恢复</button>
+          <button className="danger-button" type="button" onClick={() => onRestoreRequested(backup)} disabled={busy !== null} title={backup.restoreDetail} data-guide-target="protection.restore"><RotateCcw size={16} />安全恢复</button>
         </div>
       ))}</div> : <p className="section-meta">暂时没有恢复点。</p>}
     </section>
@@ -2173,7 +2538,7 @@ function ConfigurationProtectionWorkspace({
   return (
     <div className="workspace-stack">
       <section className="surface-panel protection-overview">
-        <div className="protection-hero">
+        <div className="protection-hero" data-guide-target="protection.baseline">
           <div>
             <span className="eyebrow">备份状态</span>
             <h3>{protection.baselineReady ? '首次启动基线备份已就绪' : '首次启动基线备份尚未完成'}</h3>
@@ -2181,11 +2546,11 @@ function ConfigurationProtectionWorkspace({
           </div>
           <ShieldCheck size={34} aria-hidden="true" />
         </div>
-        <div className="reprepare-environment-row">
+        <div className="reprepare-environment-row" data-guide-target="protection.reprepare">
           <div><strong>连接环境</strong><span>重新扫描配置层并创建恢复点，只准备 Signalman 管理的连接设置。</span></div>
           <button className="ghost-button" type="button" onClick={onOpenSetup} disabled={busy !== null}><RefreshCcw size={16} />重新准备连接环境</button>
         </div>
-        <div className="protection-scope">
+        <div className="protection-scope" data-guide-target="protection.scope">
           <div>
             <span className="eyebrow">本工具管理</span>
             <strong>服务商、模型和接口地址</strong>
@@ -2218,7 +2583,7 @@ function ConfigurationProtectionWorkspace({
       <section className="surface-panel recovery-panel">
         <div className="section-heading-row">
           <div><span className="eyebrow">恢复中心</span><h3>已保护的恢复点</h3></div>
-          <div className="recovery-actions">
+          <div className="recovery-actions" data-guide-target="protection.manual-backup">
             <span className="section-meta">自动保护保留 {backupPolicy.automaticLimit} 个；手动保存保留 {backupPolicy.manualLimit} 个。</span>
             <button className="primary-button" type="button" onClick={() => {
               if (!manualBackupLimitReached) {
@@ -2234,9 +2599,9 @@ function ConfigurationProtectionWorkspace({
             </button>
           </div>
         </div>
-        <RecoveryGroup title="首次基线" note="首次运行前的原始状态，只保留一份。" items={baselineBackups} permanent />
+        <div data-guide-target="protection.groups"><RecoveryGroup title="首次基线" note="首次运行前的原始状态，只保留一份。" items={baselineBackups} permanent />
         <RecoveryGroup title="自动保护" note="每天首次打开、切换前和恢复前自动保存。" items={automaticBackups} />
-        <RecoveryGroup title="手动保存" note="由你主动保存当前可用状态。" items={manualBackups} />
+        <RecoveryGroup title="手动保存" note="由你主动保存当前可用状态。" items={manualBackups} /></div>
         {historicalBackups.length > 0 && <details className="historical-backups"><summary>历史项目（{historicalBackups.length}）</summary><p>这些旧目录不会参与恢复或自动清理；它们保留在本机，等待你确认后再整理。</p></details>}
       </section>
     </div>
@@ -2251,6 +2616,8 @@ function ApplicationSettingsDialog({
   buildChannelLabel,
   updateInfo,
   updateBusy,
+  updateProgress,
+  updateError,
   updateSupported,
   storeManaged,
   onClose,
@@ -2265,6 +2632,8 @@ function ApplicationSettingsDialog({
   buildChannelLabel: string
   updateInfo: UpdateInfo | null
   updateBusy: boolean
+  updateProgress: UpdateInstallProgress | null
+  updateError: string | null
   updateSupported: boolean
   storeManaged: boolean
   onClose: () => void
@@ -2274,7 +2643,7 @@ function ApplicationSettingsDialog({
 }) {
   const disabled = !desktopAvailable || busy !== null
   const updateStatus = updateBusy
-    ? '正在检查更新…'
+    ? updateProgressLabel(updateProgress) || '正在检查更新…'
     : !updateSupported
       ? desktopAvailable ? '当前版本不检查公开更新' : '本地预览不检查公开更新'
       : storeManaged
@@ -2282,12 +2651,12 @@ function ApplicationSettingsDialog({
         : updateInfo?.available
           ? `发现新版本 v${updateInfo.latestVersion}`
           : updateInfo
-            ? '已是最新版本'
+            ? `当前已是最新版${updateCheckTime(updateInfo.checkedAt) ? ` · 检查于 ${updateCheckTime(updateInfo.checkedAt)}` : ''}`
             : '尚未检查更新'
   const updateAction = storeManaged
     ? '前往 Microsoft Store'
     : updateInfo?.available
-      ? `下载 v${updateInfo.latestVersion}`
+      ? updateBusy ? '正在下载' : `下载并安装 v${updateInfo.latestVersion}`
       : '检查更新'
   return (
     <ModalDialog className="application-settings-dialog" labelledBy="application-settings-title" onClose={onClose}>
@@ -2347,6 +2716,7 @@ function ApplicationSettingsDialog({
               <strong>v{__APP_VERSION__}</strong>
               <span>{buildChannelLabel}</span>
               <small>{updateStatus}</small>
+              {updateError && <small className="settings-update-error" role="alert">{updateError}</small>}
             </div>
             <button className="ghost-button settings-update-button" type="button" onClick={onUpdate} disabled={updateBusy || !updateSupported}>
               {updateBusy ? <RefreshCcw className="spin" size={15} /> : updateInfo?.available && !storeManaged ? <Download size={15} /> : updateInfo && !updateInfo.available && !storeManaged ? <CheckCircle2 size={15} /> : <RefreshCcw size={15} />}
@@ -2447,10 +2817,10 @@ function SwitchConfirmDialog({
 function TimelineWorkspace({ state }: { state: AppState }) {
   return (
     <div className="workspace-stack">
-      <section className="surface-panel">
+      <section className="surface-panel" data-guide-target="timeline.list">
         <div className="activity-list">
           {state.activity.map((item) => (
-            <div className={`activity-item ${item.tone}`} key={item.id}>
+            <div className={`activity-item ${item.tone}`} key={item.id} data-guide-target="timeline.item">
               <time>{item.time}</time>
               <div>
                 <strong>{item.title}</strong>
@@ -2469,11 +2839,13 @@ function LabWorkspace({
   selectedProfile,
   busy,
   runAction,
+  onOpenGuide,
 }: {
   state: AppState
   selectedProfile: ProviderProfile | undefined
   busy: string | null
   runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
+  onOpenGuide: () => void
 }) {
   const [labProviderId, setLabProviderId] = useState(selectedProfile?.id ?? state.currentProfileId)
   const [fundingMode, setFundingMode] = useState<CostCalibration['fundingMode']>('prepaid')
@@ -2557,15 +2929,16 @@ function LabWorkspace({
           <h3>性价比中心</h3>
           <p>用同一条固定测试的人民币成本，比较服务商。</p>
         </div>
+        <button className="icon-button workspace-guide-button" type="button" onClick={onOpenGuide} aria-label="查看实验室使用说明" title="查看实验室使用说明" data-guide-target="lab.page-help"><CircleHelp size={16} /></button>
       </section>
-      <section className="surface-panel lab-ranking" aria-labelledby="lab-ranking-title">
+      <section className="surface-panel lab-ranking" aria-labelledby="lab-ranking-title" data-guide-target="lab.ranking">
         <div className="section-heading-row">
           <div>
             <h3 id="lab-ranking-title">{ranking.length >= 2 ? '服务商对比' : '本次成本结果'}</h3>
             <p className="section-description">{ranking.length >= 2 ? '只比较同一个固定测试模型。多次记录时取中位数；样本少于 3 次会明确提示，但不会阻止比较。' : '保存一条样本后立即显示结果。再添加一个服务商，即可查看横向对比。'}</p>
           </div>
         </div>
-        <div className="lab-benchmark-control">
+        <div className="lab-benchmark-control" data-guide-target="lab.model">
           <label><span className="field-label">固定测试模型 <FieldHint text="排名只比较同一模型下、同一固定测试请求的结果；切换模型后会显示该模型自己的排名。" /></span><select value={benchmarkModel} onChange={(event) => { setBenchmarkModel(event.target.value); setDebitCredit('') }}>
             {BENCHMARK_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
           </select></label>
@@ -2615,7 +2988,7 @@ function LabWorkspace({
             <p className="section-description">充值金额填写人民币。平台实际额度和测试额度只要来自同一个平台余额体系即可，不需要换算成美元，也不需要和其他服务商统一。人民币成本 = 充值金额 × 测试额度 ÷ 平台实际额度。</p>
           </div>
         </div>
-        <div className="lab-selected-provider">
+        <div className="lab-selected-provider" data-guide-target="lab.provider">
           <label>
             服务商
             <select value={profile?.id ?? ''} onChange={(event) => { setLabProviderId(event.target.value); setDebitCredit('') }}>
@@ -2624,7 +2997,7 @@ function LabWorkspace({
           </label>
           <span>固定模型：{benchmarkModelLabel(benchmarkModel || '未选择模型')}</span>
         </div>
-        <div className={`lab-probe-status ${latestProbe ? latestProbe.status : 'idle'}`}>
+        <div className={`lab-probe-status ${latestProbe ? latestProbe.status : 'idle'}`} data-guide-target="lab.probe">
           <div>
             <strong>{latestProbe?.status === 'final_cost_inline' ? '已读取测试额度' : latestProbe ? '需要从平台日志补充测试额度' : '尚未运行测试'}</strong>
             <span>{latestProbe?.status === 'final_cost_inline'
@@ -2635,7 +3008,7 @@ function LabWorkspace({
             <Activity size={15} />运行固定测试
           </button>
         </div>
-        <div className="lab-form">
+        <div className="lab-form" data-guide-target="lab.cost-fields">
           <label>
             <span className="field-label">计费方式 <FieldHint text="充值：按实际付款换得平台余额。订阅固定：填写本账期的实际付款和可用总额度。" /></span>
             <select aria-label="计费方式" value={fundingMode} onChange={(event) => setFundingMode(event.target.value as CostCalibration['fundingMode'])}><option value="prepaid">充值</option><option value="subscription">订阅固定</option></select>
@@ -2644,7 +3017,7 @@ function LabWorkspace({
           <label><span className="field-label">平台实际额度 <FieldHint text="付款后可用于调用的总额度，含赠送和折扣，按平台后台余额填写。" /></span><input aria-label="平台实际额度" type="text" inputMode="decimal" value={consumableCredit} onChange={(event) => setConsumableCredit(event.target.value)} placeholder={fundingMode === 'subscription' ? '本账期可用总额度' : '充值后到账总额'} /></label>
           <label><span className="field-label">测试额度 <FieldHint text="固定测试被平台扣掉的额度。系统能读到时会自动填入；否则从平台使用日志复制。" /></span><input aria-label="测试额度" type="text" inputMode="decimal" value={debitCredit} onChange={(event) => setDebitCredit(event.target.value)} placeholder="运行测试后自动填写，或从日志复制" /></label>
         </div>
-        <div className="lab-module-actions"><button className="primary-button" type="button" disabled={!profile || !benchmarkModel || busy !== null || !paidCny || !consumableCredit || !debitCredit} onClick={() => void saveCalibration()}><Save size={15} />计算并保存</button><span>官方对照按标准短上下文价与固定参考汇率 1 USD = ¥{OFFICIAL_USD_TO_CNY} 自动估算。</span></div>
+        <div className="lab-module-actions" data-guide-target="lab.save"><button className="primary-button" type="button" disabled={!profile || !benchmarkModel || busy !== null || !paidCny || !consumableCredit || !debitCredit} onClick={() => void saveCalibration()}><Save size={15} />计算并保存</button><span>官方对照按标准短上下文价与固定参考汇率 1 USD = ¥{OFFICIAL_USD_TO_CNY} 自动估算。</span></div>
       </section>
     </div>
   )

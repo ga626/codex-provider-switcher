@@ -26,6 +26,7 @@ export const initialState: AppState = {
   connectionEnvironment: {
     status: 'ready',
     selectedLayerId: 'user-config',
+    onboardingCompleted: true,
     detail: '已准备当前 Codex 用户配置。切换时只会改服务商字段，其余设置会保留。',
     layers: [
       { id: 'user-config', label: '当前 Codex 用户配置', detail: '本机配置层，保存后立即生效。', selected: true },
