@@ -1,7 +1,7 @@
 {
   "name": "codex-provider-switcher",
   "private": true,
-  "version": "0.10.8-alpha",
+  "version": "0.10.9-alpha",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,8 @@
     "preview:start": "powershell -ExecutionPolicy Bypass -File scripts/start-preview.ps1",
     "preview:stop": "powershell -ExecutionPolicy Bypass -File scripts/stop-preview.ps1",
     "qa:smoke": "node scripts/qa-smoke.mjs",
+    "feedback:contract": "node --test feedback-relay/test/*.test.mjs",
+    "feedback:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/feedback/deploy-feedback-relay.ps1",
     "docs:capture-readme": "node scripts/qa/capture-readme-screenshots.mjs",
     "qa:preview-smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/run-preview-smoke.ps1",
     "qa:dev-desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/qa/start-dev-desktop.ps1",

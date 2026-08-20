@@ -12,6 +12,7 @@ export const initialState: AppState = {
   },
   configurationProtection: {
     baselineReady: true,
+    baselineStatus: 'ready',
     baselineDetail: '首次启动基线备份已创建，包含本工具可能写入的 Codex 设置和本机登录信息。',
     restoreDetail: '只恢复服务商设置；其他内容保持不变。',
     items: [

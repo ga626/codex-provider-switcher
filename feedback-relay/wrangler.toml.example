@@ -2,6 +2,13 @@ name = "signalman-feedback-relay"
 main = "src/index.mjs"
 compatibility_date = "2026-08-18"
 
-# Supply values as encrypted Worker secrets. Do not put private keys, Turnstile
-# secrets, GitHub tokens, or a production repository name in this file.
-# ALLOWED_ORIGINS is a comma-separated list of exact app origins.
+# Bind the KV namespace created for anonymous submission throttling.
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "replace-with-your-kv-namespace-id"
+
+# Store GITHUB_TOKEN through `wrangler secret put`, never in this file.
+# GITHUB_FEEDBACK_REPOSITORY is `owner/private-feedback-repository`.
+# ALLOWED_ORIGINS is optional but should list exact browser development origins.
+# A native desktop request may not send Origin; CORS is compatibility only, not
+# authentication. The server still validates and rate-limits every payload.

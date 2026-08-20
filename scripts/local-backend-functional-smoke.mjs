@@ -215,7 +215,10 @@ const runtimeEnv = {
   HOME: userHome,
   USERPROFILE: userHome,
   LOCALAPPDATA: localAppData,
-  CODEX_PROVIDER_SWITCHER_CODEX_HOME: codexDir,
+  // Exercise the public Codex contract used by real installations. The
+  // internal switcher-only override remains reserved for development boards.
+  CODEX_PROVIDER_SWITCHER_CODEX_HOME: '',
+  CODEX_HOME: codexDir,
   CODEX_PROVIDER_SWITCHER_APP_DATA_DIR: join(localAppData, 'CodeX Provider Switcher'),
   CODEX_PROVIDER_SWITCHER_RELEASES_API: `http://127.0.0.1:${providerPort}/releases`,
 }
@@ -394,6 +397,22 @@ try {
     note: 'isolated functional smoke',
     apiKey: 'sk-fixture',
   }
+  const profileCountBeforeDraftPreview = (await api('/api/state')).profiles.length
+  const draftCatalog = await api('/api/models/preview', {
+    profile: {
+      id: '',
+      name: '尚未保存的服务商',
+      baseUrl: providerUrl,
+      model: '',
+      note: '',
+      apiKey: 'sk-fixture',
+    },
+  })
+  assert(draftCatalog.status === 'ok' && draftCatalog.models.length === 2, 'unsaved draft did not refresh its model catalog')
+  const stateAfterDraftPreview = await api('/api/state')
+  assert(stateAfterDraftPreview.profiles.length === profileCountBeforeDraftPreview, 'draft model refresh persisted an unsaved provider')
+  assert(await readFile(configPath, 'utf8') === originalConfig, 'draft model refresh changed config.toml')
+  assert(await readFile(authPath, 'utf8') === originalAuth, 'draft model refresh changed auth.json')
   const saved = await api('/api/profiles/save', { profile })
   assert(saved.profiles.some((item) => item.id === profile.id), 'save did not persist the provider')
   assert(saved.activity[0]?.title.includes('已保存'), 'save did not update activity')
@@ -401,6 +420,27 @@ try {
   const persistedProfile = JSON.parse(persistedProfiles).profiles[profile.id]
   assert(persistedProfile.api_key === '', 'profile store persisted a non-empty API key field')
   assert(typeof persistedProfile.api_key_protected === 'string' && persistedProfile.api_key_protected.length > 20, 'profile store did not use protected credential storage')
+
+  const unicodeProvider = {
+    id: '',
+    name: '中转服务',
+    baseUrl: providerUrl,
+    model: 'reasoning-current',
+    note: 'unicode id fixture',
+    apiKey: 'sk-fixture',
+  }
+  const unicodeSaved = await api('/api/profiles/save', { profile: unicodeProvider })
+  const unicodeProfile = unicodeSaved.profiles.find((item) => item.name === unicodeProvider.name)
+  assert(unicodeProfile?.id?.startsWith('provider-'), 'unicode provider name did not receive a stable non-empty id')
+  const collisionSaved = await api('/api/profiles/save', {
+    profile: { ...unicodeProvider, name: '另一个 A' },
+  })
+  const collisionProfile = collisionSaved.profiles.find((item) => item.name === '另一个 A')
+  assert(collisionProfile && collisionProfile.id !== unicodeProfile.id, 'normalized provider names collided')
+  const renamedSaved = await api('/api/profiles/save', {
+    profile: { ...unicodeProvider, id: unicodeProfile.id, name: '中文服务商（已更新）' },
+  })
+  assert(renamedSaved.profiles.some((item) => item.id === unicodeProfile.id && item.name === '中文服务商（已更新）'), 'renaming a unicode provider changed its persisted id')
 
   const refreshed = await api('/api/models/refresh', { profileId: profile.id })
   const catalog = refreshed.modelCatalogs.find((item) => item.providerId === profile.id)
@@ -431,18 +471,26 @@ try {
   assert(preparedEnvironment.connectionEnvironment?.selectedLayerId === 'user-config', 'connection environment did not retain the selected layer')
   assert(await readFile(configPath, 'utf8') === originalConfig, 'environment setup changed an already compatible config.toml')
 
-  // A genuinely new install may have neither file yet. Preparation should
-  // create the minimum safe Codex config and an empty auth object, while a
-  // later validation failure must leave those missing files missing.
+  // A genuinely new install may have neither file yet. Preparation must not
+  // select an empty provider before the user has supplied its endpoint, model,
+  // and credential. The first real switch materializes that complete provider.
   await rm(configPath, { force: true })
   await rm(authPath, { force: true })
   const blankPrepared = await api('/api/config/prepare-environment', { layerId: 'user-config' })
   const blankConfig = await readFile(configPath, 'utf8')
   const blankAuth = await readFile(authPath, 'utf8')
   assert(blankPrepared.connectionEnvironment?.status === 'ready', 'blank config/auth preparation did not complete')
-  assert(blankConfig.includes('model_provider = "custom"'), 'blank config preparation did not create the custom provider selector')
-  assert(blankConfig.includes('wire_api = "responses"'), 'blank config preparation did not create the Responses wire setting')
+  assert(blankConfig.includes('disable_response_storage = true'), 'blank config preparation did not create the required storage setting')
+  assert(!blankConfig.includes('model_provider = "custom"'), 'blank config preparation selected an empty custom provider')
+  assert(!blankConfig.includes('[model_providers.custom]'), 'blank config preparation created an empty custom provider')
   assert(JSON.parse(blankAuth) && typeof JSON.parse(blankAuth) === 'object', 'blank auth preparation did not create a JSON object')
+  const firstSwitchPreflight = await prepareSwitch(profile.id)
+  const firstSwitch = await confirmSwitch(profile.id, firstSwitchPreflight.operationId)
+  const firstSwitchConfig = await readFile(configPath, 'utf8')
+  assert(firstSwitch.currentProfileId === profile.id, 'first provider switch did not activate the saved provider')
+  assert(firstSwitchConfig.includes('model_provider = "custom"'), 'first provider switch did not select custom')
+  assert(firstSwitchConfig.includes(`base_url = "${providerUrl}"`), 'first provider switch did not write the provider endpoint')
+  assert(firstSwitchConfig.includes('wire_api = "responses"'), 'first provider switch did not write the Responses protocol')
   await rm(configPath, { force: true })
   await writeFile(authPath, '{not valid json', 'utf8')
   const blankFailure = await expectApiFailure('/api/config/prepare-environment', { layerId: 'user-config' })
@@ -519,6 +567,7 @@ try {
   const switchPreflight = await prepareSwitch(profile.id)
   assert(switchPreflight.profileId === profile.id && switchPreflight.operationId, 'switch preflight did not return a usable confirmation token')
   assert(switchPreflight.targetModel === profile.model, 'switch preflight did not return the target model')
+  const backupIdsBeforeSwitch = new Set((await api('/api/state')).backups.map((item) => item.id))
   const switched = await confirmSwitch(profile.id, switchPreflight.operationId)
   const switchedConfig = await readFile(configPath, 'utf8')
   const switchedAuth = JSON.parse(await readFile(authPath, 'utf8'))
@@ -532,7 +581,7 @@ try {
   assert(switchedConfig.includes('user_owned_extension = "keep-me"'), 'switch removed an unknown custom-provider field')
   assert(switchedAuth.OPENAI_API_KEY === profile.apiKey, 'switch did not bind the profile key to the candidate Codex auth target')
   assert(switchedAuth.preserved === 'yes', 'switch removed unrelated auth data')
-  const switchBackup = switched.backups.find((item) => item.kind === 'before_switch')
+  const switchBackup = switched.backups.find((item) => item.kind === 'before_switch' && !backupIdsBeforeSwitch.has(item.id))
   assert(
     switched.backups.length >= 3
       && switched.backups.some((item) => item.kind === 'initial_install')

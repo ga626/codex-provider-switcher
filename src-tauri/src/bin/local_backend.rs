@@ -1,7 +1,7 @@
 use codex_switcher_tauri_lib::{
     check_for_update_core, complete_onboarding_core, create_manual_backup_core, delete_profile_core,
     load_state_core, reveal_profile_api_key_core,
-    prepare_switch_core, prepare_connection_environment_core_with_onboarding, refresh_models_core, reorder_profiles_core, restore_backup_core,
+    prepare_switch_core, prepare_connection_environment_core_with_onboarding, preview_models_core, refresh_models_core, reorder_profiles_core, restore_backup_core,
     restore_latest_backup_core, run_response_probe_for_model_core, save_cost_calibration_core,
     delete_cost_calibration_core,
     save_profile_core, set_backup_policy_core,
@@ -367,6 +367,17 @@ fn handle_api(
             delete_cost_calibration_core(calibration_id).map(state_json)
         }
         ("POST", "/api/models/refresh") => refresh_models_core(profile_id(body)?).map(state_json),
+        ("POST", "/api/models/preview") => {
+            let profile = request_json(body)?
+                .get("profile")
+                .cloned()
+                .ok_or_else(|| SwitcherError::Message("缺少草稿服务商配置。".to_string()))
+                .and_then(|value| {
+                    serde_json::from_value::<EditableProfile>(value).map_err(SwitcherError::from)
+                })?;
+            preview_models_core(profile)
+                .and_then(|value| serde_json::to_value(value).map_err(SwitcherError::from))
+        }
         ("POST", "/api/profiles/default") => {
             set_default_profile_core(profile_id(body)?).map(state_json)
         }

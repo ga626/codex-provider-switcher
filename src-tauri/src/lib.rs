@@ -25,12 +25,16 @@ const PROFILES_FILE: &str = "profiles.json";
 const ACTIVITY_FILE: &str = "activity.json";
 const BACKUPS_DIR: &str = "backups";
 const INITIAL_BACKUP_LABEL: &str = "initial-install";
+const CURRENT_BACKUP_FINGERPRINT_VERSION: u8 = 2;
 const CONNECTION_ENVIRONMENT_FILE: &str = "connection-environment.json";
 const PENDING_TRANSACTION_FILE: &str = "pending-config-transaction.json";
 const SWITCH_PREFLIGHT_FILE: &str = "pending-switch-preflight.json";
 const OPERATION_RECEIPTS_FILE: &str = "config-operation-receipts.json";
 const STARTUP_DIAGNOSTICS_FILE: &str = "startup-diagnostics.json";
+// This is intentionally private to Signalman's development runners. Production
+// installs follow Codex's documented CODEX_HOME contract.
 const CODEX_HOME_ENV: &str = "CODEX_PROVIDER_SWITCHER_CODEX_HOME";
+const OFFICIAL_CODEX_HOME_ENV: &str = "CODEX_HOME";
 const APP_DATA_DIR_ENV: &str = "CODEX_PROVIDER_SWITCHER_APP_DATA_DIR";
 const RELEASES_API_ENV: &str = "CODEX_PROVIDER_SWITCHER_RELEASES_API";
 const RELEASES_API_URL: &str =
@@ -287,6 +291,8 @@ fn normalized_backup_limit(value: usize) -> usize {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BackupManifest {
     schema_version: u8,
+    #[serde(default)]
+    fingerprint_version: u8,
     created_at: String,
     reason: String,
     files: Vec<String>,
@@ -318,6 +324,8 @@ struct ConfigOperationReceipt {
     backup_id: String,
     kind: String,
     created_at: String,
+    #[serde(default)]
+    fingerprint_version: u8,
     before_fingerprint: String,
     after_fingerprint: String,
 }
@@ -454,6 +462,7 @@ struct StartupDiagnostic {
 #[serde(rename_all = "camelCase")]
 pub struct ConfigurationProtection {
     pub baseline_ready: bool,
+    pub baseline_status: String,
     pub baseline_detail: String,
     pub items: Vec<ConfigurationProtectionItem>,
     pub restore_detail: String,
@@ -612,17 +621,22 @@ fn windows_user_proxy() -> Option<String> {
     let candidate = raw
         .split(';')
         .map(str::trim)
-        .find_map(|item| item.strip_prefix("https=").or_else(|| item.strip_prefix("http=")))
+        .find_map(|item| {
+            item.strip_prefix("https=")
+                .or_else(|| item.strip_prefix("http="))
+        })
         .or_else(|| raw.split(';').map(str::trim).find(|item| !item.is_empty()))?;
     let candidate = candidate.trim();
     if candidate.is_empty() {
         return None;
     }
-    Some(if candidate.starts_with("http://") || candidate.starts_with("https://") {
-        candidate.to_string()
-    } else {
-        format!("http://{candidate}")
-    })
+    Some(
+        if candidate.starts_with("http://") || candidate.starts_with("https://") {
+            candidate.to_string()
+        } else {
+            format!("http://{candidate}")
+        },
+    )
 }
 
 #[cfg(not(windows))]
@@ -630,7 +644,9 @@ fn windows_user_proxy() -> Option<String> {
     None
 }
 
-fn configure_http_client(builder: reqwest::blocking::ClientBuilder) -> reqwest::blocking::ClientBuilder {
+fn configure_http_client(
+    builder: reqwest::blocking::ClientBuilder,
+) -> reqwest::blocking::ClientBuilder {
     let Some(proxy_url) = windows_user_proxy() else {
         return builder;
     };
@@ -674,12 +690,29 @@ fn short_time() -> String {
     Local::now().format("%H:%M").to_string()
 }
 
+fn non_empty_environment_path(name: &str) -> Option<PathBuf> {
+    env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn resolve_codex_home(
+    development_override: Option<PathBuf>,
+    codex_override: Option<PathBuf>,
+    user_home: PathBuf,
+) -> PathBuf {
+    development_override
+        .or(codex_override)
+        .unwrap_or_else(|| user_home.join(".codex"))
+}
+
 fn codex_home() -> Result<PathBuf, SwitcherError> {
-    if let Some(path) = env::var_os(CODEX_HOME_ENV).filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(path));
-    }
-    let home = dirs::home_dir().ok_or(SwitcherError::MissingHome)?;
-    Ok(home.join(".codex"))
+    let user_home = dirs::home_dir().ok_or(SwitcherError::MissingHome)?;
+    Ok(resolve_codex_home(
+        non_empty_environment_path(CODEX_HOME_ENV),
+        non_empty_environment_path(OFFICIAL_CODEX_HOME_ENV),
+        user_home,
+    ))
 }
 
 fn root_config_path() -> Result<PathBuf, SwitcherError> {
@@ -700,7 +733,9 @@ fn load_connection_environment_record() -> StoredConnectionEnvironment {
     parse_json_document(&text).unwrap_or_default()
 }
 
-fn save_connection_environment_record(record: &StoredConnectionEnvironment) -> Result<(), SwitcherError> {
+fn save_connection_environment_record(
+    record: &StoredConnectionEnvironment,
+) -> Result<(), SwitcherError> {
     ensure_dirs()?;
     write_bytes_atomically(
         &connection_environment_path()?,
@@ -710,10 +745,24 @@ fn save_connection_environment_record(record: &StoredConnectionEnvironment) -> R
 
 fn configuration_layer_candidates() -> Result<Vec<(String, PathBuf, String)>, SwitcherError> {
     let root = root_config_path()?;
-    let mut layers = vec![("user-config".to_string(), root, "当前 Codex 用户配置".to_string())];
+    let mut layers = vec![(
+        "user-config".to_string(),
+        root,
+        "当前 Codex 用户配置".to_string(),
+    )];
     for path in discovered_profile_configs()? {
-        let Some(name) = path.file_name().and_then(|value| value.to_str()).map(str::to_string) else { continue; };
-        layers.push((format!("profile:{name}"), path, format!("Profile 配置 · {name}")));
+        let Some(name) = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        layers.push((
+            format!("profile:{name}"),
+            path,
+            format!("Profile 配置 · {name}"),
+        ));
     }
     Ok(layers)
 }
@@ -760,7 +809,10 @@ fn configuration_layer_check() -> ValidationCheck {
         ),
         Ok(layers) => {
             let record = load_connection_environment_record();
-            let selected_valid = record.selected_layer_id.as_ref().is_some_and(|selected| layers.iter().any(|(id, _, _)| id == selected));
+            let selected_valid = record
+                .selected_layer_id
+                .as_ref()
+                .is_some_and(|selected| layers.iter().any(|(id, _, _)| id == selected));
             check(
                 "configuration-layer",
                 "连接环境",
@@ -785,8 +837,13 @@ fn ensure_configuration_layer_is_unambiguous() -> Result<(), SwitcherError> {
             .map(|layers| layers.iter().any(|(id, _, _)| id == selected))
             .unwrap_or(false)
     });
-    if record.setup_completed && valid { return Ok(()); }
-    Err(SwitcherError::Message("切换已阻止：请先在“开始使用”中选择并准备要管理的 Codex 配置层。程序不会猜测写入位置。".to_string()))
+    if record.setup_completed && valid {
+        return Ok(());
+    }
+    Err(SwitcherError::Message(
+        "切换已阻止：请先在“开始使用”中选择并准备要管理的 Codex 配置层。程序不会猜测写入位置。"
+            .to_string(),
+    ))
 }
 
 fn auth_path() -> Result<PathBuf, SwitcherError> {
@@ -897,17 +954,25 @@ fn current_owned_fingerprint() -> Result<String, SwitcherError> {
 }
 
 fn current_state_is_safe_to_restore(manifest: &BackupManifest) -> Result<(), SwitcherError> {
-    let current = current_owned_fingerprint()?;
-    if manifest.snapshot_fingerprint.as_deref() == Some(current.as_str()) {
+    let config = fs::read_to_string(config_path()?)?;
+    let auth = fs::read_to_string(auth_path()?)?;
+    if backup_snapshot_fingerprint_match(manifest, &config, &auth)?.is_some() {
         return Ok(());
     }
+    let current = owned_configuration_fingerprint(&config, &auth)?;
+    let legacy_current = (manifest.fingerprint_version < CURRENT_BACKUP_FINGERPRINT_VERSION)
+        .then(|| owned_configuration_fingerprint_v1(&config, &auth))
+        .transpose()?;
     let receipts = load_operation_receipts()?;
     let latest = receipts.last().ok_or_else(|| {
         SwitcherError::Message(
             "当前服务商设置没有可验证的 Signalman 变更回执，已停止自动恢复。".to_string(),
         )
     })?;
-    if latest.after_fingerprint != current {
+    let current_matches_receipt = latest.after_fingerprint == current
+        || (latest.fingerprint_version < CURRENT_BACKUP_FINGERPRINT_VERSION
+            && legacy_current.as_deref() == Some(latest.after_fingerprint.as_str()));
+    if !current_matches_receipt {
         return Err(SwitcherError::Message(
             "检测到服务商或认证设置在上次 Signalman 操作后发生变化；已停止自动恢复。".to_string(),
         ));
@@ -1197,6 +1262,22 @@ fn normalize_id(name: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
+/// Return a stable, non-empty identifier for a provider display name.
+///
+/// Display names are user-facing and may be entirely Unicode.  The old
+/// ASCII-only normalizer returned an empty string for names such as
+/// "中转服务", and reduced different names containing the same ASCII suffix
+/// to the same key.  Keep readable slugs where possible, and use a short hash
+/// only when the name has no ASCII material at all.
+fn provider_id_base(name: &str) -> String {
+    let normalized = normalize_id(name);
+    if !normalized.is_empty() {
+        return normalized;
+    }
+    let digest = format!("{:x}", Sha256::digest(name.trim().as_bytes()));
+    format!("provider-{}", &digest[..12])
+}
+
 fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
     Ok(StoredCatalog {
         version: default_version(),
@@ -1372,7 +1453,7 @@ fn unique_profile_id(catalog: &StoredCatalog, preferred: &str) -> String {
     let base = if preferred.trim().is_empty() {
         "legacy-provider".to_string()
     } else {
-        normalize_id(preferred)
+        provider_id_base(preferred)
     };
     if !catalog.profiles.contains_key(&base) {
         return base;
@@ -1385,6 +1466,14 @@ fn unique_profile_id(catalog: &StoredCatalog, preferred: &str) -> String {
         }
     }
     unreachable!("unbounded profile identifier search")
+}
+
+fn profile_id_for_save(catalog: &StoredCatalog, requested_id: &str, name: &str) -> String {
+    if requested_id.trim().is_empty() {
+        unique_profile_id(catalog, name)
+    } else {
+        requested_id.trim().to_string()
+    }
 }
 
 fn merge_legacy_profile_document(
@@ -1632,10 +1721,16 @@ fn validation_checks(config_text: &str) -> Vec<ValidationCheck> {
                 model_provider == "custom",
                 if model_provider == "custom" {
                     "Codex 保持在 custom 服务商分组。"
+                } else if model_provider.is_empty() {
+                    "尚未选择服务商；保存并切换第一家服务商时会自动设置。"
                 } else {
                     "model_provider 必须保持 custom，避免破坏历史记录和服务商分组行为。"
                 },
-                "warning",
+                if model_provider.is_empty() {
+                    "info"
+                } else {
+                    "warning"
+                },
             ));
             checks.push(check(
                 "disable-response-storage",
@@ -1656,9 +1751,9 @@ fn validation_checks(config_text: &str) -> Vec<ValidationCheck> {
                 if custom.is_some() {
                     "[model_providers.custom] 存在。"
                 } else {
-                    "缺少 [model_providers.custom]，无法安全切换服务商。"
+                    "尚未添加服务商；保存并切换第一家服务商时会自动创建。"
                 },
-                "required",
+                if custom.is_some() { "warning" } else { "info" },
             ));
             let wire_api = custom
                 .and_then(|v| v.get("wire_api"))
@@ -1670,10 +1765,12 @@ fn validation_checks(config_text: &str) -> Vec<ValidationCheck> {
                 wire_api == "responses",
                 if wire_api == "responses" {
                     "wire_api 当前为 responses。"
+                } else if custom.is_none() {
+                    "尚未添加服务商；切换第一家服务商时会自动设置为 responses。"
                 } else {
                     "wire_api 必须保持 responses，才能兼容 Codex 原生请求。"
                 },
-                "warning",
+                if custom.is_none() { "info" } else { "warning" },
             ));
             let base_url = custom
                 .and_then(|v| v.get("base_url"))
@@ -1685,10 +1782,12 @@ fn validation_checks(config_text: &str) -> Vec<ValidationCheck> {
                 base_url.starts_with("http"),
                 if base_url.starts_with("http") {
                     "custom 服务商已配置 base_url。"
+                } else if custom.is_none() {
+                    "尚未添加服务商，因此当前没有接口地址。"
                 } else {
                     "custom 服务商缺少有效 base_url。"
                 },
-                "warning",
+                if custom.is_none() { "info" } else { "warning" },
             ));
             let requires_openai_auth = custom
                 .and_then(|v| v.get("requires_openai_auth"))
@@ -1802,7 +1901,16 @@ fn toml_value_at<'a>(value: &'a toml::Value, path: &[&str]) -> Option<&'a toml::
 
 fn configuration_protection(config_text: &str) -> ConfigurationProtection {
     let parsed = toml::from_str::<toml::Value>(config_text).ok();
-    let baseline_ready = healthy_baseline_backup().is_ok();
+    // An empty first-run record is useful as an audit marker, but it is not a
+    // restorable configuration snapshot and must not be advertised as ready.
+    let baseline_ready = restorable_baseline_backup().unwrap_or(false);
+    let baseline_status = if baseline_ready {
+        "ready"
+    } else if empty_initial_baseline() {
+        "empty"
+    } else {
+        "blocked"
+    };
     let mut items = PROTECTED_CONFIGURATION_AREAS
         .iter()
         .map(|(id, label, path)| {
@@ -1853,9 +1961,12 @@ fn configuration_protection(config_text: &str) -> ConfigurationProtection {
     });
     ConfigurationProtection {
         baseline_ready,
-        baseline_detail: if baseline_ready {
+        baseline_status: baseline_status.to_string(),
+        baseline_detail: if baseline_status == "ready" {
             "首次启动基线备份已验证。恢复只回退服务商配置，不会改写当前 Codex 登录信息。"
                 .to_string()
+        } else if baseline_status == "empty" {
+            "首次启动时还没有完整的 Codex 配置；这是状态记录。保存并切换第一家服务商后会自动生成可恢复备份。".to_string()
         } else {
             "首次启动基线备份尚未通过完整性检查；应用不会允许切换服务商。".to_string()
         },
@@ -1907,6 +2018,31 @@ fn only_provider_owned_configuration_changed(
             }
             custom.remove("auth");
         }
+        let remove_empty_custom = value
+            .get("model_providers")
+            .and_then(|providers| providers.get("custom"))
+            .and_then(toml::Value::as_table)
+            .is_some_and(|custom| custom.is_empty());
+        if remove_empty_custom {
+            value
+                .get_mut("model_providers")
+                .and_then(toml::Value::as_table_mut)
+                .expect("model providers is a table")
+                .remove("custom");
+        }
+        // Adding the first managed custom provider necessarily creates its
+        // parent table. Once Signalman-owned fields are removed for this
+        // comparison, an otherwise empty parent table is not user content.
+        let remove_empty_providers = value
+            .get("model_providers")
+            .and_then(toml::Value::as_table)
+            .is_some_and(|providers| providers.is_empty());
+        if remove_empty_providers {
+            value
+                .as_table_mut()
+                .expect("TOML root is always a table")
+                .remove("model_providers");
+        }
     }
     Ok(before == after)
 }
@@ -1936,6 +2072,54 @@ fn owned_configuration_fingerprint(
     });
     let bytes = serde_json::to_vec(&snapshot)?;
     Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+// Snapshot fingerprints created before v0.10.7 did not include the custom
+// provider auth table. Keep this exact legacy form only for validating old,
+// DPAPI-protected backup files; all newly created manifests use version 2.
+fn owned_configuration_fingerprint_v1(
+    config_text: &str,
+    auth_text: &str,
+) -> Result<String, SwitcherError> {
+    let config = toml::from_str::<toml::Value>(config_text)?;
+    let custom = config
+        .get("model_providers")
+        .and_then(|value| value.get("custom"));
+    let auth = serde_json::from_str::<Value>(auth_text)?;
+    let snapshot = json!({
+        "model": config.get("model"),
+        "model_provider": config.get("model_provider"),
+        "disable_response_storage": config.get("disable_response_storage"),
+        "custom": custom.map(|value| json!({
+            "name": value.get("name"),
+            "wire_api": value.get("wire_api"),
+            "requires_openai_auth": value.get("requires_openai_auth"),
+            "base_url": value.get("base_url"),
+            "api_key": value.get("api_key"),
+        })),
+        "auth_openai_key": auth.get("OPENAI_API_KEY"),
+    });
+    let bytes = serde_json::to_vec(&snapshot)?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn backup_snapshot_fingerprint_match(
+    manifest: &BackupManifest,
+    config_text: &str,
+    auth_text: &str,
+) -> Result<Option<u8>, SwitcherError> {
+    let Some(expected) = manifest.snapshot_fingerprint.as_deref() else {
+        return Ok(None);
+    };
+    if owned_configuration_fingerprint(config_text, auth_text)? == expected {
+        return Ok(Some(CURRENT_BACKUP_FINGERPRINT_VERSION));
+    }
+    if manifest.fingerprint_version < CURRENT_BACKUP_FINGERPRINT_VERSION
+        && owned_configuration_fingerprint_v1(config_text, auth_text)? == expected
+    {
+        return Ok(Some(1));
+    }
+    Ok(None)
 }
 
 fn bytes_digest(bytes: &[u8]) -> String {
@@ -1974,8 +2158,7 @@ fn backup_manifest_health(
         backup_dir.join("auth.json.dpapi"),
     )?)?)
     .map_err(|_| SwitcherError::Message("恢复点中的认证文件不是 UTF-8 文本。".to_string()))?;
-    let fingerprint = owned_configuration_fingerprint(&config, &auth)?;
-    if manifest.snapshot_fingerprint.as_deref() != Some(fingerprint.as_str()) {
+    if backup_snapshot_fingerprint_match(manifest, &config, &auth)?.is_none() {
         return Err(SwitcherError::Message(
             "恢复点与记录的配置摘要不一致。".to_string(),
         ));
@@ -1991,17 +2174,52 @@ fn healthy_baseline_backup() -> Result<(), SwitcherError> {
     .map_err(|_| SwitcherError::Message("首次启动基线备份说明损坏，已停止切换。".to_string()))?;
 
     // A truly new Codex home has no files to encrypt yet. The manifest is still
-    // a valid baseline record, but it is intentionally not presented as a
-    // restorable full-file snapshot in the recovery UI.
-    if manifest.files.is_empty()
-        && manifest.snapshot_fingerprint.is_none()
-        && manifest.missing_files.iter().any(|file| file == "config.toml")
-        && manifest.missing_files.iter().any(|file| file == "auth.json")
-    {
+    // a valid audit record; switching may proceed and will create the first
+    // complete backup before writing a provider.
+    if is_empty_initial_backup(&manifest) {
         return Ok(());
     }
 
     backup_manifest_health(&backup_dir, &manifest)
+}
+
+fn is_empty_initial_backup(manifest: &BackupManifest) -> bool {
+    manifest.reason == "initial_install"
+        && manifest.files.is_empty()
+        && manifest.snapshot_fingerprint.is_none()
+        && manifest
+            .missing_files
+            .iter()
+            .any(|file| file == "config.toml")
+        && manifest
+            .missing_files
+            .iter()
+            .any(|file| file == "auth.json")
+}
+
+fn empty_initial_baseline() -> bool {
+    let Ok(backup_dir) = backups_dir() else {
+        return false;
+    };
+    let Ok(text) = fs::read_to_string(backup_dir.join(INITIAL_BACKUP_LABEL).join("manifest.json"))
+    else {
+        return false;
+    };
+    serde_json::from_str::<BackupManifest>(&text)
+        .map(|manifest| is_empty_initial_backup(&manifest))
+        .unwrap_or(false)
+}
+
+fn restorable_baseline_backup() -> Result<bool, SwitcherError> {
+    let backup_dir = backups_dir()?.join(INITIAL_BACKUP_LABEL);
+    let manifest: BackupManifest =
+        serde_json::from_str(&fs::read_to_string(backup_dir.join("manifest.json"))?)
+            .map_err(|_| SwitcherError::Message("首次启动基线备份说明损坏。".to_string()))?;
+    if is_empty_initial_backup(&manifest) {
+        return Ok(false);
+    }
+    backup_manifest_health(&backup_dir, &manifest)?;
+    Ok(true)
 }
 
 fn check(id: &str, label: &str, ok: bool, detail: &str, severity: &str) -> ValidationCheck {
@@ -2247,6 +2465,12 @@ fn list_backups() -> Result<Vec<BackupItem>, SwitcherError> {
                 false,
                 "这是旧版恢复目录，未纳入当前保留规则。不会自动删除；请先核对创建时间和文件数，再决定是否整理。".to_string(),
             ),
+            Some(manifest) if is_empty_initial_backup(manifest) => (
+                manifest.reason.clone(),
+                manifest.retention_managed,
+                false,
+                "首次启动时还没有完整的 Codex 配置；这是状态记录，不是可恢复的配置快照。完成首次配置后才会生成可恢复备份。".to_string(),
+            ),
             Some(manifest) => match backup_manifest_health(&path, manifest) {
                 Ok(()) => (
                     manifest.reason.clone(),
@@ -2372,7 +2596,10 @@ fn connection_environment_state() -> ConnectionEnvironment {
     let record = load_connection_environment_record();
     match configuration_layer_candidates() {
         Ok(layers) => {
-            let selected_valid = record.selected_layer_id.as_ref().is_some_and(|selected| layers.iter().any(|(id, _, _)| id == selected));
+            let selected_valid = record
+                .selected_layer_id
+                .as_ref()
+                .is_some_and(|selected| layers.iter().any(|(id, _, _)| id == selected));
             let status = if record.setup_completed && selected_valid {
                 "ready"
             } else if layers.len() > 1 {
@@ -2382,9 +2609,14 @@ fn connection_environment_state() -> ConnectionEnvironment {
             };
             let detail = match status {
                 "ready" => "已准备连接环境。切换时仅写入当前选择配置层的服务商字段。",
-                "needs_selection" => "发现多个 Codex 配置层。请选择本次要管理的配置层，程序不会猜测。",
-                _ => "首次使用前请准备连接环境。程序会创建恢复点，并保留项目、MCP、插件与历史设置。",
-            }.to_string();
+                "needs_selection" => {
+                    "发现多个 Codex 配置层。请选择本次要管理的配置层，程序不会猜测。"
+                }
+                _ => {
+                    "首次使用前请准备连接环境。程序会创建恢复点，并保留项目、MCP、插件与历史设置。"
+                }
+            }
+            .to_string();
             ConnectionEnvironment {
                 status: status.to_string(),
                 selected_layer_id: record.selected_layer_id.clone(),
@@ -2393,12 +2625,23 @@ fn connection_environment_state() -> ConnectionEnvironment {
                 // first-run flow after a normal upgrade.
                 onboarding_completed: record.onboarding_completed || record.setup_completed,
                 detail,
-                layers: layers.into_iter().map(|(id, path, label)| ConnectionEnvironmentLayer {
-                    selected: record.selected_layer_id.as_ref().is_some_and(|selected| selected == &id),
-                    id,
-                    label,
-                    detail: format!("{}。", path.file_name().and_then(|value| value.to_str()).unwrap_or("config.toml")),
-                }).collect(),
+                layers: layers
+                    .into_iter()
+                    .map(|(id, path, label)| ConnectionEnvironmentLayer {
+                        selected: record
+                            .selected_layer_id
+                            .as_ref()
+                            .is_some_and(|selected| selected == &id),
+                        id,
+                        label,
+                        detail: format!(
+                            "{}。",
+                            path.file_name()
+                                .and_then(|value| value.to_str())
+                                .unwrap_or("config.toml")
+                        ),
+                    })
+                    .collect(),
             }
         }
         Err(error) => ConnectionEnvironment {
@@ -2636,6 +2879,136 @@ fn parse_provider_models(body: &Value) -> Vec<ProviderModel> {
 mod tests {
     use super::*;
 
+    fn fingerprint_fixture_manifest(
+        fingerprint: String,
+        fingerprint_version: u8,
+    ) -> BackupManifest {
+        BackupManifest {
+            schema_version: 4,
+            fingerprint_version,
+            created_at: "2026-08-19 00:00:00".to_string(),
+            reason: "before_switch".to_string(),
+            files: vec![
+                "config.toml.dpapi".to_string(),
+                "auth.json.dpapi".to_string(),
+            ],
+            missing_files: Vec::new(),
+            post_change_fingerprint: None,
+            snapshot_fingerprint: Some(fingerprint),
+            file_digests: BTreeMap::new(),
+            retention_managed: true,
+        }
+    }
+
+    #[test]
+    fn accepts_a_valid_legacy_backup_fingerprint_but_not_for_new_manifests() {
+        let config = r#"
+model = "gpt-test"
+model_provider = "custom"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "provider"
+wire_api = "responses"
+base_url = "https://provider.example/v1"
+api_key = "test-key"
+
+[model_providers.custom.auth]
+command = "powershell.exe"
+args = ["-NoProfile"]
+"#;
+        let auth = r#"{"OPENAI_API_KEY":"test-key"}"#;
+        let legacy = owned_configuration_fingerprint_v1(config, auth).unwrap();
+        let current = owned_configuration_fingerprint(config, auth).unwrap();
+
+        assert_ne!(legacy, current);
+        assert_eq!(
+            backup_snapshot_fingerprint_match(
+                &fingerprint_fixture_manifest(legacy.clone(), 0),
+                config,
+                auth,
+            )
+            .unwrap(),
+            Some(1)
+        );
+        assert_eq!(
+            backup_snapshot_fingerprint_match(
+                &fingerprint_fixture_manifest(legacy, CURRENT_BACKUP_FINGERPRINT_VERSION),
+                config,
+                auth,
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            backup_snapshot_fingerprint_match(
+                &fingerprint_fixture_manifest(current, CURRENT_BACKUP_FINGERPRINT_VERSION),
+                config,
+                auth,
+            )
+            .unwrap(),
+            Some(CURRENT_BACKUP_FINGERPRINT_VERSION)
+        );
+    }
+
+    #[test]
+    fn validates_a_dpapi_protected_legacy_backup_before_accepting_its_fingerprint() {
+        let config = r#"
+model = "gpt-test"
+model_provider = "custom"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "provider"
+wire_api = "responses"
+base_url = "https://provider.example/v1"
+api_key = "test-key"
+
+[model_providers.custom.auth]
+command = "powershell.exe"
+args = ["-NoProfile"]
+"#;
+        let auth = r#"{"OPENAI_API_KEY":"test-key"}"#;
+        let path = env::temp_dir().join(format!(
+            "signalman-legacy-backup-{}",
+            Local::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir(&path).unwrap();
+        let protected_config = protect_secret(config.as_bytes()).unwrap();
+        let protected_auth = protect_secret(auth.as_bytes()).unwrap();
+        fs::write(path.join("config.toml.dpapi"), &protected_config).unwrap();
+        fs::write(path.join("auth.json.dpapi"), &protected_auth).unwrap();
+        let manifest = BackupManifest {
+            schema_version: 4,
+            fingerprint_version: 0,
+            created_at: "2026-08-19 00:00:00".to_string(),
+            reason: "initial_install".to_string(),
+            files: vec![
+                "config.toml.dpapi".to_string(),
+                "auth.json.dpapi".to_string(),
+            ],
+            missing_files: Vec::new(),
+            post_change_fingerprint: None,
+            snapshot_fingerprint: Some(owned_configuration_fingerprint_v1(config, auth).unwrap()),
+            file_digests: BTreeMap::from([
+                (
+                    "config.toml.dpapi".to_string(),
+                    bytes_digest(protected_config.as_bytes()),
+                ),
+                (
+                    "auth.json.dpapi".to_string(),
+                    bytes_digest(protected_auth.as_bytes()),
+                ),
+            ]),
+            retention_managed: false,
+        };
+
+        assert!(backup_manifest_health(&path, &manifest).is_ok());
+        fs::write(path.join("auth.json.dpapi"), "changed").unwrap();
+        assert!(backup_manifest_health(&path, &manifest).is_err());
+        fs::remove_dir_all(path).unwrap();
+    }
+
     #[test]
     fn parses_full_openai_compatible_model_list_without_version_filtering() {
         let body = json!({
@@ -2693,6 +3066,23 @@ mod tests {
             ids,
             vec!["provider-fast-current", "provider-reasoning-current"]
         );
+    }
+
+    #[test]
+    fn preview_models_reports_missing_key_without_contacting_the_provider() {
+        let catalog = preview_models_core(EditableProfile {
+            id: String::new(),
+            name: "草稿服务商".to_string(),
+            base_url: "https://provider.example/v1".to_string(),
+            model: String::new(),
+            note: String::new(),
+            api_key: String::new(),
+        })
+        .unwrap();
+
+        assert_eq!(catalog.provider_id, "draft-provider");
+        assert_eq!(catalog.status, "missing_key");
+        assert!(catalog.models.is_empty());
     }
 
     #[test]
@@ -2937,16 +3327,36 @@ api_key = "before-key"
             .and_then(|providers| providers.get("custom"))
             .and_then(|provider| provider.get("auth"))
             .expect("provider auth table");
-        assert_eq!(auth.get("command").and_then(toml::Value::as_str), Some("powershell.exe"));
-        assert!(auth.get("args").and_then(toml::Value::as_array).is_some());
+        assert_eq!(
+            auth.get("command").and_then(toml::Value::as_str),
+            Some("powershell.exe")
+        );
+        let args = auth
+            .get("args")
+            .and_then(toml::Value::as_array)
+            .expect("provider auth args");
+        let command = args
+            .iter()
+            .filter_map(toml::Value::as_str)
+            .find(|value| value.contains("OPENAI_API_KEY"))
+            .expect("provider auth command");
+        assert!(command.contains("$env:CODEX_HOME"));
+        assert!(command.contains("Join-Path $codexHome 'auth.json'"));
+        assert!(!command.contains("Join-Path (Join-Path $HOME '.codex') 'auth.json'"));
         assert!(!next.contains("requires_openai_auth"));
         assert!(next.contains("gpt-5.6-sol"));
         assert!(protected_sections_match(original, &next).unwrap());
 
         let auth_json = build_next_auth(r#"{"other":"keep"}"#, &profile).unwrap();
         let auth_value = serde_json::from_str::<Value>(&auth_json).unwrap();
-        assert_eq!(auth_value.get("OPENAI_API_KEY").and_then(Value::as_str), Some("model-flare-test-key"));
-        assert_eq!(auth_value.get("other").and_then(Value::as_str), Some("keep"));
+        assert_eq!(
+            auth_value.get("OPENAI_API_KEY").and_then(Value::as_str),
+            Some("model-flare-test-key")
+        );
+        assert_eq!(
+            auth_value.get("other").and_then(Value::as_str),
+            Some("keep")
+        );
     }
 
     #[test]
@@ -2958,7 +3368,7 @@ api_key = "before-key"
                 .http1_only(),
         )
         .build()
-            .unwrap();
+        .unwrap();
         let response = client
             .get("https://modelflare.dev/v1/models")
             .bearer_auth("signalman-transport-probe-invalid")
@@ -3072,10 +3482,7 @@ fn build_model_catalog_with_metadata(
 }
 
 fn compact_provider_error(error_body: &str) -> Option<String> {
-    let compact = error_body
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let compact = error_body.split_whitespace().collect::<Vec<_>>().join(" ");
     let compact = compact.trim();
     if compact.is_empty() {
         return None;
@@ -3149,7 +3556,7 @@ fn fetch_provider_models(
             .http1_only(),
     )
     .build()
-        .map_err(|err| SwitcherError::Message(format!("创建 HTTP client 失败：{err}")))?;
+    .map_err(|err| SwitcherError::Message(format!("创建 HTTP client 失败：{err}")))?;
     let mut response = None;
     let mut last_error = None;
     for attempt in 0..2 {
@@ -3183,7 +3590,9 @@ fn fetch_provider_models(
                 .unwrap_or_else(|| "未知传输错误".to_string());
             let mut detail = format!("模型目录请求失败：{error}（已对连接/超时做有限重试）。");
             if base_url.contains("a6api.com") && !base_url.contains("api.a6api.com") {
-                detail.push_str(" A6 官方文档当前推荐地址为 https://api.a6api.com/v1，请核对服务商配置。 ");
+                detail.push_str(
+                    " A6 官方文档当前推荐地址为 https://api.a6api.com/v1，请核对服务商配置。 ",
+                );
             }
             return Ok(build_model_catalog(
                 provider_id,
@@ -3208,12 +3617,8 @@ fn fetch_provider_models(
     let final_url = response.url().to_string();
     if status.as_u16() == 401 || status.as_u16() == 403 {
         let body = response.text().unwrap_or_default();
-        let (mut detail, provider_code) = model_catalog_http_detail(
-            status,
-            &body,
-            request_id.as_deref(),
-            retry_after,
-        );
+        let (mut detail, provider_code) =
+            model_catalog_http_detail(status, &body, request_id.as_deref(), retry_after);
         detail.push_str("；请检查 API key 和服务商权限。");
         detail.push_str(modelflare_permission_hint(profile));
         return Ok(build_model_catalog_with_metadata(
@@ -3232,12 +3637,8 @@ fn fetch_provider_models(
     }
     if !status.is_success() {
         let body = response.text().unwrap_or_default();
-        let (detail, provider_code) = model_catalog_http_detail(
-            status,
-            &body,
-            request_id.as_deref(),
-            retry_after,
-        );
+        let (detail, provider_code) =
+            model_catalog_http_detail(status, &body, request_id.as_deref(), retry_after);
         let status_name = match status.as_u16() {
             429 => "rate_limited",
             code if code >= 500 => "service_error",
@@ -3466,14 +3867,7 @@ fn transport_failure_outcome(err: &reqwest::Error, base_url: &str) -> ProviderVe
         } else {
             "无法建立连接；请检查 DNS、网络、TLS 或代理链路。"
         };
-        return verification_outcome(
-            false,
-            "network_error",
-            "transport",
-            detail,
-            None,
-            None,
-        );
+        return verification_outcome(false, "network_error", "transport", detail, None, None);
     }
     verification_outcome(
         false,
@@ -3712,7 +4106,9 @@ const COST_SCALE: u128 = 1_000_000_000_000;
 fn parse_fixed_decimal(value: &str, field_name: &str) -> Result<u128, SwitcherError> {
     let value = value.trim();
     if value.is_empty() || value.starts_with('-') || value.starts_with('+') {
-        return Err(SwitcherError::Message(format!("{field_name} 必须是大于 0 的十进制数。")));
+        return Err(SwitcherError::Message(format!(
+            "{field_name} 必须是大于 0 的十进制数。"
+        )));
     }
     let mut parts = value.split('.');
     let whole = parts.next().unwrap_or_default();
@@ -3727,15 +4123,15 @@ fn parse_fixed_decimal(value: &str, field_name: &str) -> Result<u128, SwitcherEr
             "{field_name} 必须是最多 {COST_SCALE_DIGITS} 位小数的正十进制数。"
         )));
     }
-    let whole = whole.parse::<u128>().map_err(|_| {
-        SwitcherError::Message(format!("{field_name} 数值过大，无法安全计算。"))
-    })?;
+    let whole = whole
+        .parse::<u128>()
+        .map_err(|_| SwitcherError::Message(format!("{field_name} 数值过大，无法安全计算。")))?;
     let fraction_value = if fraction.is_empty() {
         0
     } else {
-        fraction.parse::<u128>().map_err(|_| {
-            SwitcherError::Message(format!("{field_name} 数值无效。"))
-        })?
+        fraction
+            .parse::<u128>()
+            .map_err(|_| SwitcherError::Message(format!("{field_name} 数值无效。")))?
     };
     let fraction_scale = 10_u128.pow(COST_SCALE_DIGITS - fraction.len() as u32);
     let scaled = whole
@@ -3838,12 +4234,17 @@ fn numeric_cost(value: Option<&Value>) -> Option<String> {
 fn response_cost_candidate(body: &Value) -> Option<(String, String)> {
     ["total_cost", "total_cost_usd", "cost"]
         .iter()
-        .find_map(|key| numeric_cost(body.get(*key)).map(|cost| (cost, "response_inline".to_string())))
+        .find_map(|key| {
+            numeric_cost(body.get(*key)).map(|cost| (cost, "response_inline".to_string()))
+        })
         .or_else(|| {
             body.get("usage").and_then(|usage| {
                 ["cost", "total_cost", "total_cost_usd"]
                     .iter()
-                    .find_map(|key| numeric_cost(usage.get(*key)).map(|cost| (cost, "response_usage".to_string())))
+                    .find_map(|key| {
+                        numeric_cost(usage.get(*key))
+                            .map(|cost| (cost, "response_usage".to_string()))
+                    })
             })
         })
 }
@@ -3952,13 +4353,8 @@ fn preserve_previous_model_catalog(previous: Option<&Value>, next: &mut ModelCat
     let previous_count = previous.models.len();
     next.models = previous.models.clone();
     next.status = "stale".to_string();
-    next.last_successful_at = previous
-        .last_successful_at
-        .or(previous.fetched_at.clone());
-    let last_success = next
-        .last_successful_at
-        .as_deref()
-        .unwrap_or("未知时间");
+    next.last_successful_at = previous.last_successful_at.or(previous.fetched_at.clone());
+    let last_success = next.last_successful_at.as_deref().unwrap_or("未知时间");
     next.status_detail = format!(
         "{} 已保留上次成功目录（{} 个模型，最近成功于 {}）。",
         next.status_detail.trim_end_matches('。'),
@@ -3976,9 +4372,11 @@ pub fn check_for_update_core() -> Result<UpdateInfo, SwitcherError> {
     let current = Version::parse(&current_version)
         .map_err(|err| SwitcherError::Message(format!("当前应用版本无效：{err}")))?;
     let releases_url = env::var(RELEASES_API_ENV).unwrap_or_else(|_| RELEASES_API_URL.to_string());
-    let client = configure_http_client(reqwest::blocking::Client::builder().timeout(Duration::from_secs(15)))
-        .build()
-        .map_err(|err| SwitcherError::Message(format!("创建更新检查连接失败：{err}")))?;
+    let client = configure_http_client(
+        reqwest::blocking::Client::builder().timeout(Duration::from_secs(15)),
+    )
+    .build()
+    .map_err(|err| SwitcherError::Message(format!("创建更新检查连接失败：{err}")))?;
     let response = client
         .get(releases_url)
         .header("User-Agent", "CodeX-Provider-Switcher")
@@ -4062,6 +4460,7 @@ fn create_backup_with_label(label: &str, reason: &str) -> Result<PathBuf, Switch
     };
     let manifest = BackupManifest {
         schema_version: 4,
+        fingerprint_version: CURRENT_BACKUP_FINGERPRINT_VERSION,
         created_at: now_label(),
         reason: reason.to_string(),
         files,
@@ -4350,7 +4749,10 @@ fn remove_section(lines: &mut Vec<String>, header: &str) {
 }
 
 fn section_block(document: &str, header: &str) -> Option<Vec<String>> {
-    let lines = document.lines().map(ToString::to_string).collect::<Vec<_>>();
+    let lines = document
+        .lines()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
     let start = lines.iter().position(|line| line.trim() == header)?;
     let end = lines
         .iter()
@@ -4362,12 +4764,19 @@ fn section_block(document: &str, header: &str) -> Option<Vec<String>> {
     Some(lines[start..end].to_vec())
 }
 
+fn provider_command_auth_script() -> &'static str {
+    // CODEX_HOME is Codex's public override. When it is absent both Codex and
+    // Signalman fall back to the same per-user .codex directory. The internal
+    // development override deliberately never appears in a user config.
+    "$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }; Get-Content -LiteralPath (Join-Path $codexHome 'auth.json') -Raw | ConvertFrom-Json | Select-Object -ExpandProperty OPENAI_API_KEY"
+}
+
 fn append_provider_command_auth(lines: &mut Vec<String>, end: &mut usize) {
     // Keep the command deterministic and local. Signalman writes the selected
     // key to auth.json in the same transaction; Codex then reads it through
     // the provider-level auth command instead of relying on custom Bearer
     // handling.
-    let command = "Get-Content -LiteralPath (Join-Path (Join-Path $HOME '.codex') 'auth.json') -Raw | ConvertFrom-Json | Select-Object -ExpandProperty OPENAI_API_KEY";
+    let command = provider_command_auth_script();
     lines.insert(*end, "[model_providers.custom.auth]".to_string());
     *end += 1;
     lines.insert(*end, "command = \"powershell.exe\"".to_string());
@@ -4396,12 +4805,19 @@ fn build_next_config(original: &str, profile: &StoredProfile) -> Result<String, 
     );
     upsert_root_bool(&mut lines, "disable_response_storage", true);
 
+    if lines
+        .iter()
+        .all(|line| line.trim() != "[model_providers.custom]")
+    {
+        if !lines.is_empty() && !lines.last().is_some_and(|line| line.trim().is_empty()) {
+            lines.push(String::new());
+        }
+        lines.push("[model_providers.custom]".to_string());
+    }
     let start = lines
         .iter()
         .position(|line| line.trim() == "[model_providers.custom]")
-        .ok_or_else(|| {
-            SwitcherError::Message("缺少 [model_providers.custom] 配置段。".to_string())
-        })?;
+        .expect("custom provider section was just created when missing");
     let mut end = lines
         .iter()
         .enumerate()
@@ -4459,23 +4875,34 @@ fn build_next_config(original: &str, profile: &StoredProfile) -> Result<String, 
 fn build_connection_environment_config(original: &str) -> Result<String, SwitcherError> {
     let mut lines: Vec<String> = original.lines().map(ToString::to_string).collect();
     toml::from_str::<toml::Value>(original)?;
-    upsert_root_string(&mut lines, "model_provider", "custom");
     upsert_root_bool(&mut lines, "disable_response_storage", true);
-    if lines.iter().all(|line| line.trim() != "[model_providers.custom]") {
-        if !lines.is_empty() && !lines.last().is_some_and(|line| line.trim().is_empty()) {
-            lines.push(String::new());
-        }
-        lines.push("[model_providers.custom]".to_string());
-        lines.push("wire_api = \"responses\"".to_string());
-        lines.push("requires_openai_auth = false".to_string());
-    } else {
-        let start = lines.iter().position(|line| line.trim() == "[model_providers.custom]").unwrap_or(0);
-        let mut end = lines.iter().enumerate().skip(start + 1).find(|(_, line)| line.trim_start().starts_with('[')).map(|(index, _)| index).unwrap_or(lines.len());
+    // A new user has no provider endpoint, model, or credential yet. Creating
+    // a selected custom provider at this point makes Codex send an incomplete
+    // request and can combine an official endpoint with a third-party key.
+    // Keep an existing custom provider compatible, but create/select one only
+    // as part of the first real provider switch.
+    if lines
+        .iter()
+        .any(|line| line.trim() == "[model_providers.custom]")
+    {
+        let start = lines
+            .iter()
+            .position(|line| line.trim() == "[model_providers.custom]")
+            .unwrap_or(0);
+        let mut end = lines
+            .iter()
+            .enumerate()
+            .skip(start + 1)
+            .find(|(_, line)| line.trim_start().starts_with('['))
+            .map(|(index, _)| index)
+            .unwrap_or(lines.len());
         upsert_section_string(&mut lines, start, &mut end, "wire_api", "responses");
     }
     let next = lines.join("\r\n");
     if !protected_sections_match(original, &next)? {
-        return Err(SwitcherError::Message("连接环境准备已阻止：检测到受保护设置会被改动。".to_string()));
+        return Err(SwitcherError::Message(
+            "连接环境准备已阻止：检测到受保护设置会被改动。".to_string(),
+        ));
     }
     Ok(next)
 }
@@ -4503,10 +4930,13 @@ pub fn prepare_connection_environment_core_with_onboarding(
 ) -> Result<AppState, SwitcherError> {
     let candidates = configuration_layer_candidates()?;
     if !candidates.iter().any(|(id, _, _)| id == &layer_id) {
-        return Err(SwitcherError::Message("选择的 Codex 配置层已不存在，请重新检查。".to_string()));
+        return Err(SwitcherError::Message(
+            "选择的 Codex 配置层已不存在，请重新检查。".to_string(),
+        ));
     }
     let previous = load_connection_environment_record();
-    let onboarding_completed = !onboarding && (previous.onboarding_completed || previous.setup_completed);
+    let onboarding_completed =
+        !onboarding && (previous.onboarding_completed || previous.setup_completed);
     let selected = StoredConnectionEnvironment {
         selected_layer_id: Some(layer_id.clone()),
         setup_completed: false,
@@ -4519,7 +4949,9 @@ pub fn prepare_connection_environment_core_with_onboarding(
     let original_auth = capture_file(&auth)?;
     let result = (|| {
         let original = String::from_utf8(original_config.bytes.clone()).map_err(|_| {
-            SwitcherError::Message("现有 Codex 配置不是 UTF-8 文本，已停止准备连接环境。".to_string())
+            SwitcherError::Message(
+                "现有 Codex 配置不是 UTF-8 文本，已停止准备连接环境。".to_string(),
+            )
         })?;
         let next = build_connection_environment_config(&original)?;
         create_backup()?;
@@ -4635,7 +5067,69 @@ fn switch_config(
         return Err(error);
     }
     update_config_transaction_phase("auth_replaced")?;
-    let fingerprint = owned_configuration_fingerprint(&next_config, &next_auth)?;
+    let written_config = match fs::read_to_string(&config) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = restore_file_snapshot(
+                &config,
+                &FileSnapshot {
+                    exists: true,
+                    bytes: original.as_bytes().to_vec(),
+                },
+            );
+            let _ = restore_file_snapshot(
+                &auth,
+                &FileSnapshot {
+                    exists: true,
+                    bytes: original_auth_text.as_bytes().to_vec(),
+                },
+            );
+            let _ = complete_config_transaction();
+            return Err(error.into());
+        }
+    };
+    let written_auth = match fs::read_to_string(&auth) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = restore_file_snapshot(
+                &config,
+                &FileSnapshot {
+                    exists: true,
+                    bytes: original.as_bytes().to_vec(),
+                },
+            );
+            let _ = restore_file_snapshot(
+                &auth,
+                &FileSnapshot {
+                    exists: true,
+                    bytes: original_auth_text.as_bytes().to_vec(),
+                },
+            );
+            let _ = complete_config_transaction();
+            return Err(error.into());
+        }
+    };
+    if written_config != next_config || written_auth != next_auth {
+        let _ = restore_file_snapshot(
+            &config,
+            &FileSnapshot {
+                exists: true,
+                bytes: original.as_bytes().to_vec(),
+            },
+        );
+        let _ = restore_file_snapshot(
+            &auth,
+            &FileSnapshot {
+                exists: true,
+                bytes: original_auth_text.as_bytes().to_vec(),
+            },
+        );
+        let _ = complete_config_transaction();
+        return Err(SwitcherError::Message(
+            "切换后的配置回读不一致，已恢复切换前文件。".to_string(),
+        ));
+    }
+    let fingerprint = owned_configuration_fingerprint(&written_config, &written_auth)?;
     record_backup_post_change(&backup, &fingerprint)?;
     let initial_backup = backups_dir()?.join(INITIAL_BACKUP_LABEL);
     if let Ok(initial_manifest) =
@@ -4652,6 +5146,7 @@ fn switch_config(
         backup_id: backup_id.to_string(),
         kind: "switch".to_string(),
         created_at: now_label(),
+        fingerprint_version: CURRENT_BACKUP_FINGERPRINT_VERSION,
         before_fingerprint,
         after_fingerprint: fingerprint,
     })?;
@@ -4773,15 +5268,11 @@ fn save_profile(profile: EditableProfile) -> Result<AppState, SwitcherError> {
 
 pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
-    let id = if profile.id.trim().is_empty() {
-        normalize_id(&profile.name)
-    } else {
-        profile.id.trim().to_string()
-    };
-    if id.is_empty() {
+    if profile.name.trim().is_empty() {
         return Err(SwitcherError::Message("服务商名称不能为空。".to_string()));
     }
-    if profile.name.trim().is_empty() {
+    let id = profile_id_for_save(&catalog, &profile.id, &profile.name);
+    if id.is_empty() {
         return Err(SwitcherError::Message("服务商名称不能为空。".to_string()));
     }
     if !profile.base_url.trim().starts_with("http://")
@@ -4810,7 +5301,10 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
         auth_mode: existing_profile
             .as_ref()
             .map(|p| p.auth_mode.clone())
-            .filter(|mode| mode != &default_auth_mode() || preferred_auth_mode(&profile.name, &profile.base_url) != "provider_command")
+            .filter(|mode| {
+                mode != &default_auth_mode()
+                    || preferred_auth_mode(&profile.name, &profile.base_url) != "provider_command"
+            })
             .unwrap_or_else(|| preferred_auth_mode(&profile.name, &profile.base_url)),
         model_reasoning_effort: existing_profile
             .as_ref()
@@ -4840,9 +5334,9 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
         .profiles
         .insert(id.clone(), serde_json::to_value(stored)?);
     if is_new {
-        catalog.profile_order.push(id);
+        catalog.profile_order.push(id.clone());
     }
-    invalidate_catalog_model_verifications(&mut catalog, &profile.id);
+    invalidate_catalog_model_verifications(&mut catalog, &id);
     save_catalog(&catalog)?;
     app_state_with_activity(
         &format!("{display_name} 已保存"),
@@ -4922,7 +5416,9 @@ pub fn reveal_profile_api_key_core(profile_id: String) -> Result<String, Switche
         .ok_or_else(|| SwitcherError::Message("未找到服务商配置。".to_string()))?;
     let profile: StoredProfile = serde_json::from_value(value)?;
     if profile.api_key.trim().is_empty() {
-        return Err(SwitcherError::Message("该服务商没有已保存的访问密钥。".to_string()));
+        return Err(SwitcherError::Message(
+            "该服务商没有已保存的访问密钥。".to_string(),
+        ));
     }
     Ok(profile.api_key)
 }
@@ -5137,7 +5633,10 @@ pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError
 }
 
 #[tauri::command]
-fn run_response_probe(profile_id: String, benchmark_model: String) -> Result<AppState, SwitcherError> {
+fn run_response_probe(
+    profile_id: String,
+    benchmark_model: String,
+) -> Result<AppState, SwitcherError> {
     run_response_probe_for_model_core(profile_id, benchmark_model)
 }
 
@@ -5171,8 +5670,8 @@ pub fn run_response_probe_for_model_core(
             "缺少默认模型，无法运行返回能力探针。".to_string(),
         ));
     }
-    let endpoint = provider_probe_endpoint(&profile.base_url, "responses")
-        .map_err(SwitcherError::Message)?;
+    let endpoint =
+        provider_probe_endpoint(&profile.base_url, "responses").map_err(SwitcherError::Message)?;
     let observed_at = now_label();
     let mut observation = ResponseProbeObservation {
         id: format!("response-probe-{}", Local::now().timestamp_millis()),
@@ -5205,7 +5704,14 @@ pub fn run_response_probe_for_model_core(
             cache_write_tokens: Some(0),
             reasoning_tokens: Some(0),
         });
-        observation.cost_candidate = Some(if profile_id == "example-provider-d" { "0.000398" } else { "0.000524" }.to_string());
+        observation.cost_candidate = Some(
+            if profile_id == "example-provider-d" {
+                "0.000398"
+            } else {
+                "0.000524"
+            }
+            .to_string(),
+        );
         observation.cost_source = Some("response_usage".to_string());
         observation.detail = "已从服务商回包读取测试额度。".to_string();
         let detail = observation.detail.clone();
@@ -5223,7 +5729,7 @@ pub fn run_response_probe_for_model_core(
             .http1_only(),
     )
     .build()
-        .map_err(|err| SwitcherError::Message(format!("创建探针连接失败：{err}")))?;
+    .map_err(|err| SwitcherError::Message(format!("创建探针连接失败：{err}")))?;
     let response = client
         .post(endpoint)
         .bearer_auth(profile.api_key.trim())
@@ -5269,17 +5775,24 @@ pub fn run_response_probe_for_model_core(
                             observation.detail = "已从响应内容或响应头读取费用候选值；仍需核对平台余额单位和账单规则后再保存。".to_string();
                         } else if observation.usage.is_some() {
                             observation.status = "usage_only".to_string();
-                            observation.detail = "响应包含用量字段，可与服务商后台日志交叉核对。".to_string();
-                        } else if observation.request_id.is_some() || observation.response_id.is_some() {
+                            observation.detail =
+                                "响应包含用量字段，可与服务商后台日志交叉核对。".to_string();
+                        } else if observation.request_id.is_some()
+                            || observation.response_id.is_some()
+                        {
                             observation.status = "correlation_only".to_string();
-                            observation.detail = "已获得关联 ID，可到服务商后台定位本次调用。".to_string();
+                            observation.detail =
+                                "已获得关联 ID，可到服务商后台定位本次调用。".to_string();
                         } else {
                             observation.status = "no_signal".to_string();
-                            observation.detail = "服务商已响应，但没有返回可安全保存的费用、用量或关联线索。".to_string();
+                            observation.detail =
+                                "服务商已响应，但没有返回可安全保存的费用、用量或关联线索。"
+                                    .to_string();
                         }
                     }
                     Err(_) => {
-                        observation.detail = "服务商已响应，但返回体无法按 JSON 解析；未保存完整响应。".to_string();
+                        observation.detail =
+                            "服务商已响应，但返回体无法按 JSON 解析；未保存完整响应。".to_string();
                     }
                 }
             } else {
@@ -5290,7 +5803,8 @@ pub fn run_response_probe_for_model_core(
             observation.detail = "服务商响应超时；未确认返回能力。".to_string();
         }
         Err(error) if error.is_connect() => {
-            observation.detail = "无法建立服务商连接；请检查网络、DNS、TLS 或代理链路。".to_string();
+            observation.detail =
+                "无法建立服务商连接；请检查网络、DNS、TLS 或代理链路。".to_string();
         }
         Err(_) => {
             observation.detail = "服务商请求在传输过程中失败；未确认返回能力。".to_string();
@@ -5309,7 +5823,11 @@ pub fn run_response_probe_for_model_core(
             "返回能力探针未完成"
         },
         &format!("{}：{detail}", profile.name),
-        if succeeded && status != "no_signal" { "success" } else { "warning" },
+        if succeeded && status != "no_signal" {
+            "success"
+        } else {
+            "warning"
+        },
     )
 }
 
@@ -5389,7 +5907,9 @@ pub fn delete_cost_calibration_core(calibration_id: String) -> Result<AppState, 
     }
     let mut catalog = load_catalog()?;
     let before = catalog.cost_calibrations.len();
-    catalog.cost_calibrations.retain(|item| item.id != calibration_id);
+    catalog
+        .cost_calibrations
+        .retain(|item| item.id != calibration_id);
     if catalog.cost_calibrations.len() == before {
         return Err(SwitcherError::Message("未找到这条费用记录。".to_string()));
     }
@@ -5400,6 +5920,52 @@ pub fn delete_cost_calibration_core(calibration_id: String) -> Result<AppState, 
 #[tauri::command]
 fn refresh_models(profile_id: String) -> Result<AppState, SwitcherError> {
     refresh_models_core(profile_id)
+}
+
+#[tauri::command]
+fn preview_models(profile: EditableProfile) -> Result<ModelCatalog, SwitcherError> {
+    preview_models_core(profile)
+}
+
+pub fn preview_models_core(profile: EditableProfile) -> Result<ModelCatalog, SwitcherError> {
+    let base_url = profile.base_url.trim();
+    provider_probe_endpoint(base_url, "models").map_err(SwitcherError::Message)?;
+
+    let draft_profile = StoredProfile {
+        name: profile.name.trim().to_string(),
+        base_url: base_url.to_string(),
+        api_key: profile.api_key.trim().to_string(),
+        api_key_protected: String::new(),
+        model: profile.model.trim().to_string(),
+        auth_mode: preferred_auth_mode(&profile.name, base_url),
+        model_reasoning_effort: default_reasoning(),
+        verified: false,
+        verification_status: default_verification_status(),
+        verification_response_shape: None,
+        default: false,
+        note: String::new(),
+        last_switched_at: None,
+        last_verified_at: None,
+        last_verification_detail: None,
+        last_verification_stage: None,
+        last_verification_http_status: None,
+        last_verification_provider_code: None,
+    };
+    let preview_id = if profile.id.trim().is_empty() {
+        "draft-provider"
+    } else {
+        profile.id.trim()
+    };
+    let mut result = fetch_provider_models(preview_id, &draft_profile)?;
+    result.provider_id = preview_id.to_string();
+    result.status_detail = if result.status == "ok" {
+        format!("{} 保存后才会写入本机服务商目录。", result.status_detail)
+    } else {
+        result.status_detail
+    };
+    // Deliberately do not persist the draft or its key. This endpoint exists
+    // solely to populate the in-form model picker before a save.
+    Ok(result)
 }
 
 pub fn refresh_models_core(profile_id: String) -> Result<AppState, SwitcherError> {
@@ -5423,7 +5989,11 @@ pub fn refresh_models_core(profile_id: String) -> Result<AppState, SwitcherError
                 .model_catalogs
                 .insert(profile_id, serde_json::to_value(&model_catalog)?);
             save_catalog(&catalog)?;
-            return app_state_with_activity("模型目录已刷新", &model_catalog.status_detail, "success");
+            return app_state_with_activity(
+                "模型目录已刷新",
+                &model_catalog.status_detail,
+                "success",
+            );
         }
     }
     let mut model_catalog = fetch_provider_models(&profile_id, &profile)?;
@@ -5572,6 +6142,8 @@ pub fn restore_latest_backup_core(confirmation: String) -> Result<AppState, Swit
     let backups = list_backups()?;
     let latest = backups
         .first()
+        .filter(|backup| backup.restore_ready)
+        .or_else(|| backups.iter().find(|backup| backup.restore_ready))
         .ok_or_else(|| SwitcherError::Message("当前没有可恢复的备份。".to_string()))?;
     restore_backup_core(latest.label.clone(), confirmation)
 }
@@ -5630,6 +6202,7 @@ pub fn restore_backup_core(
         backup_id: backup_id.clone(),
         kind: "restore".to_string(),
         created_at: now_label(),
+        fingerprint_version: CURRENT_BACKUP_FINGERPRINT_VERSION,
         before_fingerprint,
         after_fingerprint: restored_fingerprint,
     })?;
@@ -5686,6 +6259,7 @@ pub fn run() {
             save_cost_calibration,
             delete_cost_calibration,
             refresh_models,
+            preview_models,
             set_default_profile,
             sync_current_configuration,
             toggle_auto_start,
@@ -5730,7 +6304,11 @@ mod legacy_profile_import_tests {
         }
     }
 
-    fn calibration_input(paid_cny: &str, consumable_credit: &str, debit_credit: &str) -> CostCalibrationInput {
+    fn calibration_input(
+        paid_cny: &str,
+        consumable_credit: &str,
+        debit_credit: &str,
+    ) -> CostCalibrationInput {
         CostCalibrationInput {
             provider_id: "test".to_string(),
             provider_name: "Test".to_string(),
@@ -5758,7 +6336,9 @@ mod legacy_profile_import_tests {
     fn calibrated_cost_rejects_invalid_or_zero_decimal_inputs() {
         assert!(calculate_calibrated_cost(&calibration_input("0", "100", "1")).is_err());
         assert!(calculate_calibrated_cost(&calibration_input("1", "abc", "1")).is_err());
-        assert!(calculate_calibrated_cost(&calibration_input("1.0000000000001", "1", "1")).is_err());
+        assert!(
+            calculate_calibrated_cost(&calibration_input("1.0000000000001", "1", "1")).is_err()
+        );
     }
 
     #[test]
@@ -5818,6 +6398,100 @@ mod legacy_profile_import_tests {
     fn new_install_catalog_has_no_preconfigured_provider() {
         let catalog = seed_catalog_from_existing().unwrap();
         assert!(catalog.profiles.is_empty());
+    }
+
+    #[test]
+    fn provider_ids_are_non_empty_and_unique_for_unicode_names() {
+        assert!(!provider_id_base("中转服务").is_empty());
+        assert!(provider_id_base("中转服务").starts_with("provider-"));
+
+        let mut catalog = seed_catalog_from_existing().unwrap();
+        let first = unique_profile_id(&catalog, "服务商 A");
+        catalog.profiles.insert(first.clone(), json!({}));
+        let second = unique_profile_id(&catalog, "另一个 A");
+        assert_ne!(first, second);
+        assert!(!second.is_empty());
+        assert_eq!(
+            profile_id_for_save(&catalog, &first, "已改名的中文服务商"),
+            first
+        );
+        assert_eq!(profile_id_for_save(&catalog, "", "服务商 A"), second);
+    }
+
+    #[test]
+    fn empty_initial_backup_is_audit_only_and_not_restorable() {
+        let manifest = BackupManifest {
+            schema_version: 4,
+            fingerprint_version: CURRENT_BACKUP_FINGERPRINT_VERSION,
+            created_at: "2026-08-20 00:00:00".to_string(),
+            reason: "initial_install".to_string(),
+            files: Vec::new(),
+            missing_files: vec!["config.toml".to_string(), "auth.json".to_string()],
+            post_change_fingerprint: None,
+            snapshot_fingerprint: None,
+            file_digests: BTreeMap::new(),
+            retention_managed: true,
+        };
+        assert!(is_empty_initial_backup(&manifest));
+    }
+
+    #[test]
+    fn codex_home_prefers_isolated_fixture_then_official_override_then_default() {
+        let default_home = PathBuf::from("C:/Users/tester");
+        assert_eq!(
+            resolve_codex_home(
+                Some(PathBuf::from("D:/fixture/.codex")),
+                Some(PathBuf::from("D:/official/.codex")),
+                default_home.clone(),
+            ),
+            PathBuf::from("D:/fixture/.codex")
+        );
+        assert_eq!(
+            resolve_codex_home(
+                None,
+                Some(PathBuf::from("D:/official/.codex")),
+                default_home.clone()
+            ),
+            PathBuf::from("D:/official/.codex")
+        );
+        assert_eq!(
+            resolve_codex_home(None, None, default_home),
+            PathBuf::from("C:/Users/tester/.codex")
+        );
+    }
+
+    #[test]
+    fn first_environment_setup_does_not_create_an_empty_current_provider() {
+        let prepared = build_connection_environment_config("").unwrap();
+        assert!(prepared.contains("disable_response_storage = true"));
+        assert!(!prepared.contains("model_provider = \"custom\""));
+        assert!(!prepared.contains("[model_providers.custom]"));
+
+        let checks = validation_checks(&prepared);
+        assert!(checks.iter().any(|check| {
+            check.id == "custom-provider" && !check.ok && check.severity == "info"
+        }));
+        assert!(checks.iter().any(|check| {
+            check.id == "custom-base-url" && !check.ok && check.severity == "info"
+        }));
+    }
+
+    #[test]
+    fn first_provider_switch_materializes_a_complete_custom_provider() {
+        let prepared = build_connection_environment_config("").unwrap();
+        let profile: StoredProfile = serde_json::from_value(json!({
+            "name": "First provider",
+            "base_url": "https://provider.example/v1",
+            "api_key": "test-key",
+            "model": "gpt-test"
+        }))
+        .unwrap();
+
+        let switched = build_next_config(&prepared, &profile).unwrap();
+        assert!(switched.contains("model_provider = \"custom\""));
+        assert!(switched.contains("[model_providers.custom]"));
+        assert!(switched.contains("base_url = \"https://provider.example/v1\""));
+        assert!(switched.contains("wire_api = \"responses\""));
     }
 
     #[test]
