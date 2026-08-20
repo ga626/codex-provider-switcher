@@ -2932,6 +2932,22 @@ select {
   text-overflow: ellipsis;
 }
 
+.statusbar-operation {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusbar-operation.is-busy {
+  color: var(--accent);
+}
+
+.statusbar-operation-elapsed {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+}
+
 /* First-run shell: a quiet, focused surface before the workbench exists. */
 .first-run-shell {
   min-width: 980px;

@@ -9,20 +9,22 @@ const backendPort = Number(process.env.BACKEND_FUNCTIONAL_SMOKE_PORT ?? 47842)
 const providerPort = Number(process.env.PROVIDER_FIXTURE_PORT ?? 47843)
 const backendUrl = `http://127.0.0.1:${backendPort}`
 const providerUrl = `http://127.0.0.1:${providerPort}/v1`
-const exePath = join(
+const defaultExePath = join(
   process.cwd(),
   'src-tauri',
   'target',
   'debug',
   process.platform === 'win32' ? 'local_backend.exe' : 'local_backend'
 )
-const recoveryExePath = join(
+const exePath = process.env.BACKEND_FUNCTIONAL_SMOKE_EXE ?? defaultExePath
+const defaultRecoveryExePath = join(
   process.cwd(),
   'src-tauri',
   'target',
   'debug',
   process.platform === 'win32' ? 'profile_recovery.exe' : 'profile_recovery'
 )
+const recoveryExePath = process.env.BACKEND_FUNCTIONAL_SMOKE_RECOVERY_EXE ?? defaultRecoveryExePath
 const packageMetadata = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8'))
 const versionMatch = /^(\d+)\.(\d+)\.(\d+)(-.+)?$/.exec(packageMetadata.version)
 if (!versionMatch) throw new Error(`Unsupported package version for update fixture: ${packageMetadata.version}`)
@@ -36,6 +38,7 @@ const authPath = join(codexDir, 'auth.json')
 const profilesPath = join(localAppData, 'CodeX Provider Switcher', 'profiles.json')
 let modelsProbeRequestCount = 0
 let responsesProbeRequestCount = 0
+const slowProviderDelayMs = 1200
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -120,6 +123,34 @@ async function oversizedRequestStatus() {
       socket.write('POST /api/profiles/save HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 262145\r\n\r\n')
     })
   })
+}
+
+async function openIdleConnections(count) {
+  const sockets = []
+  for (let index = 0; index < count; index += 1) {
+    const socket = connect(backendPort, '127.0.0.1')
+    await new Promise((resolve, reject) => {
+      socket.once('connect', resolve)
+      socket.once('error', reject)
+    })
+    sockets.push(socket)
+  }
+  return sockets
+}
+
+async function waitForBusyResponse() {
+  const started = Date.now()
+  while (Date.now() - started < 750) {
+    try {
+      const response = await fetch(`${backendUrl}/api/health`, { signal: AbortSignal.timeout(120) })
+      if (response.status === 503) return Date.now() - started
+    } catch {
+      // A request that entered the queue can time out while the test is still
+      // filling the pool. Keep probing until the explicit overload response.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  throw new Error('local backend did not return a bounded 503 response while its worker pool was saturated')
 }
 
 async function runProfileRecovery(source, environment) {
@@ -245,6 +276,13 @@ const providerServer = createServer((request, response) => {
   if (request.url === '/v1/models') {
     modelsProbeRequestCount += 1
     const authorization = request.headers.authorization
+    if (authorization === 'Bearer sk-slow-fixture') {
+      setTimeout(() => {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ data: [{ id: 'slow-model', object: 'model' }] }))
+      }, slowProviderDelayMs)
+      return
+    }
     if (authorization === 'Bearer sk-fixture') {
       response.writeHead(200, { 'Content-Type': 'application/json' })
       response.end(JSON.stringify({
@@ -420,6 +458,37 @@ try {
   const persistedProfile = JSON.parse(persistedProfiles).profiles[profile.id]
   assert(persistedProfile.api_key === '', 'profile store persisted a non-empty API key field')
   assert(typeof persistedProfile.api_key_protected === 'string' && persistedProfile.api_key_protected.length > 20, 'profile store did not use protected credential storage')
+
+  const slowProfile = {
+    ...profile,
+    id: 'slow-fixture-provider',
+    name: 'Slow Fixture Provider',
+    model: 'slow-model',
+    apiKey: 'sk-slow-fixture',
+  }
+  await api('/api/profiles/save', { profile: slowProfile })
+  const slowRefresh = api('/api/models/refresh', { profileId: slowProfile.id })
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const healthStartedAt = Date.now()
+  const healthDuringRefresh = await fetch(`${backendUrl}/api/health`)
+  assert(healthDuringRefresh.ok, 'local backend did not answer health checks while a provider request was running')
+  assert(Date.now() - healthStartedAt < 500, 'local backend queued the UI health check behind a slow provider request')
+  const slowState = await slowRefresh
+  assert(
+    slowState.modelCatalogs.find((item) => item.providerId === slowProfile.id)?.status === 'ok',
+    'slow provider refresh did not complete after the backend served concurrent UI traffic',
+  )
+
+  const idleConnections = await openIdleConnections(40)
+  try {
+    const busyResponseElapsed = await waitForBusyResponse()
+    assert(busyResponseElapsed < 750, 'local backend overload response exceeded the bounded wait budget')
+  } finally {
+    for (const socket of idleConnections) socket.destroy()
+  }
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const healthAfterOverload = await fetch(`${backendUrl}/api/health`)
+  assert(healthAfterOverload.ok, 'local backend did not recover after overloaded idle connections closed')
 
   const unicodeProvider = {
     id: '',
@@ -785,6 +854,8 @@ try {
       'local fallback rejects drive-qualified static paths and oversized request bodies',
       'update check compared semantic versions and selected the Windows installer',
       'model refresh called /v1/models, deduplicated results, and accepted the common models-array catalog shape',
+      'a slow provider refresh did not block the local backend health endpoint used by the visible workspace',
+      'the local backend bounded idle connection work and returned a fast 503 instead of creating unlimited threads',
       'authenticated /v1/responses probes distinguish standard, compatible, and unconfirmed response shapes',
       'every switch preflight performs a fresh provider probe; use risks require acknowledgement while unsafe configuration writes remain blocked',
       'verification diagnostics classify endpoint, response shape, billing, and service errors without changing Codex config/auth',

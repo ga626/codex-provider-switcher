@@ -18,6 +18,14 @@ use thiserror::Error;
 #[cfg(windows)]
 use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
+mod commands;
+mod providers;
+
+use providers::{
+    has_compatible_response_output, has_provider_error, parse_provider_models, provider_error_code,
+    provider_probe_endpoint,
+};
+
 // Keep the existing data directory so installed users retain DPAPI-protected
 // credentials, backups, and history when the visible product brand changes.
 const APP_DIR_NAME: &str = "CodeX Provider Switcher";
@@ -654,6 +662,20 @@ fn configure_http_client(
         Ok(proxy) => builder.proxy(proxy),
         Err(_) => builder,
     }
+}
+
+// Provider endpoints can take several seconds to answer. Keep the existing
+// blocking HTTP client on a dedicated runtime worker so the desktop event loop
+// stays responsive while a command is waiting for the network.
+async fn run_blocking_command<T>(
+    operation: impl FnOnce() -> Result<T, SwitcherError> + Send + 'static,
+) -> Result<T, SwitcherError>
+where
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(operation)
+        .await
+        .map_err(|error| SwitcherError::Message(format!("后台任务意外中断：{error}")))?
 }
 
 #[tauri::command]
@@ -2821,60 +2843,6 @@ fn configuration_drift(catalog: &StoredCatalog, config_text: &str) -> Option<Con
     })
 }
 
-fn model_tags(model_id: &str) -> Vec<String> {
-    let id = model_id.to_ascii_lowercase();
-    let mut tags = Vec::new();
-    if id.contains("embedding") {
-        tags.push("embedding".to_string());
-    }
-    if id.contains("audio") || id.contains("transcribe") || id.contains("tts") {
-        tags.push("audio".to_string());
-    }
-    if id.contains("image") || id.contains("vision") || id.contains("vl") {
-        tags.push("vision".to_string());
-    }
-    if id.contains("reason") || id.contains("thinking") || id.contains("o1") || id.contains("o3") {
-        tags.push("reasoning".to_string());
-    }
-    if id.contains("gpt") || id.contains("chat") || id.contains("codex") {
-        tags.push("responses-candidate".to_string());
-    }
-    tags
-}
-
-fn model_id_from_value(item: &Value) -> Option<String> {
-    item.as_str()
-        .or_else(|| item.get("id").and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(ToString::to_string)
-}
-
-fn parse_provider_models(body: &Value) -> Vec<ProviderModel> {
-    let mut seen = BTreeSet::new();
-    let empty = Vec::new();
-    let items = body
-        .get("data")
-        .and_then(Value::as_array)
-        .or_else(|| body.get("models").and_then(Value::as_array))
-        .or_else(|| body.as_array())
-        .unwrap_or(&empty);
-    let mut models = items
-        .iter()
-        .filter_map(model_id_from_value)
-        .filter(|id| seen.insert(id.to_ascii_lowercase()))
-        .map(|id| ProviderModel {
-            tags: model_tags(&id),
-            id,
-            aliases: Vec::new(),
-            source: "provider_models_api".to_string(),
-            verified_for_responses: "unknown".to_string(),
-        })
-        .collect::<Vec<_>>();
-    models.sort_by(|a, b| a.id.to_ascii_lowercase().cmp(&b.id.to_ascii_lowercase()));
-    models
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3759,95 +3727,6 @@ fn inference_outcome(
         provider_code: None,
         response_shape: Some(response_shape.to_string()),
     }
-}
-
-fn nonempty_text(value: Option<&Value>) -> bool {
-    value
-        .and_then(Value::as_str)
-        .is_some_and(|text| !text.trim().is_empty())
-}
-
-fn has_provider_error(body: &Value) -> bool {
-    body.get("error").is_some_and(|error| !error.is_null())
-}
-
-fn has_compatible_response_output(body: &Value) -> bool {
-    if nonempty_text(body.get("output_text"))
-        || nonempty_text(body.get("content"))
-        || body
-            .get("message")
-            .is_some_and(|message| nonempty_text(message.get("content")))
-    {
-        return true;
-    }
-
-    if body
-        .get("output")
-        .and_then(Value::as_array)
-        .is_some_and(|output| {
-            output.iter().any(|item| {
-                nonempty_text(item.get("text"))
-                    || nonempty_text(item.get("content"))
-                    || item
-                        .get("content")
-                        .and_then(Value::as_array)
-                        .is_some_and(|content| {
-                            content.iter().any(|part| nonempty_text(part.get("text")))
-                        })
-            })
-        })
-    {
-        return true;
-    }
-
-    body.get("choices")
-        .and_then(Value::as_array)
-        .is_some_and(|choices| {
-            choices.iter().any(|choice| {
-                nonempty_text(choice.get("text"))
-                    || choice
-                        .get("message")
-                        .is_some_and(|message| nonempty_text(message.get("content")))
-            })
-        })
-}
-
-fn provider_probe_endpoint(base_url: &str, probe_path: &str) -> Result<String, String> {
-    let trimmed = base_url.trim();
-    let mut url = reqwest::Url::parse(trimmed)
-        .map_err(|_| "接口地址不是有效的 http 或 https URL。".to_string())?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err("接口地址必须以 http 或 https 开头。".to_string());
-    }
-    if url.query().is_some() || url.fragment().is_some() {
-        return Err("接口地址不能包含查询参数或页面锚点。".to_string());
-    }
-    let base_path = url.path().trim_end_matches('/').to_string();
-    if base_path.ends_with("/responses") || base_path.ends_with("/models") {
-        return Err("接口地址应填写 API 基地址，不应包含 /responses 或 /models。".to_string());
-    }
-    if !url.path().ends_with('/') {
-        url.set_path(&format!("{}/", url.path()));
-    }
-    url.join(probe_path)
-        .map(|endpoint| endpoint.to_string())
-        .map_err(|_| "无法由接口地址构造服务商探针路径。".to_string())
-}
-
-fn provider_error_code(error_body: &str) -> Option<String> {
-    let value = serde_json::from_str::<Value>(error_body).ok()?;
-    value
-        .get("error")
-        .and_then(|error| {
-            error
-                .get("code")
-                .or_else(|| error.get("type"))
-                .and_then(Value::as_str)
-        })
-        .or_else(|| value.get("code").and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|code| !code.is_empty())
-        .map(ToString::to_string)
 }
 
 fn transport_failure_outcome(err: &reqwest::Error, base_url: &str) -> ProviderVerificationOutcome {
@@ -5174,11 +5053,6 @@ fn load_state(app: tauri::AppHandle) -> Result<AppState, SwitcherError> {
     Ok(state)
 }
 
-#[tauri::command]
-fn check_for_update() -> Result<UpdateInfo, SwitcherError> {
-    check_for_update_core()
-}
-
 pub fn load_state_core() -> Result<AppState, SwitcherError> {
     let state = match ensure_daily_backup() {
         Ok(true) => app_state_with_activity(
@@ -5585,11 +5459,6 @@ pub fn switch_profile_core(
     )
 }
 
-#[tauri::command]
-fn verify_profile(profile_id: String) -> Result<AppState, SwitcherError> {
-    verify_profile_core(profile_id)
-}
-
 pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError> {
     let mut catalog = load_catalog()?;
     let value = catalog
@@ -5630,14 +5499,6 @@ pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError
             "warning",
         )
     }
-}
-
-#[tauri::command]
-fn run_response_probe(
-    profile_id: String,
-    benchmark_model: String,
-) -> Result<AppState, SwitcherError> {
-    run_response_probe_for_model_core(profile_id, benchmark_model)
 }
 
 pub fn run_response_probe_core(profile_id: String) -> Result<AppState, SwitcherError> {
@@ -5915,16 +5776,6 @@ pub fn delete_cost_calibration_core(calibration_id: String) -> Result<AppState, 
     }
     save_catalog(&catalog)?;
     app_state_with_activity("已删除费用记录", "已删除一条基准测试费用记录。", "info")
-}
-
-#[tauri::command]
-fn refresh_models(profile_id: String) -> Result<AppState, SwitcherError> {
-    refresh_models_core(profile_id)
-}
-
-#[tauri::command]
-fn preview_models(profile: EditableProfile) -> Result<ModelCatalog, SwitcherError> {
-    preview_models_core(profile)
 }
 
 pub fn preview_models_core(profile: EditableProfile) -> Result<ModelCatalog, SwitcherError> {
@@ -6244,7 +6095,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             load_state,
-            check_for_update,
+            commands::check_for_update,
             save_profile,
             delete_profile,
             reorder_profiles,
@@ -6254,12 +6105,12 @@ pub fn run() {
             update_transport_options,
             prepare_switch,
             switch_profile,
-            verify_profile,
-            run_response_probe,
+            commands::verify_profile,
+            commands::run_response_probe,
             save_cost_calibration,
             delete_cost_calibration,
-            refresh_models,
-            preview_models,
+            commands::refresh_models,
+            commands::preview_models,
             set_default_profile,
             sync_current_configuration,
             toggle_auto_start,

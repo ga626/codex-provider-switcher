@@ -64,6 +64,7 @@ import {
 import type { AppState, BackupItem, ConfigurationProtection, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, ResponseProbeObservation, SwitchPreflight, UpdateInfo, ValidationCheck } from './types'
 import type { UpdateInstallProgress } from './adapter'
 import { createCompatibilityFeedback } from './feedback'
+import { operationElapsedLabel, operationStatusLabel, type ActiveOperation, type OperationId } from './operations'
 
 type ViewId = 'providers' | 'models' | 'switch-check' | 'protection' | 'timeline' | 'lab'
 type GuideChapterId = 'initialization' | 'providers' | 'protection' | 'timeline' | 'lab' | 'overview'
@@ -522,7 +523,8 @@ function App() {
   const [activeView, setActiveView] = useState<ViewId>('providers')
   const [draft, setDraft] = useState<EditableProfile>(emptyProfile)
   const [draftModelCatalog, setDraftModelCatalog] = useState<ModelCatalog | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
+  const [activeOperation, setActiveOperation] = useState<ActiveOperation | null>(null)
+  const [operationNow, setOperationNow] = useState(() => Date.now())
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<NoticeState | null>(null)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
@@ -555,6 +557,22 @@ function App() {
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
+  const busy = activeOperation?.id ?? null
+
+  function beginOperation(id: OperationId) {
+    setActiveOperation({ id, startedAt: Date.now() })
+  }
+
+  function finishOperation(id: OperationId) {
+    setActiveOperation((current) => current?.id === id ? null : current)
+  }
+
+  useEffect(() => {
+    if (!activeOperation) return undefined
+    setOperationNow(Date.now())
+    const timer = window.setInterval(() => setOperationNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [activeOperation])
 
   useEffect(() => {
     if (__CODEX_RELEASE_CHANNEL__ !== 'development' || !('__TAURI_INTERNALS__' in window)) return
@@ -624,7 +642,7 @@ function App() {
 
   useEffect(() => {
     async function loadInitialState() {
-      setBusy('refresh')
+      beginOperation('refresh')
       try {
         const next = await loadState()
         setState(next)
@@ -640,7 +658,7 @@ function App() {
       } catch (err) {
         setError(errorMessage(err, '加载切换器状态失败。'))
       } finally {
-        setBusy(null)
+        finishOperation('refresh')
       }
     }
 
@@ -685,7 +703,7 @@ function App() {
   }, [])
 
   async function refresh() {
-    setBusy('refresh')
+    beginOperation('refresh')
     try {
       const next = await loadState()
       setState(next)
@@ -698,7 +716,7 @@ function App() {
     } catch (err) {
       setError(errorMessage(err, '加载切换器状态失败。'))
     } finally {
-      setBusy(null)
+      finishOperation('refresh')
     }
   }
 
@@ -745,7 +763,7 @@ function App() {
   }
 
   async function refreshDraftModels() {
-    setBusy('preview-models')
+    beginOperation('preview-models')
     try {
       const catalog = await previewModels(draft)
       setDraftModelCatalog(catalog)
@@ -757,12 +775,12 @@ function App() {
     } catch (err) {
       setError(errorMessage(err, '无法刷新模型目录。'))
     } finally {
-      setBusy(null)
+      finishOperation('preview-models')
     }
   }
 
-  async function runAction(label: string, action: () => Promise<AppState>) {
-    setBusy(label)
+  async function runAction(label: OperationId, action: () => Promise<AppState>) {
+    beginOperation(label)
     try {
       const next = await action()
       setState(next)
@@ -786,7 +804,7 @@ function App() {
       }
       setError(errorMessage(err, '操作失败。'))
     } finally {
-      setBusy(null)
+      finishOperation(label)
     }
   }
 
@@ -794,7 +812,7 @@ function App() {
     setFirstRunPhase('preparing')
     setFirstRunError(null)
     setPreparationStep(0)
-    setBusy('prepare-connection-environment')
+    beginOperation('prepare-connection-environment')
     let phase = 0
     preparationTimer.current = window.setInterval(() => {
       phase = Math.min(FIRST_RUN_FEED.length, phase + 1)
@@ -823,12 +841,12 @@ function App() {
     } finally {
       if (preparationTimer.current !== null) window.clearInterval(preparationTimer.current)
       preparationTimer.current = null
-      setBusy(null)
+      finishOperation('prepare-connection-environment')
     }
   }
 
   async function enterSignalman() {
-    setBusy('complete-onboarding')
+    beginOperation('complete-onboarding')
     try {
       const next = await completeOnboarding()
       setState(next)
@@ -836,7 +854,7 @@ function App() {
       setFirstRunError(errorMessage(err, '无法保存首次使用完成状态。请重试。'))
       return
     } finally {
-      setBusy(null)
+      finishOperation('complete-onboarding')
     }
     setFirstRunTransitioning(true)
     setFirstRun(false)
@@ -870,8 +888,8 @@ function App() {
     setGuideProgress((current) => ({ ...current, [chapter]: { ...current[chapter], ...next } }))
   }
 
-  async function saveEditableProfile(nextDraft: EditableProfile, busyLabel: string) {
-    setBusy(busyLabel)
+  async function saveEditableProfile(nextDraft: EditableProfile, busyLabel: OperationId) {
+    beginOperation(busyLabel)
     try {
       const next = await saveProfile(nextDraft)
       setState(next)
@@ -893,12 +911,12 @@ function App() {
     } catch (err) {
       setError(errorMessage(err, '保存配置失败。'))
     } finally {
-      setBusy(null)
+      finishOperation(busyLabel)
     }
   }
 
   async function revealSavedApiKey(profileId: string) {
-    setBusy('reveal-key')
+    beginOperation('reveal-key')
     try {
       setError(null)
       return await revealProfileApiKey(profileId)
@@ -906,7 +924,7 @@ function App() {
       setError(errorMessage(err, '无法读取已保存的访问密钥。'))
       return null
     } finally {
-      setBusy(null)
+      finishOperation('reveal-key')
     }
   }
 
@@ -972,15 +990,20 @@ function App() {
     if (isStoreManagedBuild) {
       setUpdateBusy(true)
       setUpdateError(null)
+      beginOperation('check-update')
       try {
         const next = await checkForUpdate()
         setUpdateInfo(next)
+        finishOperation('check-update')
+        beginOperation('install-update')
         await openUpdate(next.releaseUrl)
         setError(null)
       } catch (err) {
         setUpdateError(errorMessage(err, '无法打开 Microsoft Store。'))
       } finally {
         setUpdateBusy(false)
+        finishOperation('check-update')
+        finishOperation('install-update')
       }
       return
     }
@@ -991,6 +1014,7 @@ function App() {
       setUpdateBusy(true)
       setUpdateError(null)
       setUpdateProgress({ phase: 'downloading', downloadedBytes: 0 })
+      beginOperation('install-update')
       try {
         await openUpdate(updateInfo.downloadUrl ?? updateInfo.releaseUrl, setUpdateProgress)
       } catch (err) {
@@ -998,6 +1022,7 @@ function App() {
       } finally {
         setUpdateBusy(false)
         setUpdateProgress(null)
+        finishOperation('install-update')
       }
       return
     }
@@ -1005,6 +1030,7 @@ function App() {
     setUpdateBusy(true)
     setUpdateProgress(null)
     setUpdateError(null)
+    beginOperation('check-update')
     try {
       const next = await checkForUpdate()
       setUpdateInfo(next)
@@ -1012,6 +1038,7 @@ function App() {
       setUpdateError(updateFailureMessage(err, '检查更新失败。'))
     } finally {
       setUpdateBusy(false)
+      finishOperation('check-update')
     }
   }
 
@@ -1023,7 +1050,7 @@ function App() {
 
   async function requestSwitch() {
     if (!selectedProfile || !canSwitch) return
-    setBusy('prepare-switch')
+    beginOperation('prepare-switch')
     try {
       const preflight = await prepareSwitch(selectedProfile.id)
       setSwitchConfirm(preflight)
@@ -1047,7 +1074,7 @@ function App() {
     } catch (err) {
       setError(errorMessage(err, '切换前检查失败。'))
     } finally {
-      setBusy(null)
+      finishOperation('prepare-switch')
     }
   }
 
@@ -1346,7 +1373,11 @@ function App() {
 
       <footer className="statusbar">
         <div className="statusbar-left">
-          <span>{busy ? `正在执行：${busy}` : '就绪'}</span>
+          <span className={busy ? 'statusbar-operation is-busy' : 'statusbar-operation'} aria-live="polite">
+            {busy && <RefreshCcw className="spin" size={13} aria-hidden="true" />}
+            {operationStatusLabel(busy)}
+            {busy && <small className="statusbar-operation-elapsed">{operationElapsedLabel(activeOperation, operationNow)}</small>}
+          </span>
           <span>{state.connectionEnvironment.status === 'ready' ? '连接环境已准备' : '需要准备连接环境'}</span>
           <span>本机资料仅保存在此设备</span>
         </div>
@@ -1643,7 +1674,7 @@ function ProviderWorkspace({
   updateDraft: <K extends keyof EditableProfile>(key: K, value: EditableProfile[K]) => void
   saveCurrentProfile: () => Promise<void>
   duplicateProfile: () => void
-  runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
+  runAction: (label: OperationId, action: () => Promise<AppState>) => Promise<void>
   revealApiKey: (profileId: string) => Promise<string | null>
   selectedModelCatalog: ModelCatalog | undefined
   onRefreshModels: () => void
@@ -2313,7 +2344,7 @@ function ModelsWorkspace({
   selectedModelCatalog: ModelCatalog | undefined
   busy: string | null
   selectModel: (model: string) => Promise<void>
-  runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
+  runAction: (label: OperationId, action: () => Promise<AppState>) => Promise<void>
 }) {
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -2469,7 +2500,7 @@ function SafetyWorkspace({
   selectedProfile: ProviderProfile | undefined
   busy: string | null
   hasUnsavedChanges: boolean
-  runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
+  runAction: (label: OperationId, action: () => Promise<AppState>) => Promise<void>
 }) {
   const targetChecks = [...availabilityChecks, ...profileConfigChecks]
   return (
@@ -2884,7 +2915,7 @@ function LabWorkspace({
   state: AppState
   selectedProfile: ProviderProfile | undefined
   busy: string | null
-  runAction: (label: string, action: () => Promise<AppState>) => Promise<void>
+  runAction: (label: OperationId, action: () => Promise<AppState>) => Promise<void>
   onOpenGuide: () => void
 }) {
   const [labProviderId, setLabProviderId] = useState(selectedProfile?.id ?? state.currentProfileId)

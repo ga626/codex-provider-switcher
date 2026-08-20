@@ -23,7 +23,7 @@ function assertBmp(buffer, width, height, label) {
   assert(Math.abs(buffer.readInt32LE(22)) === height, `${label} must be ${height}px high`)
 }
 
-const [packageJsonText, viteConfigText, buildRs, tauriConfigText, cargoToml, manifestText, libRs, adapterTs, appTsx, appCss, mockDataTs, preflightScript, devDesktopScript, prepareDevRuntimeScript, developmentFixtureCatalogText, developmentFixtureActivityText, headerBmp, sidebarBmp] = await Promise.all([
+const [packageJsonText, viteConfigText, buildRs, tauriConfigText, cargoToml, manifestText, libRs, commandRs, localBackendRs, adapterTs, appTsx, appCss, mockDataTs, preflightScript, devDesktopScript, prepareDevRuntimeScript, developmentFixtureCatalogText, developmentFixtureActivityText, headerBmp, sidebarBmp] = await Promise.all([
   readText('package.json'),
   readText('vite.config.ts'),
   readText('src-tauri/build.rs'),
@@ -31,6 +31,8 @@ const [packageJsonText, viteConfigText, buildRs, tauriConfigText, cargoToml, man
   readText('src-tauri/Cargo.toml'),
   readText('src-tauri/store/Package.appxmanifest'),
   readText('src-tauri/src/lib.rs'),
+  readText('src-tauri/src/commands.rs'),
+  readText('src-tauri/src/bin/local_backend.rs'),
   readText('src/adapter.ts'),
   readText('src/App.tsx'),
   readText('src/App.css'),
@@ -51,7 +53,7 @@ const developmentFixtureCatalog = JSON.parse(developmentFixtureCatalogText)
 const developmentFixtureActivity = JSON.parse(developmentFixtureActivityText)
 const switchProfileCore = libRs.slice(
   libRs.indexOf('pub fn switch_profile_core'),
-  libRs.indexOf('#[tauri::command]\nfn verify_profile')
+  libRs.indexOf('pub fn verify_profile_core')
 )
 
 assert(tauriConfig.productName === 'Signalman AI', 'Tauri productName must use the approved brand')
@@ -149,6 +151,19 @@ assert(libRs.includes('has_compatible_response_output(&body)'), 'Provider verifi
 assert(libRs.includes('"response_shape_unconfirmed"'), 'Provider verification must distinguish an unconfirmed response shape from a provider failure')
 assert(libRs.includes('mark_catalog_model_verified'), 'Successful inference verification must update the matching catalog model')
 assert(libRs.includes('.timeout(Duration::from_secs(15))'), 'Compatibility probes must use the bounded 15-second timeout budget')
+assert(libRs.includes('async fn run_blocking_command'), 'Long-running desktop commands must use the dedicated background-command helper')
+assert(libRs.includes('tauri::async_runtime::spawn_blocking(operation)'), 'Blocking provider HTTP work must leave the Tauri UI thread')
+assert(libRs.includes('mod commands;'), 'Desktop command boundary must be declared from the composition root')
+assert(commandRs.includes('async fn verify_profile('), 'Availability verification command must be asynchronous')
+assert(commandRs.includes('async fn run_response_probe('), 'Laboratory response probe command must be asynchronous')
+assert(commandRs.includes('async fn refresh_models('), 'Saved model refresh command must be asynchronous')
+assert(commandRs.includes('async fn preview_models('), 'Draft model refresh command must be asynchronous')
+assert(commandRs.includes('async fn check_for_update()'), 'Update checking command must be asynchronous')
+assert(commandRs.includes('run_blocking_command'), 'Network command adapters must use the background-command helper')
+assert(localBackendRs.includes('mpsc::sync_channel::<TcpStream>(QUEUED_CONNECTIONS)'), 'Local backend must queue only a bounded number of connections')
+assert(localBackendRs.includes('CONNECTION_WORKERS: usize = 8'), 'Local backend must use a fixed worker count')
+assert(localBackendRs.includes('TrySendError::Full'), 'Local backend must return a controlled busy response when saturated')
+assert(localBackendRs.includes('stream.set_write_timeout'), 'Local backend must bound response writes')
 assert(libRs.includes('custom_authentication_risk(&candidate_config)?'), 'Switch preparation must surface the candidate external-authentication mode as a risk before confirmation')
 assertNotIncludes(switchProfileCore, '切换已阻止：缺少 API 密钥', 'Switching must not treat a missing TOML or profile API key as an unconditional blocker')
 assertNotIncludes(switchProfileCore, 'verify_provider_auth_probe', 'Switching must not trigger a remote compatibility probe')
