@@ -46,6 +46,7 @@ import {
   openUpdate,
   prepareConnectionEnvironment,
   prepareSwitch,
+  previewModels,
   refreshModels,
   revealProfileApiKey,
   reorderProfiles,
@@ -62,6 +63,7 @@ import {
 } from './adapter'
 import type { AppState, BackupItem, ConfigurationProtection, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, ResponseProbeObservation, SwitchPreflight, UpdateInfo, ValidationCheck } from './types'
 import type { UpdateInstallProgress } from './adapter'
+import { createCompatibilityFeedback } from './feedback'
 
 type ViewId = 'providers' | 'models' | 'switch-check' | 'protection' | 'timeline' | 'lab'
 type GuideChapterId = 'initialization' | 'providers' | 'protection' | 'timeline' | 'lab' | 'overview'
@@ -519,6 +521,7 @@ function App() {
   const [selectedId, setSelectedId] = useState('example-provider-a')
   const [activeView, setActiveView] = useState<ViewId>('providers')
   const [draft, setDraft] = useState<EditableProfile>(emptyProfile)
+  const [draftModelCatalog, setDraftModelCatalog] = useState<ModelCatalog | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<NoticeState | null>(null)
@@ -706,6 +709,13 @@ function App() {
   const selectedModelCatalog = useMemo(() => {
     return state?.modelCatalogs.find((catalog) => catalog.providerId === selectedId)
   }, [selectedId, state])
+  const usesDraftConnection = Boolean(
+    !selectedProfile ||
+      draft.name.trim() !== selectedProfile.name ||
+      draft.baseUrl.trim() !== selectedProfile.baseUrl ||
+      draft.apiKey.trim()
+  )
+  const visibleModelCatalog = usesDraftConnection ? draftModelCatalog ?? undefined : selectedModelCatalog
 
   const profileConfigChecks = useMemo(() => {
     return profileConfigurationChecks(selectedProfile, draft)
@@ -728,7 +738,27 @@ function App() {
       busy === null
   )
   function updateDraft<K extends keyof EditableProfile>(key: K, value: EditableProfile[K]) {
+    if (key === 'name' || key === 'baseUrl' || key === 'apiKey') {
+      setDraftModelCatalog(null)
+    }
     setDraft((current) => ({ ...current, [key]: value }))
+  }
+
+  async function refreshDraftModels() {
+    setBusy('preview-models')
+    try {
+      const catalog = await previewModels(draft)
+      setDraftModelCatalog(catalog)
+      setNotice({
+        message: catalog.status === 'ok' ? '模型目录已刷新' : '模型目录未能刷新',
+        tone: catalog.status === 'ok' ? 'success' : 'warning',
+      })
+      setError(null)
+    } catch (err) {
+      setError(errorMessage(err, '无法刷新模型目录。'))
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function runAction(label: string, action: () => Promise<AppState>) {
@@ -855,6 +885,7 @@ function App() {
       if (saved) {
         setSelectedId(saved.id)
         setDraft(toEditable(saved))
+        setDraftModelCatalog(null)
       }
       const activity = next.activity[0]
       setNotice({ message: activity?.title ?? '已保存配置', tone: activity?.tone ?? 'success' })
@@ -894,11 +925,13 @@ function App() {
   function selectProfile(profile: ProviderProfile) {
     setSelectedId(profile.id)
     setDraft(toEditable(profile))
+    setDraftModelCatalog(null)
   }
 
   function startNewProfile() {
     setSelectedId('')
     setDraft(emptyProfile)
+    setDraftModelCatalog(null)
     setActiveView('providers')
   }
 
@@ -1067,7 +1100,7 @@ function App() {
 
   const primaryNavItems: Array<{ id: ViewId; label: string; note: string; icon: React.ReactNode }> = [
     { id: 'providers', label: '服务商', note: `${state.profiles.length} 个配置`, icon: <LayoutDashboard size={17} /> },
-    { id: 'protection', label: '安全与恢复', note: state.configurationProtection.baselineReady ? '备份已就绪' : '需要处理', icon: <ShieldCheck size={17} /> },
+    { id: 'protection', label: '安全与恢复', note: state.configurationProtection.baselineStatus === 'ready' ? '备份已就绪' : state.configurationProtection.baselineStatus === 'empty' ? '等待首次配置' : '需要处理', icon: <ShieldCheck size={17} /> },
     { id: 'timeline', label: '活动记录', note: latestActivity?.time ?? '暂无记录', icon: <Activity size={17} /> },
     { id: 'lab', label: '实验室', note: '费用比较', icon: <FlaskConical size={17} /> },
   ]
@@ -1230,9 +1263,14 @@ function App() {
                 duplicateProfile={duplicateProfile}
                 runAction={runAction}
                 revealApiKey={revealSavedApiKey}
-                selectedModelCatalog={selectedModelCatalog}
-                onRefreshModels={() => selectedProfile && runAction('refresh-models', () => refreshModels(selectedProfile.id))}
-                onSelectModel={selectModel}
+                selectedModelCatalog={visibleModelCatalog}
+                onRefreshModels={() => {
+                  if (usesDraftConnection) {
+                    void refreshDraftModels()
+                  } else if (selectedProfile) {
+                    void runAction('refresh-models', () => refreshModels(selectedProfile.id))
+                  }
+                }}
                 environment={state.connectionEnvironment}
                 onOpenSetup={() => setSetupDialogOpen(true)}
                 onOpenFeedback={() => setFeedbackOpen(true)}
@@ -1288,7 +1326,13 @@ function App() {
           canSwitch={canSwitch}
           preview={state.runtimeMode === 'browser_preview_mock'}
           onSave={() => void saveCurrentProfile()}
-          onRefreshModels={() => selectedProfile && void runAction('refresh-models', () => refreshModels(selectedProfile.id))}
+          onRefreshModels={() => {
+            if (usesDraftConnection) {
+              void refreshDraftModels()
+            } else if (selectedProfile) {
+              void runAction('refresh-models', () => refreshModels(selectedProfile.id))
+            }
+          }}
           onVerify={() => selectedProfile && void runAction('verify-profile', () => verifyProfile(selectedProfile.id))}
           onSwitch={() => void requestSwitch()}
           onOpenSetup={() => setSetupDialogOpen(true)}
@@ -1567,8 +1611,8 @@ function RestartCodexNoticeDialog({ onClose }: { onClose: () => void }) {
       <div className="confirm-dialog-icon"><RotateCcw size={20} /></div>
       <div>
         <span className="eyebrow">切换已完成</span>
-        <h2 id="restart-notice-title">请重新打开 Codex</h2>
-        <p>新配置已经写入并创建了恢复点，但当前正在运行的 Codex 或 ChatGPT 桌面端中的 Codex 会话不会自动切换。请关闭当前会话后重新打开，再确认实际工作正常。</p>
+            <h2 id="restart-notice-title">请在新对话中确认</h2>
+            <p>新配置已经写入并创建了恢复点。已打开的 Codex 或 ChatGPT 桌面端 Codex 对话会保留创建时的连接信息，不能被安全热切换。请结束当前对话后新建一个 Codex 对话，再确认实际服务商。</p>
       </div>
       <div className="command-row">
         <button className="primary-button" type="button" onClick={onClose} data-dialog-initial-focus>我知道了</button>
@@ -1588,7 +1632,6 @@ function ProviderWorkspace({
   revealApiKey,
   selectedModelCatalog,
   onRefreshModels,
-  onSelectModel,
   environment,
   onOpenSetup,
   onOpenFeedback,
@@ -1604,7 +1647,6 @@ function ProviderWorkspace({
   revealApiKey: (profileId: string) => Promise<string | null>
   selectedModelCatalog: ModelCatalog | undefined
   onRefreshModels: () => void
-  onSelectModel: (model: string) => Promise<void>
   environment: AppState['connectionEnvironment']
   onOpenSetup: () => void
   onOpenFeedback: () => void
@@ -1617,6 +1659,15 @@ function ProviderWorkspace({
   const [modelQuery, setModelQuery] = useState(draft.model)
   const [modelOpen, setModelOpen] = useState(false)
   const [modelSearchActive, setModelSearchActive] = useState(false)
+  const usesDraftConnection = Boolean(
+    !selectedProfile ||
+      draft.name.trim() !== selectedProfile.name ||
+      draft.baseUrl.trim() !== selectedProfile.baseUrl ||
+      draft.apiKey.trim()
+  )
+  const canRefreshDraftModels = Boolean(
+    draft.name.trim() && draft.baseUrl.trim() && draft.apiKey.trim()
+  )
   const filteredModels = useMemo(() => {
     // Opening the picker shows the full catalog. Typing explicitly activates
     // filtering so a query identical to the selected model still works.
@@ -1681,29 +1732,28 @@ function ProviderWorkspace({
         </div>
         <div className="form-grid" data-tour="provider-form" data-guide-target="providers.form">
           <label data-tour="provider-name" data-guide-target="providers.name">
-            服务商名称
+            <span className="field-label">服务商名称 <FieldHint text="给这条连接起一个容易识别的名称，只保存在本机，不会发送给服务商。" /></span>
             <input value={draft.name} onChange={(event) => updateDraft('name', event.target.value)} placeholder="输入服务商名称" />
           </label>
           <label data-tour="provider-base-url" data-guide-target="providers.endpoint">
-            接口地址
+            <span className="field-label">接口地址 <FieldHint text="填写服务商提供的 API 基地址。Codex 连接失败时，可以尝试在末尾补上 /v1。" /></span>
             <input value={draft.baseUrl} onChange={(event) => updateDraft('baseUrl', event.target.value)} placeholder="https://api.provider.com/v1" />
           </label>
           <label className="model-picker-field" data-tour="provider-model" data-guide-target="providers.model">
-            默认模型
+            <span className="field-label">默认模型 <FieldHint text={usesDraftConnection ? '填好名称、接口和访问密钥后即可刷新；刷新不会保存配置。' : '刷新只读取模型目录；保存后会作为 Codex 默认模型。'} /></span>
             <div className="model-picker-input">
               <div className="model-combobox-wrap">
                 <input role="combobox" aria-expanded={modelOpen} aria-controls="model-options" value={modelQuery} onFocus={() => { setModelOpen(true); setModelSearchActive(false) }} onChange={(event) => { setModelOpen(true); setModelSearchActive(true); setModelQuery(event.target.value); updateDraft('model', event.target.value) }} onKeyDown={(event) => { if (event.key === 'Escape') { setModelOpen(false); setModelSearchActive(false) }; if (event.key === 'Enter' && filteredModels[0]) { setModelQuery(filteredModels[0].id); updateDraft('model', filteredModels[0].id); setModelOpen(false); setModelSearchActive(false) } }} placeholder="输入 5.6 搜索模型" />
                 <button className="model-open-button" type="button" aria-label={modelOpen ? '收起模型列表' : '展开模型列表'} onMouseDown={(event) => event.preventDefault()} onClick={() => setModelOpen((open) => { setModelSearchActive(false); return !open })}><ChevronDown size={16} /></button>
                 {modelOpen && <div id="model-options" className="model-suggestions scroll-region" role="listbox" aria-label="可选模型">
-                  {filteredModels.length > 0 ? filteredModels.map((model) => <button key={model.id} type="button" role="option" aria-selected={model.id === draft.model} onClick={() => { setModelQuery(model.id); updateDraft('model', model.id); setModelOpen(false); setModelSearchActive(false); void onSelectModel(model.id) }}><strong>{model.id}</strong></button>) : <span className="model-empty">没有匹配的模型，可直接手动输入。</span>}
+                  {filteredModels.length > 0 ? filteredModels.map((model) => <button key={model.id} type="button" role="option" aria-selected={model.id === draft.model} onClick={() => { setModelQuery(model.id); updateDraft('model', model.id); setModelOpen(false); setModelSearchActive(false) }}><strong>{model.id}</strong></button>) : <span className="model-empty">没有匹配的模型，可直接手动输入。</span>}
                 </div>}
               </div>
-              <button className="ghost-button model-refresh-button" type="button" aria-label="刷新模型目录" title="刷新模型目录" disabled={!selectedProfile || busy !== null} onClick={onRefreshModels}><RefreshCcw size={16} /></button>
+              <button className="ghost-button model-refresh-button" type="button" aria-label="刷新模型目录" title={usesDraftConnection ? '使用当前填写的接口和密钥刷新模型目录，不会保存配置' : '刷新已保存服务商的模型目录'} disabled={busy !== null || (usesDraftConnection ? !canRefreshDraftModels : !selectedProfile)} onClick={onRefreshModels}><RefreshCcw size={16} /></button>
             </div>
-            {providerModelLabel(draft.model) !== draft.model && <small className="model-purpose-note">用途：{providerModelLabel(draft.model)}。保存后会作为 Codex 默认模型。</small>}
           </label>
           <label data-tour="provider-api-key" data-guide-target="providers.key">
-            访问密钥
+            <span className="field-label">访问密钥 <FieldHint text="填写服务商提供的访问密钥。它只保存在本机，用于刷新模型目录和执行连接检查。" /></span>
             <div className="key-field">
               <KeyRound size={15} />
               <input
@@ -1839,7 +1889,7 @@ function ConnectionDock({
     <div className="connection-dock-heading"><div><span>连接与切换</span><strong>{profile?.name ?? '未选择服务商'}</strong></div><button className="icon-button" type="button" onClick={onOpenGuide} aria-label="查看使用步骤" title="查看使用步骤"><CircleHelp size={16} /></button></div>
     {!environmentReady && <section className="dock-setup-callout" data-tour="environment-setup-action">
       <strong>先准备连接环境</strong>
-      <span>这一步会先创建恢复点，再只统一 Signalman 管理的连接字段。</span>
+      <span>这一步会先创建恢复点并准备安全写入位置；不会先创建空服务商。</span>
       <button className="primary-button" type="button" onClick={onOpenSetup} disabled={busy !== null}><ShieldCheck size={16} />一键准备连接环境</button>
     </section>}
     <section className="dock-action-stack" aria-label="检查与切换操作">
@@ -1869,9 +1919,9 @@ function ConnectionEnvironmentDialog({ environment, busy, onClose, onConfirm }: 
   const selectedLayer = environment.layers.find((layer) => layer.id === layerId)
   return <ModalDialog className="connection-environment-dialog" labelledBy="connection-environment-title" onClose={onClose}>
     <div className="section-heading-row"><div><span className="eyebrow">开始使用</span><h2 id="connection-environment-title">准备连接环境</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="关闭准备连接环境"><X size={16} /></button></div>
-    <p>此操作会先创建恢复点，再只统一 Signalman 必需的服务商和 Responses 设置。项目、MCP、插件、hooks、历史记录和其他未知设置保持不变。</p>
+    <p>此操作会先创建恢复点，再确认 Signalman 写入的位置安全可控。此时不会创建没有地址、模型或密钥的空服务商；你保存并切换第一家服务商后才会一次性写入完整连接信息。项目、MCP、插件、hooks、历史记录和其他未知设置保持不变。</p>
     {environment.layers.length > 1 && <label className="environment-layer-select">要管理的配置层<select value={layerId} onChange={(event) => setLayerId(event.target.value)}>{environment.layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.label}</option>)}</select></label>}
-    {selectedLayer && <div className="environment-preview"><strong>本次选择：{selectedLayer.label}</strong><span>{selectedLayer.detail}</span><ul><li>会设置 <code>model_provider = custom</code></li><li>会保持 <code>wire_api = responses</code></li><li>会创建可恢复的备份并在写入后回读</li></ul></div>}
+    {selectedLayer && <div className="environment-preview"><strong>本次选择：{selectedLayer.label}</strong><span>{selectedLayer.detail}</span><ul><li>会确认后续配置与认证写入同一 Codex 目录</li><li>不会提前选择空的 custom 服务商</li><li>切换时会创建可恢复的备份并在写入后回读</li></ul></div>}
     <div className="command-row"><button className="ghost-button" type="button" onClick={onClose} disabled={busy}>取消</button><button className="primary-button" type="button" disabled={!layerId || busy} onClick={() => onConfirm(layerId)} data-dialog-initial-focus><ShieldCheck size={16} />一键准备连接环境</button></div>
   </ModalDialog>
 }
@@ -1882,18 +1932,8 @@ function FeedbackDialog({ state, selectedProfile, onClose, onCopied, onSubmitted
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [diagnosticId] = useState(() => globalThis.crypto?.randomUUID?.() ?? `local-${Date.now()}-${Math.random().toString(16).slice(2)}`)
   const relayUrl = import.meta.env.VITE_FEEDBACK_RELAY_URL?.trim()
-  const catalog = state.modelCatalogs.find((item) => item.providerId === selectedProfile?.id)
-  const payload = JSON.stringify({
-    schema: 'signalman-compatibility-feedback/v1',
-    diagnosticId,
-    app: 'Signalman AI',
-    build: __CODEX_BUILD_SHA__,
-    runtime: state.runtimeMode,
-    provider: selectedProfile ? { name: selectedProfile.name.slice(0, 80), baseUrlHost: (() => { try { return new URL(selectedProfile.baseUrl).hostname } catch { return 'invalid' } })(), model: selectedProfile.model.slice(0, 120), status: selectedProfile.verificationStatus, stage: selectedProfile.lastVerificationStage, httpStatus: selectedProfile.lastVerificationHttpStatus, providerCode: selectedProfile.lastVerificationProviderCode } : null,
-    catalog: catalog ? { status: catalog.status, httpStatus: catalog.httpStatus, providerCode: catalog.providerCode, requestId: catalog.requestId, retryAfterSeconds: catalog.retryAfterSeconds } : null,
-    checks: [...state.checks].filter((check) => !check.ok).map((check) => ({ id: check.id, severity: check.severity })),
-    createdAt: new Date().toISOString(),
-  }, null, 2)
+  const feedback = useMemo(() => createCompatibilityFeedback(state, selectedProfile, diagnosticId), [diagnosticId, selectedProfile, state])
+  const payload = JSON.stringify(feedback, null, 2)
   async function copyPayload() {
     await navigator.clipboard?.writeText(payload)
     onCopied()
@@ -1917,9 +1957,9 @@ function FeedbackDialog({ state, selectedProfile, onClose, onCopied, onSubmitted
   }
   return <ModalDialog className="feedback-dialog" labelledBy="feedback-title" onClose={onClose}>
     <div className="section-heading-row"><div><span className="eyebrow">问题反馈</span><h2 id="feedback-title">把这次问题告诉维护者</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="关闭反馈"><X size={16} /></button></div>
-    <p>内容只包含版本、服务商名称、接口域名、模型和失败状态，不包含访问密钥、配置正文、文件路径、响应原文、Cookie、日志或截图。</p>
+    <p>内容会包含失败操作、接口域名与路径、模型目录摘要、检查结果和最近操作名称，方便维护者复现；不包含访问密钥、配置正文、文件路径、响应原文、Cookie、日志或截图。</p>
     <pre className="feedback-preview">{payload}</pre>
-    {relayUrl ? <label className="feedback-consent"><input type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)} />我确认提交以上脱敏信息给 Signalman 维护者</label> : <p className="feedback-relay-unavailable">在线反馈尚未配置。可先导出脱敏内容后发送给维护者。</p>}
+    {relayUrl ? <label className="feedback-consent"><input type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)} />我确认提交以上脱敏诊断信息给 Signalman 维护者</label> : <p className="feedback-relay-unavailable">在线反馈尚未配置。可先导出这份脱敏诊断单后发送给维护者。</p>}
     {submitError && <p className="feedback-submit-error">{submitError}</p>}
     <div className="command-row"><button className="ghost-button" type="button" onClick={onClose}>取消</button><button className="ghost-button" type="button" onClick={() => void copyPayload()}><Copy size={16} />导出脱敏内容</button>{relayUrl && <button className="primary-button" type="button" disabled={!consented || submitting} onClick={() => void submitPayload()}><MessageSquare size={16} />{submitting ? '正在提交' : '提交给维护者'}</button>}</div>
   </ModalDialog>
@@ -1933,9 +1973,9 @@ export function GettingStartedDialog({ environment, onClose, onOpenProviders }: 
     { title: '先统一连接环境', detail: '新安装的电脑可能有不同的 Codex 配置。先点“一键准备连接环境”，选择配置层并创建恢复点，之后才开始检查服务商。', target: 'environment-setup-action' },
     { title: '添加服务商', detail: '在左侧点击加号，新增一个服务商。已有配置可以直接点选，不必重复添加。', target: 'provider-add' },
     { title: '填写服务商名称', detail: '给这条连接起一个容易辨认的名字，例如“公司中转站”。', target: 'provider-name' },
-    { title: '填写接口地址', detail: '粘贴服务商提供的 OpenAI 兼容接口地址，通常以 /v1 结尾。', target: 'provider-base-url' },
+    { title: '填写接口地址', detail: '粘贴服务商提供的 API 基地址。Codex 连接失败时，可尝试在地址末尾补上 /v1。', target: 'provider-base-url' },
     { title: '填写访问密钥', detail: '粘贴访问密钥。默认只显示星号，点击眼睛可以在本机临时查看，密钥不会进入反馈内容。', target: 'provider-api-key' },
-    { title: '选择默认模型', detail: '点开模型框，输入“5.6”可筛选 GPT-5.6 系列，也可以滚动选择。找不到模型时先保存配置，再点刷新。', target: 'provider-model' },
+    { title: '选择默认模型', detail: '填好名称、接口和密钥后可直接点刷新图标；模型目录会先显示在这里，不会保存配置。点开模型框可搜索和滚动选择。', target: 'provider-model' },
     { title: '保存配置', detail: '确认名称、接口、模型和密钥后，点击保存更改。保存后右侧状态会更新。', target: 'save-provider' },
     { title: '运行可用性测试', detail: '在右侧顶部运行测试。这里会实际请求当前服务商，并把超时、限流、鉴权等结果分开显示。', target: 'run-availability' },
     { title: '检查并切换', detail: '最后点检查并切换。它会再次检查当前配置；有风险时会明确告诉你，安全阻止不会被绕过。', target: 'switch-preflight' },
@@ -2045,9 +2085,9 @@ const GUIDE_CHAPTERS: Record<GuideChapterId, GuideChapter> = {
       { id: 'environment', title: '先准备连接环境', detail: '新电脑的 Codex 配置可能不同。先创建恢复点，再只统一 Signalman 管理的连接字段；项目、MCP、插件和历史记录不会被改动。', target: 'providers.environment', view: 'providers' },
       { id: 'add', title: '新增服务商', detail: '点击加号新增一条连接；已有服务商直接从列表选择，不需要重复添加。', target: 'providers.add', view: 'providers' },
       { id: 'name', title: '填写服务商名称', detail: '给这条连接起一个容易认出的名字，例如“公司中转站”。', target: 'providers.name', view: 'providers' },
-      { id: 'endpoint', title: '填写接口地址', detail: '粘贴服务商提供的 OpenAI 兼容接口地址，通常以 /v1 结尾。', target: 'providers.endpoint', view: 'providers' },
+      { id: 'endpoint', title: '填写接口地址', detail: '粘贴服务商提供的 API 基地址。Codex 连接失败时，可尝试在末尾补上 /v1。', target: 'providers.endpoint', view: 'providers' },
       { id: 'key', title: '填写访问密钥', detail: '密钥默认隐藏；点击眼睛只会在本机临时显示，反馈内容不会包含密钥。', target: 'providers.key', view: 'providers' },
-      { id: 'model', title: '选择默认模型', detail: '输入“5.6”可筛选模型，也可以展开列表滚动选择。目录为空时先保存，再点刷新按钮。', target: 'providers.model', view: 'providers' },
+      { id: 'model', title: '选择默认模型', detail: '填好名称、接口和密钥后就能点击刷新图标。目录先显示在表单里，不会保存配置；展开后可搜索和滚动选择。', target: 'providers.model', view: 'providers' },
       { id: 'save', title: '保存配置', detail: '保存后，右侧检查会读取这条新配置。未保存的修改不能直接拿去测试或切换。', target: 'providers.save', view: 'providers' },
       { id: 'availability', title: '运行可用性测试', detail: '这里会实际请求当前服务商，并分别显示超时、限流、鉴权或协议问题；它不会切换 Codex 配置。', target: 'providers.availability', view: 'providers' },
       { id: 'switch', title: '检查并切换', detail: '最后执行检查并切换。安全阻止不能绕过；使用风险会明确说明，并在确认前让你选择是否继续。', target: 'providers.switch', view: 'providers' },
@@ -2058,7 +2098,7 @@ const GUIDE_CHAPTERS: Record<GuideChapterId, GuideChapter> = {
       { id: 'list', title: '服务商列表', detail: '点击条目开始编辑；可用拖动手柄或键盘调整显示顺序。', target: 'providers.list', view: 'providers' },
       { id: 'add', title: '新增一条连接', detail: '加号会打开一条空白配置，不会覆盖现有服务商。', target: 'providers.add', view: 'providers' },
       { id: 'form', title: '基础配置', detail: '名称、接口、默认模型和访问密钥在这里填写；备注只用于本机识别。', target: 'providers.form', view: 'providers' },
-      { id: 'model', title: '模型选择与刷新', detail: '模型框支持输入筛选和滚动选择；右侧刷新只请求当前服务商的模型目录。', target: 'providers.model', view: 'providers' },
+      { id: 'model', title: '模型选择与刷新', detail: '未保存时，刷新会使用当前填写的接口和密钥，不写入本机目录；已保存时，刷新对应服务商的模型目录。模型框支持搜索和滚动选择。', target: 'providers.model', view: 'providers' },
       { id: 'save', title: '保存与管理', detail: '保存后才会更新检查结果。这里还可以复制配置、设为默认或删除不再需要的服务商。', target: 'providers.actions', view: 'providers' },
       { id: 'availability', title: '可用性测试', detail: '测试会请求当前服务商，不会改写 Codex 配置。结果会区分限流、鉴权、超时和响应格式。', target: 'providers.availability', view: 'providers' },
       { id: 'switch', title: '检查并切换', detail: '切换前会重新核对当前配置并创建恢复点。安全检查和使用风险是两种不同状态。', target: 'providers.switch', view: 'providers' },
@@ -2541,7 +2581,7 @@ function ConfigurationProtectionWorkspace({
         <div className="protection-hero" data-guide-target="protection.baseline">
           <div>
             <span className="eyebrow">备份状态</span>
-            <h3>{protection.baselineReady ? '首次启动基线备份已就绪' : '首次启动基线备份尚未完成'}</h3>
+            <h3>{protection.baselineStatus === 'ready' ? '首次启动基线备份已就绪' : protection.baselineStatus === 'empty' ? '首次启动记录已建立' : '首次启动基线备份需要处理'}</h3>
             <p>{protection.baselineDetail}</p>
           </div>
           <ShieldCheck size={34} aria-hidden="true" />

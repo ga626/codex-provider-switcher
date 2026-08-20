@@ -159,6 +159,7 @@ export type ConfigurationProtectionItem = {
 
 export type ConfigurationProtection = {
   baselineReady: boolean
+  baselineStatus: 'ready' | 'empty' | 'blocked'
   baselineDetail: string
   items: ConfigurationProtectionItem[]
   restoreDetail: string

@@ -369,9 +369,13 @@ function mockModelCatalog(profileId: string): ModelCatalog {
   if (!profile) {
     throw new Error('未找到服务商配置。')
   }
+  return mockModelCatalogFromProfile(profile)
+}
+
+function mockModelCatalogFromProfile(profile: ProviderProfile): ModelCatalog {
   if (!profile.hasApiKey) {
     return {
-      providerId: profileId,
+      providerId: profile.id,
       baseUrl: profile.baseUrl,
       fetchedAt: nowLabel(),
       status: 'missing_key',
@@ -381,7 +385,7 @@ function mockModelCatalog(profileId: string): ModelCatalog {
   }
 
   return {
-    providerId: profileId,
+    providerId: profile.id,
     baseUrl: profile.baseUrl,
     fetchedAt: nowLabel(),
     status: 'ok',
@@ -455,6 +459,36 @@ export async function refreshModels(profileId: string): Promise<AppState> {
     tone: catalog.status === 'ok' ? 'success' : 'warning',
   })
   return structuredClone(mockState)
+}
+
+export async function previewModels(profile: EditableProfile): Promise<ModelCatalog> {
+  if (isTauri) {
+    return invoke<ModelCatalog>('preview_models', { profile })
+  }
+  const webCatalog = await tryWebBackend<ModelCatalog>('/api/models/preview', apiPost({ profile }))
+  if (webCatalog) {
+    return webCatalog
+  }
+  await mockDelay()
+  if (!profile.baseUrl.trim()) {
+    throw new Error('请先填写接口地址。')
+  }
+  return {
+    ...mockModelCatalogFromProfile({
+      id: profile.id || 'draft-provider',
+      name: profile.name,
+      baseUrl: profile.baseUrl,
+      model: profile.model,
+      reasoningEffort: 'high',
+      note: '',
+      verified: false,
+      verificationStatus: 'not_checked',
+      isDefault: false,
+      active: false,
+      hasApiKey: Boolean(profile.apiKey.trim()),
+    }),
+    statusDetail: '开发预览返回了示例模型；保存后才会写入本机服务商目录。',
+  }
 }
 
 export async function deleteProfile(profileId: string): Promise<AppState> {
