@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "perf:ui-fixtures": "node scripts/perf/ui-fixture-benchmark.mjs",
     "preview": "vite preview",
     "preview:start": "powershell -ExecutionPolicy Bypass -File scripts/start-preview.ps1",
     "preview:stop": "powershell -ExecutionPolicy Bypass -File scripts/stop-preview.ps1",

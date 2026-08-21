@@ -26,9 +26,76 @@ export type OperationId =
   | 'verify'
   | 'verify-profile'
 
+export type OperationScope = 'workspace' | 'provider' | 'lab' | 'update' | 'onboarding'
+
+export type OperationPhase = 'queued' | 'running' | 'completed'
+
+export type OperationResult = 'pending' | 'success' | 'failure' | 'cancelled'
+
+/** Versioned counterpart of Rust's OperationEventV1 contract. */
+export type OperationEventV1 = {
+  version: 1
+  /** Unique invocation id; different from the human-readable operation kind. */
+  id: string
+  kind: OperationId
+  scope: OperationScope
+  phase: OperationPhase
+  startedAt: string
+  elapsedMs: number
+  result: OperationResult
+  detail?: string
+  errorCode?: string
+}
+
+function newOperationInvocationId(kind: OperationId, now: number) {
+  const randomId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${now}-${Math.random().toString(36).slice(2)}`
+  return `${kind}-${randomId}`
+}
+
+export function startOperationEvent(
+  kind: OperationId,
+  scope: OperationScope = 'workspace',
+  now = Date.now(),
+): OperationEventV1 {
+  return {
+    version: 1,
+    id: newOperationInvocationId(kind, now),
+    kind,
+    scope,
+    phase: 'running',
+    startedAt: new Date(now).toISOString(),
+    elapsedMs: 0,
+    result: 'pending',
+  }
+}
+
+export function finishOperationEvent(
+  event: OperationEventV1,
+  result: Exclude<OperationResult, 'pending'>,
+  elapsedMs: number,
+  detail?: string,
+  errorCode?: string,
+): OperationEventV1 {
+  return {
+    ...event,
+    phase: 'completed',
+    elapsedMs: Math.max(0, Math.round(elapsedMs)),
+    result,
+    ...(detail ? { detail } : {}),
+    ...(errorCode ? { errorCode } : {}),
+  }
+}
+
+export function isTerminalOperationEvent(event: OperationEventV1 | null): boolean {
+  return event?.phase === 'completed'
+}
+
 export type ActiveOperation = {
   id: OperationId
   startedAt: number
+  event: OperationEventV1
 }
 
 export function operationStatusLabel(operation: OperationId | null) {

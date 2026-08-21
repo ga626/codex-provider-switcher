@@ -6,38 +6,58 @@
 //! boundary.
 
 use super::{
-    check_for_update_core, preview_models_core, refresh_models_core, run_blocking_command,
-    run_response_probe_for_model_core, verify_profile_core, AppState, EditableProfile,
-    ModelCatalog, SwitcherError, UpdateInfo,
+    check_for_update_core, preview_models_core, refresh_models_core,
+    run_blocking_command_with_events, run_response_probe_for_model_core, verify_profile_core,
+    AppState, EditableProfile, ModelCatalog, OperationEventV1, SwitcherError, UpdateInfo,
 };
+use tauri::ipc::Channel;
 
 #[tauri::command]
 pub(crate) async fn check_for_update() -> Result<UpdateInfo, SwitcherError> {
-    run_blocking_command(check_for_update_core).await
+    super::run_blocking_command(check_for_update_core).await
 }
 
 #[tauri::command]
-pub(crate) async fn verify_profile(profile_id: String) -> Result<AppState, SwitcherError> {
-    run_blocking_command(move || verify_profile_core(profile_id)).await
+pub(crate) async fn verify_profile(
+    profile_id: String,
+    on_event: Channel<OperationEventV1>,
+) -> Result<AppState, SwitcherError> {
+    run_blocking_command_with_events("verify-profile", "provider", Some(on_event), move || {
+        verify_profile_core(profile_id)
+    })
+    .await
 }
 
 #[tauri::command]
 pub(crate) async fn run_response_probe(
     profile_id: String,
     benchmark_model: String,
+    on_event: Channel<OperationEventV1>,
 ) -> Result<AppState, SwitcherError> {
-    run_blocking_command(move || run_response_probe_for_model_core(profile_id, benchmark_model))
-        .await
+    run_blocking_command_with_events("run-cost-probe", "lab", Some(on_event), move || {
+        run_response_probe_for_model_core(profile_id, benchmark_model)
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) async fn refresh_models(profile_id: String) -> Result<AppState, SwitcherError> {
-    run_blocking_command(move || refresh_models_core(profile_id)).await
+pub(crate) async fn refresh_models(
+    profile_id: String,
+    on_event: Channel<OperationEventV1>,
+) -> Result<AppState, SwitcherError> {
+    run_blocking_command_with_events("refresh-models", "provider", Some(on_event), move || {
+        refresh_models_core(profile_id)
+    })
+    .await
 }
 
 #[tauri::command]
 pub(crate) async fn preview_models(
     profile: EditableProfile,
+    on_event: Channel<OperationEventV1>,
 ) -> Result<ModelCatalog, SwitcherError> {
-    run_blocking_command(move || preview_models_core(profile)).await
+    run_blocking_command_with_events("preview-models", "provider", Some(on_event), move || {
+        preview_models_core(profile)
+    })
+    .await
 }

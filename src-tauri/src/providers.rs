@@ -5,9 +5,292 @@
 //! now, so this is a deliberately small first extraction rather than a broad
 //! provider rewrite.
 
-use crate::ProviderModel;
-use serde_json::Value;
+use crate::{
+    default_auth_mode, default_verification_status, ModelCatalog, ProviderModel,
+    ProviderVerificationOutcome, StoredProfile,
+};
+use chrono::Local;
+use serde_json::{json, Value};
 use std::collections::BTreeSet;
+use std::time::Duration;
+
+use super::{
+    configure_http_client, is_isolated_development_fixture, response_header_id, SwitcherError,
+};
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ModelCatalogMetadata {
+    pub(crate) http_status: Option<u16>,
+    pub(crate) provider_code: Option<String>,
+    pub(crate) request_id: Option<String>,
+    pub(crate) retry_after_seconds: Option<u64>,
+}
+
+/// Select the authentication contract for a provider without touching storage
+/// or the desktop command boundary. Provider-specific rules live here so
+/// profile migration and persistence can share the same decision.
+pub(crate) fn preferred_auth_mode(name: &str, base_url: &str) -> String {
+    let haystack = format!("{} {}", name, base_url).to_ascii_lowercase();
+    if haystack.contains("modelflare.dev") || haystack.contains("modelflare") {
+        "provider_command".to_string()
+    } else {
+        default_auth_mode()
+    }
+}
+
+pub(crate) fn uses_provider_command_auth(profile: &StoredProfile) -> bool {
+    profile.auth_mode == "provider_command"
+        || preferred_auth_mode(&profile.name, &profile.base_url) == "provider_command"
+}
+
+pub(crate) fn is_modelflare_profile(profile: &StoredProfile) -> bool {
+    preferred_auth_mode(&profile.name, &profile.base_url) == "provider_command"
+}
+
+pub(crate) fn modelflare_permission_hint(profile: &StoredProfile) -> &'static str {
+    if is_modelflare_profile(profile) {
+        " ModelFlare 要求 API Key 属于包含 gpt-5.6-sol 的非 default 分组；auth.command 只解决取钥匙，不会授予模型权限。"
+    } else {
+        ""
+    }
+}
+
+pub(crate) fn build_model_catalog(
+    provider_id: &str,
+    profile: &StoredProfile,
+    status: &str,
+    detail: &str,
+    models: Vec<ProviderModel>,
+    fetched_at: String,
+) -> ModelCatalog {
+    build_model_catalog_with_metadata(
+        provider_id,
+        profile,
+        status,
+        detail,
+        models,
+        fetched_at,
+        ModelCatalogMetadata::default(),
+    )
+}
+
+pub(crate) fn build_model_catalog_with_metadata(
+    provider_id: &str,
+    profile: &StoredProfile,
+    status: &str,
+    detail: &str,
+    models: Vec<ProviderModel>,
+    fetched_at: String,
+    metadata: ModelCatalogMetadata,
+) -> ModelCatalog {
+    ModelCatalog {
+        provider_id: provider_id.to_string(),
+        base_url: profile.base_url.clone(),
+        fetched_at: Some(fetched_at.clone()),
+        last_successful_at: (status == "ok").then_some(fetched_at),
+        status: status.to_string(),
+        status_detail: detail.to_string(),
+        http_status: metadata.http_status,
+        provider_code: metadata.provider_code,
+        request_id: metadata.request_id,
+        retry_after_seconds: metadata.retry_after_seconds,
+        models,
+    }
+}
+
+fn now_label() -> String {
+    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+fn build_model_catalog_now(
+    provider_id: &str,
+    profile: &StoredProfile,
+    status: &str,
+    detail: &str,
+    models: Vec<ProviderModel>,
+) -> ModelCatalog {
+    build_model_catalog(provider_id, profile, status, detail, models, now_label())
+}
+
+fn build_model_catalog_with_metadata_now(
+    provider_id: &str,
+    profile: &StoredProfile,
+    status: &str,
+    detail: &str,
+    models: Vec<ProviderModel>,
+    metadata: ModelCatalogMetadata,
+) -> ModelCatalog {
+    build_model_catalog_with_metadata(
+        provider_id,
+        profile,
+        status,
+        detail,
+        models,
+        now_label(),
+        metadata,
+    )
+}
+
+pub(crate) fn compact_provider_error(error_body: &str) -> Option<String> {
+    let compact = error_body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let compact = compact.trim();
+    if compact.is_empty() {
+        return None;
+    }
+    let mut result = compact.chars().take(240).collect::<String>();
+    if compact.chars().count() > 240 {
+        result.push('…');
+    }
+    Some(result)
+}
+
+pub(crate) fn retry_after_seconds(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+}
+
+pub(crate) fn model_catalog_http_detail(
+    status: reqwest::StatusCode,
+    body: &str,
+    request_id: Option<&str>,
+    retry_after: Option<u64>,
+) -> (String, Option<String>) {
+    let provider_code = provider_error_code(body);
+    let mut detail = format!("服务商返回 HTTP {status}");
+    if let Some(code) = provider_code.as_deref() {
+        detail.push_str(&format!("（错误码：{code}）"));
+    }
+    if let Some(seconds) = retry_after {
+        detail.push_str(&format!("；请等待约 {seconds} 秒后再试"));
+    }
+    if let Some(request_id) = request_id {
+        detail.push_str(&format!("；请求编号：{request_id}"));
+    }
+    if let Some(body) = compact_provider_error(body) {
+        detail.push_str(&format!("；服务商说明：{body}"));
+    }
+    (detail, provider_code)
+}
+
+pub(crate) fn verification_outcome(
+    verified: bool,
+    status: &str,
+    stage: &str,
+    detail: &str,
+    http_status: Option<u16>,
+    provider_code: Option<String>,
+) -> ProviderVerificationOutcome {
+    ProviderVerificationOutcome {
+        verified,
+        status: status.to_string(),
+        detail: detail.to_string(),
+        stage: stage.to_string(),
+        http_status,
+        provider_code,
+        response_shape: None,
+    }
+}
+
+pub(crate) fn inference_outcome(
+    response_shape: &str,
+    detail: &str,
+    http_status: u16,
+) -> ProviderVerificationOutcome {
+    ProviderVerificationOutcome {
+        verified: true,
+        status: "verified".to_string(),
+        detail: detail.to_string(),
+        stage: "inference".to_string(),
+        http_status: Some(http_status),
+        provider_code: None,
+        response_shape: Some(response_shape.to_string()),
+    }
+}
+
+pub(crate) fn provider_failure_outcome(
+    http_status: Option<u16>,
+    error_body: &str,
+) -> ProviderVerificationOutcome {
+    let error_text = error_body.to_ascii_lowercase();
+    let provider_code = provider_error_code(error_body);
+    let has_billing_signal = ["insufficient", "quota", "balance", "credit", "余额", "额度"]
+        .iter()
+        .any(|signal| error_text.contains(signal));
+    let (status, stage, detail) = if has_billing_signal || http_status == Some(402) {
+        (
+            "billing_unavailable",
+            "billing",
+            "服务商余额、额度或配额不足，无法完成实际请求。",
+        )
+    } else {
+        match http_status {
+            Some(401 | 403) => (
+                "unauthorized",
+                "authentication",
+                "API 密钥无效、权限不足或服务商拒绝了该请求。",
+            ),
+            Some(404 | 405) => (
+                "endpoint_or_model_unavailable",
+                "endpoint",
+                "接口路径或当前模型不可用，服务商拒绝了 Responses 请求。",
+            ),
+            Some(400 | 415 | 422) => (
+                "request_incompatible",
+                "request",
+                "服务商拒绝了认证探针请求。",
+            ),
+            Some(429) => (
+                "rate_limited",
+                "provider",
+                "服务商当前限流，尚未确认可用性。",
+            ),
+            Some(code) if code >= 500 => (
+                "service_error",
+                "provider",
+                "服务商发生服务端错误，尚未确认可用性。",
+            ),
+            None => (
+                "protocol_incompatible",
+                "response_format",
+                "服务商返回了错误响应，但响应形状不兼容。",
+            ),
+            _ => (
+                "provider_error",
+                "provider",
+                "服务商返回错误载荷，未确认可用性。",
+            ),
+        }
+    };
+    verification_outcome(false, status, stage, detail, http_status, provider_code)
+}
+
+pub(crate) fn apply_verification(
+    profile: &mut StoredProfile,
+    outcome: ProviderVerificationOutcome,
+    verified_at: String,
+) {
+    profile.verified = outcome.verified;
+    profile.verification_status = outcome.status;
+    profile.last_verified_at = Some(verified_at);
+    profile.last_verification_detail = Some(outcome.detail);
+    profile.last_verification_stage = Some(outcome.stage);
+    profile.last_verification_http_status = outcome.http_status;
+    profile.last_verification_provider_code = outcome.provider_code;
+    profile.verification_response_shape = outcome.response_shape;
+}
+
+pub(crate) fn reset_profile_verification(profile: &mut StoredProfile, detail: &str) {
+    profile.verified = false;
+    profile.verification_status = default_verification_status();
+    profile.verification_response_shape = None;
+    profile.last_verified_at = None;
+    profile.last_verification_detail = Some(detail.to_string());
+    profile.last_verification_stage = Some("profile".to_string());
+    profile.last_verification_http_status = None;
+    profile.last_verification_provider_code = None;
+}
 
 pub(crate) fn model_tags(model_id: &str) -> Vec<String> {
     let id = model_id.to_ascii_lowercase();
@@ -155,9 +438,10 @@ pub(crate) fn provider_error_code(error_body: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        has_compatible_response_output, has_provider_error, provider_error_code,
-        provider_probe_endpoint,
+        build_model_catalog, has_compatible_response_output, has_provider_error,
+        provider_error_code, provider_failure_outcome, provider_probe_endpoint,
     };
+    use crate::StoredProfile;
     use serde_json::json;
 
     #[test]
@@ -218,4 +502,433 @@ mod tests {
             Some("insufficient_quota".to_string())
         );
     }
+
+    #[test]
+    fn classifies_provider_failures_without_network_or_storage() {
+        let outcome = provider_failure_outcome(Some(429), r#"{"error":{"code":"rate_limit"}}"#);
+        assert_eq!(outcome.status, "rate_limited");
+        assert_eq!(outcome.stage, "provider");
+        assert_eq!(outcome.provider_code.as_deref(), Some("rate_limit"));
+
+        let billing = provider_failure_outcome(Some(402), "insufficient quota");
+        assert_eq!(billing.status, "billing_unavailable");
+        assert_eq!(billing.stage, "billing");
+    }
+
+    #[test]
+    fn builds_catalog_metadata_without_changing_public_shape() {
+        let profile = StoredProfile {
+            name: "Fixture".to_string(),
+            base_url: "https://provider.example/v1".to_string(),
+            api_key: "development-placeholder".to_string(),
+            api_key_protected: String::new(),
+            model: "gpt-test".to_string(),
+            auth_mode: "bearer_profile_key".to_string(),
+            model_reasoning_effort: "high".to_string(),
+            verified: false,
+            verification_status: "not_checked".to_string(),
+            verification_response_shape: None,
+            default: false,
+            note: String::new(),
+            last_switched_at: None,
+            last_verified_at: None,
+            last_verification_detail: None,
+            last_verification_stage: None,
+            last_verification_http_status: None,
+            last_verification_provider_code: None,
+        };
+        let catalog = build_model_catalog(
+            "fixture",
+            &profile,
+            "ok",
+            "已刷新 1 个模型",
+            vec![crate::ProviderModel {
+                id: "gpt-test".to_string(),
+                aliases: Vec::new(),
+                source: "fixture".to_string(),
+                tags: vec!["responses-candidate".to_string()],
+                verified_for_responses: "unknown".to_string(),
+            }],
+            "2026-08-21 00:00:00".to_string(),
+        );
+        assert_eq!(catalog.provider_id, "fixture");
+        assert_eq!(
+            catalog.last_successful_at.as_deref(),
+            Some("2026-08-21 00:00:00")
+        );
+        assert_eq!(catalog.models.len(), 1);
+    }
+}
+
+pub(crate) fn fetch_provider_models(
+    provider_id: &str,
+    profile: &StoredProfile,
+) -> Result<ModelCatalog, SwitcherError> {
+    if profile.api_key.trim().is_empty() {
+        return Ok(build_model_catalog_now(
+            provider_id,
+            profile,
+            "missing_key",
+            "缺少 API 密钥，无法刷新模型目录。",
+            Vec::new(),
+        ));
+    }
+
+    let base_url = profile.base_url.trim().trim_end_matches('/');
+    if !base_url.starts_with("http") {
+        return Ok(build_model_catalog_now(
+            provider_id,
+            profile,
+            "provider_error",
+            "接口地址无效，必须以 http 或 https 开头。",
+            Vec::new(),
+        ));
+    }
+
+    let url = format!("{base_url}/models");
+    let client = configure_http_client(
+        reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(18))
+            .http1_only(),
+    )
+    .build()
+    .map_err(|err| SwitcherError::Message(format!("创建 HTTP client 失败：{err}")))?;
+    let mut response = None;
+    let mut last_error = None;
+    for attempt in 0..2 {
+        match client
+            .get(&url)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .header(reqwest::header::USER_AGENT, "Signalman-AI/0.10")
+            .bearer_auth(profile.api_key.trim())
+            .send()
+        {
+            Ok(value) => {
+                response = Some(value);
+                break;
+            }
+            Err(err) => {
+                let retryable = err.is_timeout() || err.is_connect();
+                last_error = Some(err);
+                if retryable && attempt < 1 {
+                    std::thread::sleep(Duration::from_millis(350));
+                    continue;
+                }
+                break;
+            }
+        }
+    }
+    let response = match response {
+        Some(response) => response,
+        None => {
+            let error = last_error
+                .map(|err| err.to_string())
+                .unwrap_or_else(|| "未知传输错误".to_string());
+            let mut detail = format!("模型目录请求失败：{error}（已对连接/超时做有限重试）。");
+            if base_url.contains("a6api.com") && !base_url.contains("api.a6api.com") {
+                detail.push_str(
+                    " A6 官方文档当前推荐地址为 https://api.a6api.com/v1，请核对服务商配置。 ",
+                );
+            }
+            return Ok(build_model_catalog_now(
+                provider_id,
+                profile,
+                "network_error",
+                detail.trim(),
+                Vec::new(),
+            ));
+        }
+    };
+
+    let status = response.status();
+    let headers = response.headers().clone();
+    let request_id = response_header_id(&headers);
+    let retry_after = retry_after_seconds(&headers);
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("未知")
+        .to_string();
+    let final_url = response.url().to_string();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        let body = response.text().unwrap_or_default();
+        let (mut detail, provider_code) =
+            model_catalog_http_detail(status, &body, request_id.as_deref(), retry_after);
+        detail.push_str("；请检查 API key 和服务商权限。");
+        detail.push_str(modelflare_permission_hint(profile));
+        return Ok(build_model_catalog_with_metadata_now(
+            provider_id,
+            profile,
+            "unauthorized",
+            &detail,
+            Vec::new(),
+            ModelCatalogMetadata {
+                http_status: Some(status.as_u16()),
+                provider_code,
+                request_id,
+                retry_after_seconds: retry_after,
+            },
+        ));
+    }
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        let (detail, provider_code) =
+            model_catalog_http_detail(status, &body, request_id.as_deref(), retry_after);
+        let status_name = match status.as_u16() {
+            429 => "rate_limited",
+            code if code >= 500 => "service_error",
+            _ => "provider_error",
+        };
+        return Ok(build_model_catalog_with_metadata_now(
+            provider_id,
+            profile,
+            status_name,
+            &detail,
+            Vec::new(),
+            ModelCatalogMetadata {
+                http_status: Some(status.as_u16()),
+                provider_code,
+                request_id,
+                retry_after_seconds: retry_after,
+            },
+        ));
+    }
+
+    let body: Value = match response.json() {
+        Ok(value) => value,
+        Err(err) => {
+            return Ok(build_model_catalog_with_metadata_now(
+                provider_id,
+                profile,
+                "provider_error",
+                &format!(
+                    "模型目录响应不是有效 JSON（content-type: {content_type}，最终地址: {final_url}）：{err}"
+                ),
+                Vec::new(),
+                ModelCatalogMetadata {
+                    http_status: Some(status.as_u16()),
+                    request_id,
+                    retry_after_seconds: retry_after,
+                    ..ModelCatalogMetadata::default()
+                },
+            ));
+        }
+    };
+    let models = parse_provider_models(&body);
+
+    if models.is_empty() {
+        let shape = if body.get("data").and_then(Value::as_array).is_some() {
+            "data"
+        } else if body.get("models").and_then(Value::as_array).is_some() {
+            "models"
+        } else if body.is_array() {
+            "top_level_array"
+        } else {
+            "unknown_object"
+        };
+        return Ok(build_model_catalog_with_metadata_now(
+            provider_id,
+            profile,
+            "empty_models",
+            &format!(
+                "provider 返回空模型列表（形状: {shape}，content-type: {content_type}，最终地址: {final_url}）。"
+            ),
+            Vec::new(),
+            ModelCatalogMetadata {
+                http_status: Some(status.as_u16()),
+                request_id,
+                retry_after_seconds: retry_after,
+                ..ModelCatalogMetadata::default()
+            },
+        ));
+    }
+
+    Ok(build_model_catalog_with_metadata_now(
+        provider_id,
+        profile,
+        "ok",
+        &format!(
+            "已刷新中转站实际返回的 {} 个模型；不会自动改写当前模型。",
+            models.len()
+        ),
+        models,
+        ModelCatalogMetadata {
+            http_status: Some(status.as_u16()),
+            request_id,
+            retry_after_seconds: retry_after,
+            ..ModelCatalogMetadata::default()
+        },
+    ))
+}
+
+fn transport_failure_outcome(err: &reqwest::Error, base_url: &str) -> ProviderVerificationOutcome {
+    if err.is_timeout() {
+        return verification_outcome(
+            false,
+            "timeout",
+            "transport",
+            "服务商响应超时，尚未确认可用性。",
+            None,
+            None,
+        );
+    }
+    if err.is_connect() {
+        let detail = if base_url.contains("a6api.com") && !base_url.contains("api.a6api.com") {
+            "无法建立连接；请检查 DNS、网络、TLS 或代理链路。A6 官方文档当前推荐地址为 https://api.a6api.com/v1，请核对服务商配置。"
+        } else {
+            "无法建立连接；请检查 DNS、网络、TLS 或代理链路。"
+        };
+        return verification_outcome(false, "network_error", "transport", detail, None, None);
+    }
+    verification_outcome(
+        false,
+        "transport_error",
+        "transport",
+        "服务商请求在传输过程中失败，尚未确认可用性。",
+        None,
+        None,
+    )
+}
+
+pub(crate) fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOutcome {
+    if profile.api_key.trim().is_empty() {
+        return verification_outcome(
+            false,
+            "missing_key",
+            "profile",
+            "缺少 API 密钥，无法发送真实服务商请求。",
+            None,
+            None,
+        );
+    }
+    if profile.model.trim().is_empty() {
+        return verification_outcome(
+            false,
+            "invalid_profile",
+            "profile",
+            "缺少默认模型，无法发送与 Codex 相同的 Responses 请求。",
+            None,
+            None,
+        );
+    }
+    if is_isolated_development_fixture(profile) {
+        return inference_outcome(
+            "standard_responses",
+            "服务商已返回可识别的 Responses 输出。",
+            200,
+        );
+    }
+    let endpoint = match provider_probe_endpoint(&profile.base_url, "responses") {
+        Ok(endpoint) => endpoint,
+        Err(detail) => {
+            return verification_outcome(false, "invalid_profile", "profile", &detail, None, None)
+        }
+    };
+
+    let client = match configure_http_client(
+        reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .http1_only(),
+    )
+    .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            return verification_outcome(
+                false,
+                "transport_error",
+                "transport",
+                &format!("创建验证连接失败：{err}"),
+                None,
+                None,
+            );
+        }
+    };
+    let request = client
+        .post(endpoint)
+        .bearer_auth(profile.api_key.trim())
+        .json(&json!({
+            "model": profile.model.trim(),
+            "input": "Reply with OK.",
+            "max_output_tokens": 16,
+            "store": false,
+        }));
+    let response = match request.send() {
+        Ok(response) => response,
+        Err(err) => return transport_failure_outcome(&err, &profile.base_url),
+    };
+
+    let status = response.status();
+    let response_headers = response.headers().clone();
+    if status.is_success() {
+        return match response.json::<Value>() {
+            Ok(body) if has_provider_error(&body) => {
+                enrich_provider_failure_detail(
+                    provider_failure_outcome(Some(status.as_u16()), &body.to_string()),
+                    &response_headers,
+                    &body.to_string(),
+                )
+            }
+            Ok(body) if body.get("id").is_some() => inference_outcome(
+                "standard_responses",
+                "可用性测试已通过：当前模型返回了标准 Responses 结果。本次检查不会写入 Codex 配置。",
+                status.as_u16(),
+            ),
+            Ok(body) if has_compatible_response_output(&body) => inference_outcome(
+                "compatible_response",
+                "可用性测试已通过：当前模型返回了可识别的兼容响应。标准 Responses 形状尚未完全确认。",
+                status.as_u16(),
+            ),
+            Ok(_) => verification_outcome(
+                false,
+                "response_shape_unconfirmed",
+                "response_shape",
+                "服务端已响应并返回 JSON，但本工具尚不能从中确认模型输出；这不代表服务商不能被 Codex 使用。",
+                Some(status.as_u16()),
+                None,
+            ),
+            Err(_) => verification_outcome(
+                false,
+                "response_unparseable",
+                "response_shape",
+                "服务端已响应，但返回内容无法按 JSON 解析；本工具无法确认模型输出。",
+                Some(status.as_u16()),
+                None,
+            ),
+        };
+    }
+
+    let error_body = response.text().unwrap_or_default();
+    let mut outcome = enrich_provider_failure_detail(
+        provider_failure_outcome(Some(status.as_u16()), &error_body),
+        &response_headers,
+        &error_body,
+    );
+    outcome.detail.push_str(modelflare_permission_hint(profile));
+    outcome
+}
+
+fn enrich_provider_failure_detail(
+    mut outcome: ProviderVerificationOutcome,
+    headers: &reqwest::header::HeaderMap,
+    error_body: &str,
+) -> ProviderVerificationOutcome {
+    if let Some(code) = provider_error_code(error_body) {
+        outcome.detail.push_str(&format!("错误码：{code}。"));
+    }
+    if let Some(seconds) = retry_after_seconds(headers) {
+        outcome
+            .detail
+            .push_str(&format!("请等待约 {seconds} 秒后再试。"));
+    }
+    if let Some(request_id) = response_header_id(headers) {
+        outcome
+            .detail
+            .push_str(&format!("请求编号：{request_id}。"));
+    }
+    if let Some(body) = compact_provider_error(error_body) {
+        outcome.detail.push_str(&format!("服务商说明：{body}"));
+    }
+    outcome
 }

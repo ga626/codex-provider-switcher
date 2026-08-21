@@ -1,0 +1,52 @@
+/* Shared component primitives. Feature-specific layout remains in App.css. */
+.field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.field-hint {
+  position: relative;
+  display: inline-flex;
+  color: var(--faint);
+}
+
+.field-hint button {
+  width: 16px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: help;
+}
+
+.field-hint button:hover,
+.field-hint button:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
+.field-hint > span {
+  position: absolute;
+  z-index: 8;
+  bottom: calc(100% + 8px);
+  left: -10px;
+  width: 235px;
+  display: none;
+  padding: 9px 10px;
+  color: #fff;
+  background: #243245;
+  border-radius: 6px;
+  box-shadow: 0 8px 20px rgba(24, 35, 49, 0.2);
+  font-size: 12px;
+  font-weight: 520;
+  line-height: 1.5;
+}
+
+.field-hint:hover > span,
+.field-hint:focus-within > span {
+  display: block;
+}
