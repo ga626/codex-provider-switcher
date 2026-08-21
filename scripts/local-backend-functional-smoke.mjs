@@ -130,7 +130,19 @@ async function openIdleConnections(count) {
   for (let index = 0; index < count; index += 1) {
     const socket = connect(backendPort, '127.0.0.1')
     await new Promise((resolve, reject) => {
-      socket.once('connect', resolve)
+      socket.once('connect', () => {
+        // Observe overload responses on the burst sockets themselves. A new
+        // probe connection can remain in the kernel backlog while the server
+        // is already returning 503 to connections it has accepted.
+        let response = ''
+        socket.setEncoding('utf8')
+        socket.on('data', (chunk) => {
+          response += chunk
+          const match = /^HTTP\/1\.1\s+(\d+)/.exec(response)
+          if (match) socket.observedStatus = Number(match[1])
+        })
+        resolve()
+      })
       socket.once('error', reject)
     })
     sockets.push(socket)
@@ -138,7 +150,7 @@ async function openIdleConnections(count) {
   return sockets
 }
 
-async function waitForBusyResponse() {
+async function waitForBusyResponse(sockets) {
   const started = Date.now()
   // TCP connect completion only means the kernel accepted the socket; the
   // backend listener may still be draining the burst into its bounded queue.
@@ -146,6 +158,7 @@ async function waitForBusyResponse() {
   // weakening the contract that overload must fail quickly.
   while (Date.now() - started < 3000) {
     try {
+      if (sockets.some((socket) => socket.observedStatus === 503)) return Date.now() - started
       const response = await fetch(`${backendUrl}/api/health`, { signal: AbortSignal.timeout(120) })
       if (response.status === 503) return Date.now() - started
     } catch {
@@ -485,7 +498,7 @@ try {
 
     const idleConnections = await openIdleConnections(96)
     try {
-      const busyResponseElapsed = await waitForBusyResponse()
+      const busyResponseElapsed = await waitForBusyResponse(idleConnections)
       assert(busyResponseElapsed < 3000, 'local backend overload response exceeded the bounded wait budget')
   } finally {
     for (const socket of idleConnections) socket.destroy()
