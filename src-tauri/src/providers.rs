@@ -26,12 +26,61 @@ pub(crate) struct ModelCatalogMetadata {
     pub(crate) retry_after_seconds: Option<u64>,
 }
 
+/// Versioned provider capability registry.  The registry is deliberately
+/// small and conservative: ordinary OpenAI-compatible providers share one
+/// contract, while a provider-specific command is only selected for the
+/// documented ModelFlare adapter.  Unknown providers never inherit a command
+/// or a guessed credential field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProviderAdapter {
+    pub(crate) id: &'static str,
+    pub(crate) version: &'static str,
+    pub(crate) auth_mode: &'static str,
+    pub(crate) wire_api: &'static str,
+}
+
+const STANDARD_BEARER_ADAPTER: ProviderAdapter = ProviderAdapter {
+    id: "standard_bearer",
+    version: "1",
+    auth_mode: "bearer_profile_key",
+    wire_api: "responses",
+};
+
+const MODELFLARE_COMMAND_ADAPTER: ProviderAdapter = ProviderAdapter {
+    id: "modelflare_command",
+    version: "1",
+    auth_mode: "provider_command",
+    wire_api: "responses",
+};
+
+pub(crate) fn provider_adapter(
+    name: &str,
+    base_url: &str,
+    explicit_auth_mode: Option<&str>,
+) -> ProviderAdapter {
+    let exact_modelflare = preferred_auth_mode(name, base_url) == "provider_command";
+    // Never let a persisted/free-form auth_mode opt an arbitrary endpoint into
+    // auth.command. The command is a product-owned compatibility adapter and
+    // is selected only after the endpoint has been proven to be ModelFlare.
+    let _ = explicit_auth_mode;
+    if exact_modelflare {
+        MODELFLARE_COMMAND_ADAPTER
+    } else {
+        STANDARD_BEARER_ADAPTER
+    }
+}
+
 /// Select the authentication contract for a provider without touching storage
 /// or the desktop command boundary. Provider-specific rules live here so
 /// profile migration and persistence can share the same decision.
 pub(crate) fn preferred_auth_mode(name: &str, base_url: &str) -> String {
-    let haystack = format!("{} {}", name, base_url).to_ascii_lowercase();
-    if haystack.contains("modelflare.dev") || haystack.contains("modelflare") {
+    let host = reqwest::Url::parse(base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase));
+    // Keep the name argument for API compatibility, but never let a display
+    // name alone activate a privileged command adapter.
+    let _ = name;
+    if host.as_deref() == Some("modelflare.dev") {
         "provider_command".to_string()
     } else {
         default_auth_mode()
@@ -39,8 +88,13 @@ pub(crate) fn preferred_auth_mode(name: &str, base_url: &str) -> String {
 }
 
 pub(crate) fn uses_provider_command_auth(profile: &StoredProfile) -> bool {
-    profile.auth_mode == "provider_command"
-        || preferred_auth_mode(&profile.name, &profile.base_url) == "provider_command"
+    // `auth.command` is a provider capability, not a consequence of having a
+    // saved key.  Keep the explicit profile choice for migrations and use the
+    // verified ModelFlare host match as the compatibility bridge for profiles
+    // created before the adapter metadata existed.  All other providers use
+    // the standard Bearer contract and must not inherit this command.
+    provider_adapter(&profile.name, &profile.base_url, Some(&profile.auth_mode)).auth_mode
+        == "provider_command"
 }
 
 pub(crate) fn is_modelflare_profile(profile: &StoredProfile) -> bool {
@@ -218,11 +272,27 @@ pub(crate) fn provider_failure_outcome(
     let has_billing_signal = ["insufficient", "quota", "balance", "credit", "余额", "额度"]
         .iter()
         .any(|signal| error_text.contains(signal));
+    let has_model_signal = [
+        "model_not_found",
+        "model not found",
+        "no available channel",
+        "model unavailable",
+        "不存在此模型",
+        "模型不存在",
+    ]
+    .iter()
+    .any(|signal| error_text.contains(signal));
     let (status, stage, detail) = if has_billing_signal || http_status == Some(402) {
         (
             "billing_unavailable",
             "billing",
             "服务商余额、额度或配额不足，无法完成实际请求。",
+        )
+    } else if has_model_signal {
+        (
+            "endpoint_or_model_unavailable",
+            "endpoint",
+            "服务商入口可达，但当前模型或模型分组不可用；请从模型目录选择可用模型后重试。",
         )
     } else {
         match http_status {
@@ -439,7 +509,8 @@ pub(crate) fn provider_error_code(error_body: &str) -> Option<String> {
 mod tests {
     use super::{
         build_model_catalog, has_compatible_response_output, has_provider_error,
-        provider_error_code, provider_failure_outcome, provider_probe_endpoint,
+        preferred_auth_mode, provider_adapter, provider_error_code, provider_failure_outcome,
+        provider_probe_endpoint,
     };
     use crate::StoredProfile;
     use serde_json::json;
@@ -472,6 +543,31 @@ mod tests {
             provider_probe_endpoint("https://provider.example/v1?debug=1", "models")
                 .expect_err("query strings make endpoint composition ambiguous")
                 .contains("查询参数")
+        );
+    }
+
+    #[test]
+    fn adapter_registry_only_uses_exact_modelflare_host() {
+        assert_eq!(
+            provider_adapter("ModelFlare", "https://modelflare.dev/v1", None).id,
+            "modelflare_command"
+        );
+        assert_eq!(
+            preferred_auth_mode("ModelFlare", "https://example.com/v1"),
+            "bearer_profile_key"
+        );
+        assert_eq!(
+            provider_adapter("Any name", "https://example.com/v1", None).id,
+            "standard_bearer"
+        );
+        assert_eq!(
+            provider_adapter(
+                "Any name",
+                "https://example.com/v1",
+                Some("provider_command")
+            )
+            .id,
+            "standard_bearer"
         );
     }
 
@@ -513,6 +609,13 @@ mod tests {
         let billing = provider_failure_outcome(Some(402), "insufficient quota");
         assert_eq!(billing.status, "billing_unavailable");
         assert_eq!(billing.stage, "billing");
+
+        let model = provider_failure_outcome(
+            Some(403),
+            r#"{"error":{"code":"upstream_error","message":"不存在此模型！"}}"#,
+        );
+        assert_eq!(model.status, "endpoint_or_model_unavailable");
+        assert_eq!(model.stage, "endpoint");
     }
 
     #[test]

@@ -255,6 +255,7 @@ mod tests {
             missing_files: Vec::new(),
             post_change_fingerprint: None,
             snapshot_fingerprint: Some(fingerprint),
+            protected_fingerprint: None,
             file_digests: BTreeMap::new(),
             retention_managed: true,
         }
@@ -350,6 +351,7 @@ args = ["-NoProfile"]
             missing_files: Vec::new(),
             post_change_fingerprint: None,
             snapshot_fingerprint: Some(owned_configuration_fingerprint_v1(config, auth).unwrap()),
+            protected_fingerprint: None,
             file_digests: BTreeMap::from([
                 (
                     "config.toml.dpapi".to_string(),
@@ -561,7 +563,7 @@ args = ["-NoProfile"]
     }
 
     #[test]
-    fn switching_declares_profile_key_authentication_explicitly() {
+    fn ordinary_provider_uses_standard_bearer_contract() {
         let original = r#"
 model = "gpt-test"
 model_provider = "custom"
@@ -574,9 +576,9 @@ base_url = "https://before.example/v1"
 api_key = "before-key"
 "#;
         let profile = StoredProfile {
-            name: "after".to_string(),
-            base_url: "https://after.example/v1".to_string(),
-            api_key: "after-key".to_string(),
+            name: "A6".to_string(),
+            base_url: "https://api.a6api.com/v1".to_string(),
+            api_key: "a6-test-key".to_string(),
             api_key_protected: String::new(),
             model: "gpt-after".to_string(),
             auth_mode: default_auth_mode(),
@@ -596,11 +598,163 @@ api_key = "before-key"
 
         let next = build_next_config(original, &profile).unwrap();
 
-        assert!(next.contains("requires_openai_auth = false"));
+        let parsed = toml::from_str::<toml::Value>(&next).unwrap();
+        let custom = parsed
+            .get("model_providers")
+            .and_then(|providers| providers.get("custom"))
+            .expect("custom provider");
+        assert!(custom.get("auth").is_none());
+        assert_eq!(
+            custom
+                .get("requires_openai_auth")
+                .and_then(toml::Value::as_bool),
+            Some(true)
+        );
+        for removed_key in ["env_key", "experimental_bearer_token", "api_key"] {
+            assert!(
+                custom.get(removed_key).is_none(),
+                "{removed_key} should be absent"
+            );
+        }
+
+        let auth_json = build_next_auth(r#"{"other":"keep"}"#, &profile).unwrap();
+        let auth_value = serde_json::from_str::<Value>(&auth_json).unwrap();
+        assert_eq!(
+            auth_value.get("OPENAI_API_KEY").and_then(Value::as_str),
+            Some("a6-test-key")
+        );
+        assert_eq!(
+            auth_value.get("other").and_then(Value::as_str),
+            Some("keep")
+        );
     }
 
     #[test]
-    fn switching_removes_legacy_api_key_for_no_auth_provider() {
+    fn protected_fingerprint_covers_unknown_config_and_auth_fields() {
+        let config = r#"
+model = "gpt-test"
+model_provider = "custom"
+future_codex_setting = "keep-me"
+
+[model_providers.custom]
+name = "before"
+wire_api = "responses"
+base_url = "https://before.example/v1"
+
+[projects]
+"D:/safe" = "trusted"
+"#;
+        let auth = r#"{"OPENAI_API_KEY":"old","future_auth_field":"keep-me"}"#;
+        let same = protected_configuration_fingerprint(config, auth).unwrap();
+        let changed_config = config.replace("keep-me", "changed");
+        let changed_auth = auth.replace("keep-me", "changed");
+        assert_ne!(
+            same,
+            protected_configuration_fingerprint(&changed_config, auth).unwrap()
+        );
+        assert_ne!(
+            same,
+            protected_configuration_fingerprint(config, &changed_auth).unwrap()
+        );
+
+        let provider_only = config
+            .replace("before.example", "after.example")
+            .replace("name = \"before\"", "name = \"after\"");
+        let provider_only_auth = auth.replace("old", "new");
+        assert_eq!(
+            same,
+            protected_configuration_fingerprint(&provider_only, &provider_only_auth).unwrap()
+        );
+    }
+
+    #[test]
+    fn five_provider_profiles_share_the_standard_bearer_fixture_contract() {
+        let original = r#"
+model = "old-model"
+model_provider = "custom"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "before"
+wire_api = "responses"
+base_url = "https://before.example/v1"
+requires_openai_auth = true
+env_key = "OLD_PROVIDER_KEY"
+experimental_bearer_token = "old-token"
+api_key = "old-key"
+
+[projects]
+"D:/safe" = "trusted"
+"D:/other" = { trust_level = "trusted" }
+"#;
+
+        for (name, base_url) in [
+            ("A6", "https://api.a6api.com/v1"),
+            ("Hiyo", "https://codex.hiyo.top/v1"),
+            ("A18", "https://ai8.my/v1"),
+            ("OWL", "https://api.owlai.tech/v1"),
+            ("Unconfigured", "https://provider.example/v1"),
+        ] {
+            let profile = StoredProfile {
+                name: name.to_string(),
+                base_url: base_url.to_string(),
+                api_key: format!("{name}-test-key"),
+                api_key_protected: String::new(),
+                model: "gpt-test".to_string(),
+                auth_mode: default_auth_mode(),
+                model_reasoning_effort: default_reasoning(),
+                verified: false,
+                verification_status: default_verification_status(),
+                verification_response_shape: None,
+                default: false,
+                note: String::new(),
+                last_switched_at: None,
+                last_verified_at: None,
+                last_verification_detail: None,
+                last_verification_stage: None,
+                last_verification_http_status: None,
+                last_verification_provider_code: None,
+            };
+
+            let next = build_next_config(original, &profile).unwrap();
+            let parsed = toml::from_str::<toml::Value>(&next).unwrap();
+            let custom = parsed
+                .get("model_providers")
+                .and_then(|providers| providers.get("custom"))
+                .expect("custom provider");
+            assert!(custom.get("auth").is_none(), "{name} guessed command auth");
+            assert_eq!(
+                custom
+                    .get("requires_openai_auth")
+                    .and_then(toml::Value::as_bool),
+                Some(true),
+                "{name} did not select standard Bearer contract"
+            );
+            for removed_key in ["env_key", "experimental_bearer_token", "api_key"] {
+                assert!(
+                    custom.get(removed_key).is_none(),
+                    "{name} retained {removed_key}"
+                );
+            }
+            assert!(protected_sections_match(original, &next).unwrap());
+
+            let auth_value = serde_json::from_str::<Value>(
+                &build_next_auth(r#"{"other":"keep"}"#, &profile).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                auth_value.get("OPENAI_API_KEY").and_then(Value::as_str),
+                Some(format!("{name}-test-key").as_str())
+            );
+            assert_eq!(
+                auth_value.get("other").and_then(Value::as_str),
+                Some("keep")
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_provider_does_not_guess_command_auth() {
         let original = r#"
 model = "gpt-test"
 model_provider = "custom"
@@ -640,6 +794,8 @@ api_key = "before-key"
         assert!(checks
             .iter()
             .any(|check| { check.id == "custom-authentication-mode" && check.ok }));
+        assert!(!next.contains("[model_providers.custom.auth]"));
+        assert!(next.contains("requires_openai_auth = true"));
     }
 
     #[test]
@@ -738,7 +894,7 @@ api_key = "before-key"
     }
 
     #[test]
-    fn switching_preserves_existing_requires_openai_auth_value() {
+    fn switching_replaces_legacy_auth_flags_with_standard_bearer_auth() {
         let original = r#"
 model = "gpt-test"
 model_provider = "custom"
@@ -774,7 +930,8 @@ api_key = "before-key"
 
         let next = build_next_config(original, &profile).unwrap();
 
-        assert!(next.contains("requires_openai_auth = false"));
+        assert!(!next.contains("[model_providers.custom.auth]"));
+        assert!(next.contains("requires_openai_auth = true"));
     }
 
     #[test]
@@ -910,6 +1067,8 @@ fn switch_config(
     profile: &StoredProfile,
     expected_fingerprint: &str,
     expected_candidate_fingerprint: &str,
+    expected_protected_fingerprint: &str,
+    expected_candidate_protected_fingerprint: &str,
 ) -> Result<(), SwitcherError> {
     let original = read_config()?;
     ensure_configuration_layer_is_unambiguous()?;
@@ -917,18 +1076,36 @@ fn switch_config(
     let auth = auth_path()?;
     let original_auth_text = read_auth()?;
     let before_fingerprint = owned_configuration_fingerprint(&original, &original_auth_text)?;
+    let before_protected_fingerprint =
+        protected_configuration_fingerprint(&original, &original_auth_text)?;
     if before_fingerprint != expected_fingerprint {
         return Err(SwitcherError::Message(
             "切换预览已过期：Codex 服务商设置已发生变化，请重新检查后确认。".to_string(),
+        ));
+    }
+    if !expected_protected_fingerprint.is_empty()
+        && before_protected_fingerprint != expected_protected_fingerprint
+    {
+        return Err(SwitcherError::Message(
+            "切换预览已过期：受保护配置已发生变化，请重新检查后确认。".to_string(),
         ));
     }
     healthy_baseline_backup()?;
     let next_config = build_next_config(&original, profile)?;
     let next_auth = build_next_auth(&original_auth_text, profile)?;
     let candidate_fingerprint = owned_configuration_fingerprint(&next_config, &next_auth)?;
+    let candidate_protected_fingerprint =
+        protected_configuration_fingerprint(&next_config, &next_auth)?;
     if candidate_fingerprint != expected_candidate_fingerprint {
         return Err(SwitcherError::Message(
             "切换预览已失效：目标服务商认证或配置发生变化，请重新检查。".to_string(),
+        ));
+    }
+    if !expected_candidate_protected_fingerprint.is_empty()
+        && candidate_protected_fingerprint != expected_candidate_protected_fingerprint
+    {
+        return Err(SwitcherError::Message(
+            "切换预览已失效：受保护配置候选发生变化，请重新检查。".to_string(),
         ));
     }
     let backup = create_backup()?;
@@ -990,7 +1167,11 @@ fn switch_config(
             return Err(error.into());
         }
     };
-    if written_config != next_config || written_auth != next_auth {
+    if written_config != next_config
+        || written_auth != next_auth
+        || protected_configuration_fingerprint(&written_config, &written_auth)?
+            != before_protected_fingerprint
+    {
         let _ = restore_file_snapshot(
             &config,
             &FileSnapshot {
@@ -1168,20 +1349,25 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
     } else {
         profile.api_key.trim().to_string()
     };
+    let preferred_mode = preferred_auth_mode(&profile.name, &profile.base_url);
+    let auth_mode = existing_profile
+        .as_ref()
+        .map(|p| p.auth_mode.clone())
+        .filter(|mode| {
+            // Do not carry a legacy command adapter to a non-ModelFlare
+            // endpoint; conversely, promote a default-mode ModelFlare profile
+            // to its registered command adapter immediately on save.
+            !(mode == "provider_command" && preferred_mode != "provider_command")
+                && !(mode == &default_auth_mode() && preferred_mode == "provider_command")
+        })
+        .unwrap_or_else(|| preferred_mode.clone());
     let mut stored = StoredProfile {
         name: profile.name.trim().to_string(),
         base_url: profile.base_url.trim().to_string(),
         api_key,
         api_key_protected: String::new(),
         model: profile.model.trim().to_string(),
-        auth_mode: existing_profile
-            .as_ref()
-            .map(|p| p.auth_mode.clone())
-            .filter(|mode| {
-                mode != &default_auth_mode()
-                    || preferred_auth_mode(&profile.name, &profile.base_url) != "provider_command"
-            })
-            .unwrap_or_else(|| preferred_auth_mode(&profile.name, &profile.base_url)),
+        auth_mode,
         model_reasoning_effort: existing_profile
             .as_ref()
             .map(|p| p.model_reasoning_effort.clone())
@@ -1325,10 +1511,13 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
     ensure_configuration_layer_is_unambiguous()?;
     let auth = fs::read_to_string(auth_path()?)?;
     let fingerprint = owned_configuration_fingerprint(&config, &auth)?;
+    let protected_fingerprint = protected_configuration_fingerprint(&config, &auth)?;
     let candidate_config = build_next_config(&config, &profile)?;
     let candidate_auth = build_next_auth(&auth, &profile)?;
     let candidate_fingerprint =
         owned_configuration_fingerprint(&candidate_config, &candidate_auth)?;
+    let candidate_protected_fingerprint =
+        protected_configuration_fingerprint(&candidate_config, &candidate_auth)?;
     healthy_baseline_backup()?;
     let verification = verify_provider_auth_probe(&profile);
     let verified = verification.verified;
@@ -1351,8 +1540,14 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
     if !verified {
         risks.push(format!("目标服务商的本次自动检查未确认可用：{detail}"));
     }
-    if let Some(detail) = custom_authentication_risk(&candidate_config)? {
-        risks.push(detail);
+    // A profile-key switch writes the selected key to auth.json in the same
+    // transaction. Do not ask the user to acknowledge a generic external-auth
+    // warning for that fully-bound contract; retain the warning for profiles
+    // that deliberately rely on Codex login or an environment variable.
+    if profile.api_key.trim().is_empty() {
+        if let Some(detail) = custom_authentication_risk(&candidate_config)? {
+            risks.push(detail);
+        }
     }
     let operation_id = unique_backup_label("switch");
     let expires_at = Local::now().timestamp() + 10 * 60;
@@ -1363,6 +1558,8 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
         expires_at,
         fingerprint,
         candidate_fingerprint,
+        protected_fingerprint,
+        candidate_protected_fingerprint,
         risk_acknowledgement_required: !risks.is_empty(),
     };
     write_bytes_atomically(
@@ -1443,6 +1640,8 @@ pub fn switch_profile_core(
         &profile,
         &preflight.fingerprint,
         &preflight.candidate_fingerprint,
+        &preflight.protected_fingerprint,
+        &preflight.candidate_protected_fingerprint,
     )?;
     let _ = fs::remove_file(switch_preflight_path()?);
     profile.last_switched_at = Some(now_label());
@@ -2157,6 +2356,46 @@ mod legacy_profile_import_tests {
         }
     }
 
+    #[test]
+    fn legacy_command_auth_is_migrated_to_bearer_for_non_modelflare_profiles() {
+        let mut value = profile("OWL", "https://owl.example/v1", "owl-key", "");
+        value
+            .as_object_mut()
+            .expect("profile fixture object")
+            .insert(
+                "auth_mode".to_string(),
+                Value::String("provider_command".to_string()),
+            );
+        let mut catalog = catalog_with("owl", value);
+
+        assert!(hydrate_catalog_secrets(&mut catalog).unwrap());
+        let migrated: StoredProfile =
+            serde_json::from_value(catalog.profiles.get("owl").cloned().unwrap()).unwrap();
+        assert_eq!(migrated.auth_mode, default_auth_mode());
+        assert!(!uses_provider_command_auth(&migrated));
+    }
+
+    #[test]
+    fn legacy_modelflare_profile_keeps_command_auth_adapter() {
+        let mut value = profile(
+            "Custom label",
+            "https://modelflare.dev/v1",
+            "model-flare-key",
+            "",
+        );
+        value
+            .as_object_mut()
+            .expect("profile fixture object")
+            .insert("auth_mode".to_string(), Value::String(default_auth_mode()));
+        let mut catalog = catalog_with("modelflare", value);
+
+        assert!(hydrate_catalog_secrets(&mut catalog).unwrap());
+        let migrated: StoredProfile =
+            serde_json::from_value(catalog.profiles.get("modelflare").cloned().unwrap()).unwrap();
+        assert_eq!(migrated.auth_mode, "provider_command");
+        assert!(uses_provider_command_auth(&migrated));
+    }
+
     fn calibration_input(
         paid_cny: &str,
         consumable_credit: &str,
@@ -2282,6 +2521,7 @@ mod legacy_profile_import_tests {
             missing_files: vec!["config.toml".to_string(), "auth.json".to_string()],
             post_change_fingerprint: None,
             snapshot_fingerprint: None,
+            protected_fingerprint: None,
             file_digests: BTreeMap::new(),
             retention_managed: true,
         };
@@ -2345,6 +2585,8 @@ mod legacy_profile_import_tests {
         assert!(switched.contains("[model_providers.custom]"));
         assert!(switched.contains("base_url = \"https://provider.example/v1\""));
         assert!(switched.contains("wire_api = \"responses\""));
+        assert!(!switched.contains("[model_providers.custom.auth]"));
+        assert!(switched.contains("requires_openai_auth = true"));
     }
 
     #[test]

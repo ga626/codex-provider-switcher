@@ -370,6 +370,11 @@ pub struct BackupManifest {
     pub(crate) post_change_fingerprint: Option<String>,
     #[serde(default)]
     pub(crate) snapshot_fingerprint: Option<String>,
+    /// Digest of every configuration/auth field outside Signalman's owned
+    /// provider contract.  This is an audit proof that protected settings
+    /// (including previously unknown root fields) survived a write.
+    #[serde(default)]
+    pub(crate) protected_fingerprint: Option<String>,
     #[serde(default)]
     pub(crate) file_digests: BTreeMap<String, String>,
     #[serde(default)]
@@ -406,6 +411,10 @@ pub struct StoredSwitchPreflight {
     pub(crate) expires_at: i64,
     pub(crate) fingerprint: String,
     pub(crate) candidate_fingerprint: String,
+    #[serde(default)]
+    pub(crate) protected_fingerprint: String,
+    #[serde(default)]
+    pub(crate) candidate_protected_fingerprint: String,
     pub(crate) risk_acknowledgement_required: bool,
 }
 
@@ -565,8 +574,9 @@ pub struct StoredProfile {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub(crate) api_key_protected: String,
     pub(crate) model: String,
-    /// Codex provider-level command auth is required by some providers such
-    /// as ModelFlare. The app still uses the profile key for diagnostics.
+    /// Provider-specific presentation and migration preference. Only an
+    /// explicitly selected/verified adapter may use provider-level command
+    /// auth; ordinary profiles use the standard Bearer contract.
     #[serde(default = "default_auth_mode")]
     pub(crate) auth_mode: String,
     #[serde(default = "default_reasoning")]
@@ -808,7 +818,13 @@ pub(crate) fn validation_checks(config_text: &str) -> Vec<ValidationCheck> {
                 .and_then(|v| v.get("command"))
                 .and_then(toml::Value::as_str)
                 .unwrap_or("");
+            // `requires_openai_auth = true` is itself a valid, visible
+            // authentication contract. Newer Codex runtimes use it to
+            // consume the selected key from auth.json; treating it as an
+            // invisible warning would contradict the switcher's candidate
+            // contract.
             let authentication_is_visible = !auth_command.trim().is_empty()
+                || requires_openai_auth
                 || (!requires_openai_auth && env_key.trim().is_empty());
             let authentication_detail = if !auth_command.trim().is_empty() {
                 "当前服务商使用 provider 级 auth.command 读取密钥；切换器会保留该认证合同。"
