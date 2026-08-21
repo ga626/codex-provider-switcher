@@ -61,6 +61,13 @@ pub(crate) fn backup_manifest_health(
             "恢复点与记录的配置摘要不一致。".to_string(),
         ));
     }
+    if let Some(expected) = manifest.protected_fingerprint.as_deref() {
+        if protected_configuration_fingerprint(&config, &auth)? != expected {
+            return Err(SwitcherError::Message(
+                "恢复点的受保护配置摘要不一致。".to_string(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -618,6 +625,64 @@ pub(crate) fn owned_configuration_fingerprint(
         })),
         "auth_openai_key": auth.get("OPENAI_API_KEY"),
     });
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&snapshot)?)
+    ))
+}
+
+/// Hash the complete non-provider portion of config.toml and auth.json.
+/// Unlike the older semantic section check this also covers unknown root
+/// fields, future Codex sections, and every auth.json key except the one key
+/// explicitly owned by the selected profile.
+pub(crate) fn protected_configuration_fingerprint(
+    config_text: &str,
+    auth_text: &str,
+) -> Result<String, SwitcherError> {
+    let mut config = toml::from_str::<toml::Value>(config_text)?;
+    let mut auth = serde_json::from_str::<Value>(auth_text)?;
+    if let Some(root) = config.as_table_mut() {
+        for key in [
+            "model",
+            "model_provider",
+            "model_reasoning_effort",
+            "disable_response_storage",
+        ] {
+            root.remove(key);
+        }
+        if let Some(providers) = root
+            .get_mut("model_providers")
+            .and_then(toml::Value::as_table_mut)
+        {
+            if let Some(custom) = providers
+                .get_mut("custom")
+                .and_then(toml::Value::as_table_mut)
+            {
+                for key in [
+                    "name",
+                    "wire_api",
+                    "base_url",
+                    "api_key",
+                    "env_key",
+                    "requires_openai_auth",
+                    "experimental_bearer_token",
+                    "auth",
+                ] {
+                    custom.remove(key);
+                }
+                if custom.is_empty() {
+                    providers.remove("custom");
+                }
+            }
+            if providers.is_empty() {
+                root.remove("model_providers");
+            }
+        }
+    }
+    if let Some(object) = auth.as_object_mut() {
+        object.remove("OPENAI_API_KEY");
+    }
+    let snapshot = json!({ "config": config, "auth": auth });
     Ok(format!(
         "{:x}",
         Sha256::digest(serde_json::to_vec(&snapshot)?)
@@ -1321,6 +1386,14 @@ pub(crate) fn create_backup_with_label(
     } else {
         None
     };
+    let protected_fingerprint = if missing_files.is_empty() {
+        Some(protected_configuration_fingerprint(
+            &fs::read_to_string(config_path()?)?,
+            &fs::read_to_string(auth_path()?)?,
+        )?)
+    } else {
+        None
+    };
     let manifest = BackupManifest {
         schema_version: 4,
         fingerprint_version: CURRENT_BACKUP_FINGERPRINT_VERSION,
@@ -1330,6 +1403,7 @@ pub(crate) fn create_backup_with_label(
         missing_files,
         post_change_fingerprint: None,
         snapshot_fingerprint,
+        protected_fingerprint,
         file_digests,
         retention_managed: true,
     };
@@ -1540,8 +1614,13 @@ pub(crate) fn hydrate_catalog_secrets(catalog: &mut StoredCatalog) -> Result<boo
     for value in catalog.profiles.values_mut() {
         let mut profile: StoredProfile = serde_json::from_value(value.clone())?;
         let preferred_mode = preferred_auth_mode(&profile.name, &profile.base_url);
+        // Migrate both missing metadata and the old broad command contract.
+        // `provider_command` is reserved for the exact ModelFlare adapter;
+        // ordinary providers must use the standard auth.json Bearer path even
+        // when an older profile persisted the command mode.
         if profile.auth_mode.trim().is_empty()
             || (preferred_mode == "provider_command" && profile.auth_mode == default_auth_mode())
+            || (preferred_mode != "provider_command" && profile.auth_mode == "provider_command")
         {
             profile.auth_mode = preferred_mode;
             migrated = true;
@@ -1807,8 +1886,6 @@ pub(crate) fn build_next_config(
 ) -> Result<String, SwitcherError> {
     let mut lines: Vec<String> = original.lines().map(ToString::to_string).collect();
     toml::from_str::<toml::Value>(original)?;
-    let uses_profile_credential = !profile.api_key.trim().is_empty();
-
     upsert_root_string(&mut lines, "model", &profile.model);
     upsert_root_string(&mut lines, "model_provider", "custom");
     upsert_root_string(
@@ -1852,16 +1929,15 @@ pub(crate) fn build_next_config(
         .map(|(idx, _)| idx)
         .unwrap_or(lines.len());
     remove_section_key(&mut lines, start, &mut end, "requires_openai_auth");
+    // A provider-level command is an explicit adapter capability. Ordinary
+    // providers use Codex's current custom-provider auth contract: the
+    // selected profile key is written to auth.json and the provider must opt
+    // into OpenAI-compatible auth so newer Codex runtimes actually consume
+    // that key. `false` is not a portable "use auth.json" switch anymore.
     if uses_provider_command_auth(profile) {
         append_provider_command_auth(&mut lines, &mut end);
     } else {
-        upsert_section_bool(
-            &mut lines,
-            start,
-            &mut end,
-            "requires_openai_auth",
-            !uses_profile_credential,
-        );
+        upsert_section_bool(&mut lines, start, &mut end, "requires_openai_auth", true);
     }
     upsert_section_string(&mut lines, start, &mut end, "base_url", &profile.base_url);
     for key in ["api_key", "env_key", "experimental_bearer_token"] {

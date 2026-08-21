@@ -58,7 +58,14 @@ export function FeedbackDialog({ state, selectedProfile, onClose, onCopied, onSu
   const relayUrl = import.meta.env.VITE_FEEDBACK_RELAY_URL?.trim()
   const feedback = useMemo(() => createCompatibilityFeedback(state, selectedProfile, diagnosticId), [diagnosticId, selectedProfile, state])
   const payload = JSON.stringify(feedback, null, 2)
-  async function copyPayload() {
+  async function exportPayload() {
+    const blob = new Blob([payload], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `signalman-compatibility-${diagnosticId.slice(0, 12)}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
     await navigator.clipboard?.writeText(payload)
     onCopied()
     onClose()
@@ -85,7 +92,7 @@ export function FeedbackDialog({ state, selectedProfile, onClose, onCopied, onSu
     <pre className="feedback-preview">{payload}</pre>
     {relayUrl ? <label className="feedback-consent"><input type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)} />我确认提交以上脱敏诊断信息给 Signalman 维护者</label> : <p className="feedback-relay-unavailable">在线反馈尚未配置。可先导出这份脱敏诊断单后发送给维护者。</p>}
     {submitError && <p className="feedback-submit-error">{submitError}</p>}
-    <div className="command-row"><button className="ghost-button" type="button" onClick={onClose}>取消</button><button className="ghost-button" type="button" onClick={() => void copyPayload()}><Copy size={16} />导出脱敏内容</button>{relayUrl && <button className="primary-button" type="button" disabled={!consented || submitting} onClick={() => void submitPayload()}><MessageSquare size={16} />{submitting ? '正在提交' : '提交给维护者'}</button>}</div>
+    <div className="command-row"><button className="ghost-button" type="button" onClick={onClose}>取消</button><button className="ghost-button" type="button" onClick={() => void exportPayload()}><Copy size={16} />导出脱敏内容</button>{relayUrl && <button className="primary-button" type="button" disabled={!consented || submitting} onClick={() => void submitPayload()}><MessageSquare size={16} />{submitting ? '正在提交' : '提交给维护者'}</button>}</div>
   </ModalDialog>
 }
 

@@ -41,14 +41,28 @@ export type CompatibilityFeedback = {
 function endpointSummary(baseUrl: string) {
   try {
     const url = new URL(baseUrl)
+    const host = url.hostname === 'localhost' || url.hostname.endsWith('.localhost') || url.hostname === '::1' || /^127\./.test(url.hostname) || /^10\./.test(url.hostname) || /^192\.168\./.test(url.hostname) || /^172\.(1[6-9]|2\d|3[01])\./.test(url.hostname) ? 'private_endpoint' : url.host
     return {
       protocol: url.protocol.replace(':', ''),
-      host: url.host,
+      host: host.slice(0, 120),
       path: url.pathname.replace(/\/{2,}/g, '/').slice(0, 120) || '/',
     }
   } catch {
     return { protocol: 'invalid', host: 'invalid', path: '/' }
   }
+}
+
+function safeText(value: string, limit: number) {
+  const printable = Array.from(value).filter((character) => {
+    const code = character.charCodeAt(0)
+    return code >= 32 && code !== 127
+  }).join('')
+  return printable.replace(/(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, '[redacted]').slice(0, limit)
+}
+
+function safeActionTitle(value: string) {
+  const known = ['运行服务商可用性测试', '刷新模型目录', '切换服务商', '模型目录已刷新', '模型目录刷新失败']
+  return known.includes(value) ? value : '其他诊断操作'
 }
 
 function catalogSummary(catalog: ModelCatalog | undefined, selectedModel: string): CompatibilityFeedback['catalog'] {
@@ -75,16 +89,16 @@ export function createCompatibilityFeedback(state: AppState, selectedProfile: Pr
     runtime: state.runtimeMode,
     createdAt,
     provider: {
-      name: selectedProfile.name.slice(0, 80),
+      name: safeText(selectedProfile.name, 80),
       endpoint: endpointSummary(selectedProfile.baseUrl),
-      model: selectedProfile.model.slice(0, 120),
+      model: safeText(selectedProfile.model, 96),
       hasApiKey: selectedProfile.hasApiKey,
       active: selectedProfile.active,
       isDefault: selectedProfile.isDefault,
       status: selectedProfile.verificationStatus,
-      stage: selectedProfile.lastVerificationStage?.slice(0, 80),
+      stage: selectedProfile.lastVerificationStage ? safeText(selectedProfile.lastVerificationStage, 80) : undefined,
       httpStatus: selectedProfile.lastVerificationHttpStatus,
-      providerCode: selectedProfile.lastVerificationProviderCode?.slice(0, 80),
+      providerCode: selectedProfile.lastVerificationProviderCode ? safeText(selectedProfile.lastVerificationProviderCode, 80) : undefined,
       responseShape: selectedProfile.verificationResponseShape,
     },
     catalog: catalogSummary(catalog, selectedProfile.model),
@@ -95,6 +109,6 @@ export function createCompatibilityFeedback(state: AppState, selectedProfile: Pr
     },
     checks: state.checks.slice(0, 30).map((check) => ({ id: check.id, ok: check.ok, severity: check.severity })),
     // Titles and tones show the operation sequence without sending free-form activity details.
-    recentActions: state.activity.slice(0, 8).map((item) => ({ title: item.title.slice(0, 100), tone: item.tone })),
+    recentActions: state.activity.slice(0, 8).map((item) => ({ title: safeActionTitle(item.title), tone: ['success', 'info', 'warning', 'danger'].includes(item.tone) ? item.tone : 'info' })),
   }
 }

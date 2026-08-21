@@ -10,6 +10,9 @@
 - 新增 UI fixture 性能基线，补齐后台操作事件、桌面边界、后端功能、反馈合同和过载时序回归验证。
 - 延续已登记的 glib 安全回补与 CodeQL 第三方目录范围，避免把上游回补误报成项目新漏洞。
 - README、发布说明和七张无凭据离线示例截图同步更新到 v0.10.10-alpha。
+- 修复新版 Codex 对普通自定义 Provider 的认证合同：A6、Hiyo、OWL、A18 及未知服务商统一将 profile key 与 `auth.json.OPENAI_API_KEY` 作为同一候选写入，并显式使用 `requires_openai_auth = true`，清理旧认证字段。
+- 为 ModelFlare 保留版本化的 provider-level `auth.command` 特例，仅精确匹配 `modelflare.dev`；历史误写到普通服务商的 `provider_command` 会自动迁回标准 Bearer。
+- 新增受保护配置指纹，切换和恢复会核对未知 config/auth 字段，避免破坏项目、MCP、插件、hooks、记忆和其他历史设置；兼容性反馈导出继续脱敏。
 
 ## 0.10.9-alpha - 2026-08-20
 
