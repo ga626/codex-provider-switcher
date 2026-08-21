@@ -1,13 +1,12 @@
 use codex_switcher_tauri_lib::{
-    check_for_update_core, complete_onboarding_core, create_manual_backup_core, delete_profile_core,
-    load_state_core, reveal_profile_api_key_core,
-    prepare_switch_core, prepare_connection_environment_core_with_onboarding, preview_models_core, refresh_models_core, reorder_profiles_core, restore_backup_core,
-    restore_latest_backup_core, run_response_probe_for_model_core, save_cost_calibration_core,
-    delete_cost_calibration_core,
-    save_profile_core, set_backup_policy_core,
-    set_default_profile_core, switch_profile_core, sync_current_configuration_core,
-    toggle_auto_start_core, verify_profile_core, AppState, CostCalibrationInput, EditableProfile,
-    SwitcherError,
+    check_for_update_core, complete_onboarding_core, create_manual_backup_core,
+    delete_cost_calibration_core, delete_profile_core, load_state_core,
+    prepare_connection_environment_core_with_onboarding, prepare_switch_core, preview_models_core,
+    refresh_models_core, reorder_profiles_core, restore_backup_core, restore_latest_backup_core,
+    reveal_profile_api_key_core, run_response_probe_for_model_core, save_cost_calibration_core,
+    save_profile_core, set_backup_policy_core, set_default_profile_core, switch_profile_core,
+    sync_current_configuration_core, toggle_auto_start_core, verify_profile_core, AppState,
+    CostCalibrationInput, EditableProfile, SwitcherError,
 };
 use serde_json::{json, Value};
 use std::{
@@ -15,6 +14,7 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
+    sync::{mpsc, Arc, Mutex},
     time::Duration,
 };
 
@@ -22,6 +22,8 @@ const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 47832;
 const MAX_REQUEST_HEADER_BYTES: usize = 16 * 1024;
 const MAX_REQUEST_BODY_BYTES: usize = 256 * 1024;
+const CONNECTION_WORKERS: usize = 8;
+const QUEUED_CONNECTIONS: usize = 24;
 
 #[derive(Debug)]
 enum RequestReadError {
@@ -71,15 +73,51 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let listener = TcpListener::bind((host.as_str(), port))?;
     let dist_dir = resolve_dist_dir()?;
+    let (connection_sender, connection_receiver) =
+        mpsc::sync_channel::<TcpStream>(QUEUED_CONNECTIONS);
+    let connection_receiver = Arc::new(Mutex::new(connection_receiver));
+    for worker_index in 0..CONNECTION_WORKERS {
+        let receiver = Arc::clone(&connection_receiver);
+        let worker_dist_dir = dist_dir.clone();
+        std::thread::Builder::new()
+            .name(format!("signalman-local-{worker_index}"))
+            .spawn(move || loop {
+                let stream = match receiver.lock() {
+                    Ok(receiver) => receiver.recv(),
+                    Err(_) => return,
+                };
+                let Ok(stream) = stream else {
+                    return;
+                };
+                if let Err(err) = handle_connection(stream, &worker_dist_dir) {
+                    eprintln!("request failed: {err}");
+                }
+            })?;
+    }
     println!("Signalman AI local backend: http://{host}:{port}/");
     println!("Serving frontend from {}", dist_dir.display());
 
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                let dist_dir = dist_dir.clone();
-                if let Err(err) = handle_connection(stream, &dist_dir) {
-                    eprintln!("request failed: {err}");
+                // Provider requests may wait for their bounded network
+                // timeout. A fixed worker pool keeps the local UI responsive
+                // without allowing unbounded per-connection threads.
+                match connection_sender.try_send(stream) {
+                    Ok(()) => {}
+                    Err(mpsc::TrySendError::Full(mut stream)) => {
+                        stream.set_write_timeout(Some(Duration::from_secs(8)))?;
+                        let _ = write_json(
+                            &mut stream,
+                            503,
+                            &json!({
+                                "error": "本地开发服务正忙，请稍后重试。"
+                            }),
+                        );
+                    }
+                    Err(mpsc::TrySendError::Disconnected(_)) => {
+                        return Err("local backend worker pool stopped unexpectedly".into());
+                    }
                 }
             }
             Err(err) => eprintln!("connection failed: {err}"),
@@ -132,6 +170,7 @@ fn handle_connection(
     dist_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     stream.set_read_timeout(Some(Duration::from_secs(8)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(8)))?;
     let request = match read_request(&mut stream) {
         Ok(request) => request,
         Err(RequestReadError::TooLarge(message)) => {
@@ -304,8 +343,9 @@ fn handle_api(
         ("POST", "/api/profiles/reorder") => profile_ids(body)
             .and_then(reorder_profiles_core)
             .map(state_json),
-        ("POST", "/api/profiles/reveal-key") => reveal_profile_api_key_core(profile_id(body)?)
-            .map(|value| json!({ "apiKey": value })),
+        ("POST", "/api/profiles/reveal-key") => {
+            reveal_profile_api_key_core(profile_id(body)?).map(|value| json!({ "apiKey": value }))
+        }
         ("POST", "/api/profiles/prepare-switch") => prepare_switch_core(profile_id(body)?)
             .and_then(|value| serde_json::to_value(value).map_err(SwitcherError::from)),
         ("POST", "/api/profiles/switch") => {
@@ -352,7 +392,8 @@ fn handle_api(
                 .cloned()
                 .ok_or_else(|| SwitcherError::Message("缺少费用校准输入。".to_string()))
                 .and_then(|value| {
-                    serde_json::from_value::<CostCalibrationInput>(value).map_err(SwitcherError::from)
+                    serde_json::from_value::<CostCalibrationInput>(value)
+                        .map_err(SwitcherError::from)
                 })?;
             save_cost_calibration_core(input).map(state_json)
         }
@@ -390,8 +431,12 @@ fn handle_api(
                 .filter(|value| !value.trim().is_empty())
                 .ok_or_else(|| SwitcherError::Message("请选择要管理的配置层。".to_string()))?
                 .to_string();
-            let onboarding = request.get("onboarding").and_then(Value::as_bool).unwrap_or(false);
-            prepare_connection_environment_core_with_onboarding(layer_id, onboarding).map(state_json)
+            let onboarding = request
+                .get("onboarding")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            prepare_connection_environment_core_with_onboarding(layer_id, onboarding)
+                .map(state_json)
         }
         ("POST", "/api/config/complete-onboarding") => complete_onboarding_core().map(state_json),
         ("POST", "/api/auto-start") => {
@@ -549,6 +594,7 @@ fn write_response(
         413 => "Payload Too Large",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        503 => "Service Unavailable",
         500 => "Internal Server Error",
         _ => "OK",
     };

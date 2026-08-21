@@ -1,7 +1,14 @@
-import { invoke } from '@tauri-apps/api/core'
+import { Channel, invoke } from '@tauri-apps/api/core'
 import { initialState } from './mockData'
 import type { DownloadEvent } from '@tauri-apps/plugin-updater'
 import type { AppState, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, ResponseProbeObservation, SwitchPreflight, UpdateInfo } from './types'
+import type { OperationEventV1 } from './operations'
+
+export type OperationEventHandler = (event: OperationEventV1) => void
+
+function operationChannel(onEvent?: OperationEventHandler) {
+  return new Channel<OperationEventV1>(onEvent ?? (() => undefined))
+}
 
 const isTauri = '__TAURI_INTERNALS__' in window
 const allowBrowserMock = import.meta.env.VITE_CODEX_PROVIDER_SWITCHER_ALLOW_MOCK === 'true'
@@ -437,9 +444,9 @@ function mockModelCatalogFromProfile(profile: ProviderProfile): ModelCatalog {
   }
 }
 
-export async function refreshModels(profileId: string): Promise<AppState> {
+export async function refreshModels(profileId: string, onEvent?: OperationEventHandler): Promise<AppState> {
   if (isTauri) {
-    return invoke<AppState>('refresh_models', { profileId })
+    return invoke<AppState>('refresh_models', { profileId, onEvent: operationChannel(onEvent) })
   }
   const webState = await tryWebBackend<AppState>('/api/models/refresh', apiPost({ profileId }))
   if (webState) {
@@ -461,9 +468,9 @@ export async function refreshModels(profileId: string): Promise<AppState> {
   return structuredClone(mockState)
 }
 
-export async function previewModels(profile: EditableProfile): Promise<ModelCatalog> {
+export async function previewModels(profile: EditableProfile, onEvent?: OperationEventHandler): Promise<ModelCatalog> {
   if (isTauri) {
-    return invoke<ModelCatalog>('preview_models', { profile })
+    return invoke<ModelCatalog>('preview_models', { profile, onEvent: operationChannel(onEvent) })
   }
   const webCatalog = await tryWebBackend<ModelCatalog>('/api/models/preview', apiPost({ profile }))
   if (webCatalog) {
@@ -560,9 +567,9 @@ export async function switchProfile(profileId: string, operationId: string, risk
   throw new Error('开发预览不执行服务商切换。请使用桌面开发版或本机后端进行真实验证。')
 }
 
-export async function verifyProfile(profileId: string): Promise<AppState> {
+export async function verifyProfile(profileId: string, onEvent?: OperationEventHandler): Promise<AppState> {
   if (isTauri) {
-    return invoke<AppState>('verify_profile', { profileId })
+    return invoke<AppState>('verify_profile', { profileId, onEvent: operationChannel(onEvent) })
   }
   const webState = await tryWebBackend<AppState>('/api/profiles/verify', apiPost({ profileId }))
   if (webState) {
@@ -591,9 +598,9 @@ export async function verifyProfile(profileId: string): Promise<AppState> {
   return structuredClone(mockState)
 }
 
-export async function runResponseProbe(profileId: string, benchmarkModel: string): Promise<AppState> {
+export async function runResponseProbe(profileId: string, benchmarkModel: string, onEvent?: OperationEventHandler): Promise<AppState> {
   if (isTauri) {
-    return invoke<AppState>('run_response_probe', { profileId, benchmarkModel })
+    return invoke<AppState>('run_response_probe', { profileId, benchmarkModel, onEvent: operationChannel(onEvent) })
   }
   const webState = await tryWebBackend<AppState>('/api/lab/response-probe', apiPost({ profileId, benchmarkModel }))
   if (webState) {

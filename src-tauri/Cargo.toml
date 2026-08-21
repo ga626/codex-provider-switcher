@@ -36,3 +36,9 @@ toml = "1.1"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem"] }
 winreg = "0.55"
+
+# Tauri's Linux-only GTK branch currently resolves glib 0.18.x. The upstream
+# 0.18 line has no released backport for GHSA-wrw7-89jp-8q8g, so keep the
+# official gtk-rs fix locally until the Tauri/GTK graph can move to glib 0.20.
+[patch.crates-io]
+glib = { path = "vendor/glib-0.18.5-signalman" }

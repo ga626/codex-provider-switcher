@@ -23,7 +23,7 @@ function assertBmp(buffer, width, height, label) {
   assert(Math.abs(buffer.readInt32LE(22)) === height, `${label} must be ${height}px high`)
 }
 
-const [packageJsonText, viteConfigText, buildRs, tauriConfigText, cargoToml, manifestText, libRs, adapterTs, appTsx, appCss, mockDataTs, preflightScript, devDesktopScript, prepareDevRuntimeScript, developmentFixtureCatalogText, developmentFixtureActivityText, headerBmp, sidebarBmp] = await Promise.all([
+const [packageJsonText, viteConfigText, buildRs, tauriConfigText, cargoToml, manifestText, libRs, servicesRs, providersRs, commandRs, localBackendRs, adapterTs, appTsx, providerSidebarTsx, providerRowTsx, labWorkspaceText, appCss, mockDataTs, preflightScript, devDesktopScript, prepareDevRuntimeScript, developmentFixtureCatalogText, developmentFixtureActivityText, headerBmp, sidebarBmp] = await Promise.all([
   readText('package.json'),
   readText('vite.config.ts'),
   readText('src-tauri/build.rs'),
@@ -31,8 +31,15 @@ const [packageJsonText, viteConfigText, buildRs, tauriConfigText, cargoToml, man
   readText('src-tauri/Cargo.toml'),
   readText('src-tauri/store/Package.appxmanifest'),
   readText('src-tauri/src/lib.rs'),
+  readText('src-tauri/src/services.rs'),
+  readText('src-tauri/src/providers.rs'),
+  readText('src-tauri/src/commands.rs'),
+  readText('src-tauri/src/bin/local_backend.rs'),
   readText('src/adapter.ts'),
   readText('src/App.tsx'),
+  readText('src/features/providers/ProviderSidebar.tsx'),
+  readText('src/features/providers/SortableProviderRow.tsx'),
+  readText('src/features/lab/LabWorkspace.tsx'),
   readText('src/App.css'),
   readText('src/mockData.ts'),
   readText('scripts/qa/cutover-preflight.ps1'),
@@ -44,6 +51,7 @@ const [packageJsonText, viteConfigText, buildRs, tauriConfigText, cargoToml, man
   readFile(join(root, 'src-tauri/installer/sidebar.bmp')),
 ])
 const capabilityText = await readText('src-tauri/capabilities/default.json')
+const runtimeRs = libRs + servicesRs + providersRs
 
 const tauriConfig = JSON.parse(tauriConfigText)
 const packageJson = JSON.parse(packageJsonText)
@@ -51,7 +59,7 @@ const developmentFixtureCatalog = JSON.parse(developmentFixtureCatalogText)
 const developmentFixtureActivity = JSON.parse(developmentFixtureActivityText)
 const switchProfileCore = libRs.slice(
   libRs.indexOf('pub fn switch_profile_core'),
-  libRs.indexOf('#[tauri::command]\nfn verify_profile')
+  libRs.indexOf('pub fn verify_profile_core')
 )
 
 assert(tauriConfig.productName === 'Signalman AI', 'Tauri productName must use the approved brand')
@@ -91,8 +99,8 @@ assertNotIncludes(devDesktopScript + prepareDevRuntimeScript, 'Signalman AI.lnk'
 assertNotIncludes(devDesktopScript + prepareDevRuntimeScript, 'C:' + String.fromCharCode(92) + 'Users' + String.fromCharCode(92) + 'ga990' + String.fromCharCode(92) + '.codex', 'Development desktop runner')
 assert(appTsx.includes("setTitle(`Signalman AI · 开发版 · ${__CODEX_BUILD_SHA__}`)"), 'Development desktop must set a distinct native window title')
 assert(appTsx.includes("隔离数据"), 'Development desktop must visibly disclose isolated data')
-assert(appTsx.includes('固定测试模型 <FieldHint'), 'Cost ranking must explain the fixed benchmark model at its control')
-assert(appTsx.includes('1% 表示约为官方成本的 1/100'), 'Cost ranking must express official comparison in the user-readable direction')
+assert(labWorkspaceText.includes('固定测试模型 <FieldHint'), 'Cost ranking must explain the fixed benchmark model at its control')
+assert(labWorkspaceText.includes('1% 表示约为官方成本的 1/100'), 'Cost ranking must express official comparison in the user-readable direction')
 assertNotIncludes(appTsx, '最低成本 = 100 分', 'Cost ranking must not show an unlinked score explanation')
 assert(Object.keys(developmentFixtureCatalog.profiles).length === 4, 'Development demo catalog must contain four example providers')
 assert(developmentFixtureCatalog.model_catalogs['example-provider-a']?.models?.length === 4, 'Development demo catalog must include four example Codex models')
@@ -127,8 +135,8 @@ assertNotIncludes(capabilityText, 'process:default', 'Tauri capability')
 assert(capabilityText.includes('opener:allow-open-url'), 'Tauri capability must explicitly allow the update Release URL')
 assertNotIncludes(capabilityText, 'opener:default', 'Tauri capability')
 
-assert(libRs.includes('runtime_mode: "tauri_native".to_string()'), 'Tauri app state must report tauri_native')
-assert(libRs.includes('tray_enabled: false'), 'Tauri app state must report trayEnabled=false')
+assert((libRs + servicesRs).includes('runtime_mode: "tauri_native".to_string()'), 'Tauri app state must report tauri_native')
+assert((libRs + servicesRs).includes('tray_enabled: false'), 'Tauri app state must report trayEnabled=false')
 assert(adapterTs.includes("if (isTauri) {\n    return invoke<AppState>('load_state')"), 'Tauri frontend must use invoke(load_state)')
 assert(adapterTs.includes('function isTrustedProjectReleaseUrl(value: string)'), 'Updater fallback URLs must use a dedicated trust check')
 assert(adapterTs.includes("parsed.pathname === '/ga626/codex-provider-switcher/releases'"), 'Updater trust check must allow the canonical project Release page')
@@ -141,23 +149,36 @@ assert(adapterTs.indexOf('if (isTauri && pendingTauriUpdate)') < adapterTs.index
 assert(capabilityText.includes('ms-windows-store://pdp/*'), 'Tauri capability must explicitly allow opening the Store product page')
 assert(libRs.includes('fn is_store_release_channel() -> bool'), 'Rust runtime must identify Store-channel builds')
 assert(libRs.includes('if is_store_release_channel()'), 'Store-channel builds must skip GitHub updater initialization')
-assert(libRs.includes('provider_probe_endpoint(&profile.base_url, "responses")'), 'Provider verification must call the Responses endpoint')
-assert(libRs.includes('.post(endpoint)'), 'Provider verification must send the Responses request with POST')
-assert(libRs.includes('stage: "inference".to_string()'), 'Provider verification must record the inference stage')
-assert(libRs.includes('body.get("id").is_some()'), 'Provider verification must identify a standard Responses shape')
-assert(libRs.includes('has_compatible_response_output(&body)'), 'Provider verification must recognize a compatible response with model output')
-assert(libRs.includes('"response_shape_unconfirmed"'), 'Provider verification must distinguish an unconfirmed response shape from a provider failure')
-assert(libRs.includes('mark_catalog_model_verified'), 'Successful inference verification must update the matching catalog model')
-assert(libRs.includes('.timeout(Duration::from_secs(15))'), 'Compatibility probes must use the bounded 15-second timeout budget')
+assert(runtimeRs.includes('provider_probe_endpoint(&profile.base_url, "responses")'), 'Provider verification must call the Responses endpoint')
+assert(runtimeRs.includes('.post(endpoint)'), 'Provider verification must send the Responses request with POST')
+assert(runtimeRs.includes('stage: "inference".to_string()'), 'Provider verification must record the inference stage')
+assert(runtimeRs.includes('body.get("id").is_some()'), 'Provider verification must identify a standard Responses shape')
+assert(runtimeRs.includes('has_compatible_response_output(&body)'), 'Provider verification must recognize a compatible response with model output')
+assert(runtimeRs.includes('"response_shape_unconfirmed"'), 'Provider verification must distinguish an unconfirmed response shape from a provider failure')
+assert(runtimeRs.includes('mark_catalog_model_verified'), 'Successful inference verification must update the matching catalog model')
+assert(runtimeRs.includes('.timeout(Duration::from_secs(15))'), 'Compatibility probes must use the bounded 15-second timeout budget')
+assert(libRs.includes('async fn run_blocking_command'), 'Long-running desktop commands must use the dedicated background-command helper')
+assert(libRs.includes('tauri::async_runtime::spawn_blocking(operation)'), 'Blocking provider HTTP work must leave the Tauri UI thread')
+assert(libRs.includes('mod commands;'), 'Desktop command boundary must be declared from the composition root')
+assert(commandRs.includes('async fn verify_profile('), 'Availability verification command must be asynchronous')
+assert(commandRs.includes('async fn run_response_probe('), 'Laboratory response probe command must be asynchronous')
+assert(commandRs.includes('async fn refresh_models('), 'Saved model refresh command must be asynchronous')
+assert(commandRs.includes('async fn preview_models('), 'Draft model refresh command must be asynchronous')
+assert(commandRs.includes('async fn check_for_update()'), 'Update checking command must be asynchronous')
+assert(commandRs.includes('run_blocking_command'), 'Network command adapters must use the background-command helper')
+assert(localBackendRs.includes('mpsc::sync_channel::<TcpStream>(QUEUED_CONNECTIONS)'), 'Local backend must queue only a bounded number of connections')
+assert(localBackendRs.includes('CONNECTION_WORKERS: usize = 8'), 'Local backend must use a fixed worker count')
+assert(localBackendRs.includes('TrySendError::Full'), 'Local backend must return a controlled busy response when saturated')
+assert(localBackendRs.includes('stream.set_write_timeout'), 'Local backend must bound response writes')
 assert(libRs.includes('custom_authentication_risk(&candidate_config)?'), 'Switch preparation must surface the candidate external-authentication mode as a risk before confirmation')
 assertNotIncludes(switchProfileCore, '切换已阻止：缺少 API 密钥', 'Switching must not treat a missing TOML or profile API key as an unconditional blocker')
 assertNotIncludes(switchProfileCore, 'verify_provider_auth_probe', 'Switching must not trigger a remote compatibility probe')
 assertNotIncludes(libRs, 'uses_request_probe', 'src-tauri/src/lib.rs')
 assertNotIncludes(mockDataTs, 'safeMode:', 'Browser preview mock must not display an unimplemented safety mode')
-assert(appTsx.includes('DndContext'), 'Provider sorting must use the supported DnD context')
-assert(appTsx.includes('PointerSensor'), 'Provider sorting must expose a pointer interaction path')
-assert(appTsx.includes('KeyboardSensor'), 'Provider sorting must expose a keyboard interaction path')
-assert(appTsx.includes('className="provider-drag-handle"'), 'Provider sorting must expose a dedicated drag handle')
+assert(providerSidebarTsx.includes('DndContext'), 'Provider sorting must use the supported DnD context')
+assert(providerSidebarTsx.includes('PointerSensor'), 'Provider sorting must expose a pointer interaction path')
+assert(providerSidebarTsx.includes('KeyboardSensor'), 'Provider sorting must expose a keyboard interaction path')
+assert(providerRowTsx.includes('className="provider-drag-handle"'), 'Provider sorting must expose a dedicated drag handle')
 assertNotIncludes(appTsx, 'draggable={busy === null}', 'Provider sorting must not rely on native HTML draggable behavior')
 assert(preflightScript.includes('Cutover preflight (read-only)'), 'Cutover preflight must remain read-only')
 assert(preflightScript.includes('New installation signature:'), 'Cutover preflight must report the installed app signature')

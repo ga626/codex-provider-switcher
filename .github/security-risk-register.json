@@ -10,9 +10,16 @@
       "release_impact": "Not linked into the Windows x86_64 release target",
       "evidence_command": "cargo tree --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc -i glib",
       "review_by": "2026-09-19",
-      "reviewed_at": "2026-08-19",
-      "review_basis": "GitHub Dependabot alert #1 remains open; the Windows x86_64 dependency tree still has no glib edge, so this is a non-Windows GTK branch risk and not part of the shipped target.",
-      "required_follow_up": "Re-evaluate when Tauri or its runtime dependency graph changes; upgrade through a separately validated compatibility PR."
+      "reviewed_at": "2026-08-20",
+      "review_basis": "GitHub Dependabot alert #1 remains open because the lockfile package version is 0.18.5; the Windows x86_64 dependency tree still has no glib edge. The non-Windows GTK branch now resolves a local copy containing the exact upstream fix from gtk-rs/gtk-rs-core commit b5a4071e439bef2b5eea76c3aa25e5ae84839e34.",
+      "remediation": {
+        "status": "patched_upstream_fix_pending_dependabot_reclassification",
+        "patch_source": "https://github.com/gtk-rs/gtk-rs-core/pull/1343",
+        "patch_commit": "b5a4071e439bef2b5eea76c3aa25e5ae84839e34",
+        "local_path": "src-tauri/vendor/glib-0.18.5-signalman",
+        "change": "VariantStrIter::impl_get passes the C out-parameter as &mut p"
+      },
+      "required_follow_up": "Re-evaluate when Tauri or its runtime dependency graph supports glib 0.20; then remove the vendor patch, upgrade the normal registry graph, and confirm Dependabot alert #1 closes."
     }
   ]
 }

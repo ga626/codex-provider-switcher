@@ -18,7 +18,7 @@
 
 ## 当前已知事项
 
-Dependabot #1 涉及 `glib` 的中等风险告警。当前锁定依赖图由 Tauri 的非 Windows GTK 分支带来；`cargo tree --target x86_64-pc-windows-msvc -i glib` 没有输出，说明它不链接到当前 Windows 发布目标。它没有被标记为“已修复”：`.github/security-risk-register.json` 记录了适用范围、证据、复核日期和受控升级动作。维护者必须在 `2026-08-16` 前复核，或在目标/依赖图变化时提前复核；升级仍应在单独的 Tauri/GTK 兼容 PR 中完成。
+Dependabot #1 涉及 `glib` 的中等风险告警。当前锁定依赖图由 Tauri 的非 Windows GTK 分支带来；`cargo tree --target x86_64-pc-windows-msvc -i glib` 没有输出，说明它不链接到当前 Windows 发布目标。由于 Tauri/Wry 仍要求 GTK 0.18，不能把 `glib` 单独强升到 0.20；本分支改为在 `src-tauri/vendor/glib-0.18.5-signalman` 保留官方 gtk-rs 修复提交 `b5a4071e439bef2b5eea76c3aa25e5ae84839e34`，并通过 `[patch.crates-io]` 让完整依赖图使用这份修复后的源码。这个修复关闭了实际的 `VariantStrIter::impl_get` 未定义行为，但 GitHub Dependabot 可能仍按锁文件中的 0.18.5 版本保持告警，因此不能把它写成“告警已关闭”。当 Tauri/Wry 图形链支持 `glib` 0.20 后，应移除本地 backport，恢复正常 registry 依赖并由 GitHub 复验告警关闭。
 
 ## CodeQL 与仓库政策
 
