@@ -1,0 +1,8 @@
+name: signalman-codeql
+
+# The vendored glib tree is an intentionally pinned upstream security
+# backport. It is tracked and reviewed as dependency source, but it is not
+# application code owned by this repository; scanning it creates duplicate
+# upstream unsafe-pointer findings and blocks the PR on third-party code.
+paths-ignore:
+  - src-tauri/vendor/glib-0.18.5-signalman/**
