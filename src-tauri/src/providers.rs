@@ -46,6 +46,11 @@ const STANDARD_BEARER_ADAPTER: ProviderAdapter = ProviderAdapter {
     wire_api: "responses",
 };
 
+/// A provider can accept a short probe and still need longer to route it to
+/// an upstream model. This is a bounded user-visible wait, not a promise that
+/// a provider has cancelled work after the client gives up.
+pub(crate) const PROVIDER_PROBE_TIMEOUT: Duration = Duration::from_secs(45);
+
 const MODELFLARE_COMMAND_ADAPTER: ProviderAdapter = ProviderAdapter {
     id: "modelflare_command",
     version: "1",
@@ -410,6 +415,9 @@ pub(crate) fn parse_provider_models(body: &Value) -> Vec<ProviderModel> {
             aliases: Vec::new(),
             source: "provider_models_api".to_string(),
             verified_for_responses: "unknown".to_string(),
+            last_verification_at: None,
+            last_verification_status: None,
+            last_verification_detail: None,
         })
         .collect::<Vec<_>>();
     models.sort_by(|a, b| a.id.to_ascii_lowercase().cmp(&b.id.to_ascii_lowercase()));
@@ -510,10 +518,11 @@ mod tests {
     use super::{
         build_model_catalog, has_compatible_response_output, has_provider_error,
         preferred_auth_mode, provider_adapter, provider_error_code, provider_failure_outcome,
-        provider_probe_endpoint,
+        provider_probe_endpoint, verification_outcome, PROVIDER_PROBE_TIMEOUT,
     };
     use crate::StoredProfile;
     use serde_json::json;
+    use std::time::Duration;
 
     #[test]
     fn builds_model_and_response_endpoints_from_api_base_url() {
@@ -619,6 +628,21 @@ mod tests {
     }
 
     #[test]
+    fn provider_probe_uses_a_bounded_long_wait_and_keeps_timeout_unconfirmed() {
+        assert_eq!(PROVIDER_PROBE_TIMEOUT, Duration::from_secs(45));
+        let outcome = verification_outcome(
+            false,
+            "timed_out_unconfirmed",
+            "transport",
+            "本次等待结束前未收到服务商回复，尚未确认可用性。",
+            None,
+            None,
+        );
+        assert!(!outcome.verified);
+        assert_eq!(outcome.status, "timed_out_unconfirmed");
+    }
+
+    #[test]
     fn builds_catalog_metadata_without_changing_public_shape() {
         let profile = StoredProfile {
             name: "Fixture".to_string(),
@@ -651,6 +675,9 @@ mod tests {
                 source: "fixture".to_string(),
                 tags: vec!["responses-candidate".to_string()],
                 verified_for_responses: "unknown".to_string(),
+                last_verification_at: None,
+                last_verification_status: None,
+                last_verification_detail: None,
             }],
             "2026-08-21 00:00:00".to_string(),
         );
@@ -869,9 +896,9 @@ fn transport_failure_outcome(err: &reqwest::Error, base_url: &str) -> ProviderVe
     if err.is_timeout() {
         return verification_outcome(
             false,
-            "timeout",
+            "timed_out_unconfirmed",
             "transport",
-            "服务商响应超时，尚未确认可用性。",
+            "本次等待结束前未收到服务商回复，尚未确认可用性。",
             None,
             None,
         );
@@ -931,7 +958,7 @@ pub(crate) fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVer
 
     let client = match configure_http_client(
         reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(15))
+            .timeout(PROVIDER_PROBE_TIMEOUT)
             .http1_only(),
     )
     .build()

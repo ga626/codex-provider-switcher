@@ -68,7 +68,7 @@ try {
   await page.getByRole('heading', { name: '首次启动基线备份已就绪' }).waitFor()
   await page.screenshot({ path: join(output, `configuration-protection-v${version.replace('-alpha', '')}.png`), fullPage: true })
   await page.getByRole('button', { name: '活动记录', exact: true }).click()
-  await page.locator('.activity-list').waitFor()
+  await page.locator('.activity-operation-list').waitFor()
   await page.screenshot({ path: join(output, `activity-v${version.replace('-alpha', '')}.png`), fullPage: true })
   await page.getByRole('button', { name: '实验室', exact: true }).click()
   await page.getByRole('heading', { name: '性价比中心' }).waitFor()

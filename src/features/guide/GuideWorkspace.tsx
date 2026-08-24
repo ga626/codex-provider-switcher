@@ -79,10 +79,10 @@ export const GUIDE_CHAPTERS: Record<GuideChapterId, GuideChapter> = {
     ],
   },
   timeline: {
-    title: '活动记录', summary: '查看最近的保存、检查、切换和恢复动作。', steps: [
-      { id: 'activity', title: '活动记录', detail: '每条记录显示发生时间、动作结果和必要说明，方便你确认最近一次操作做了什么。', target: 'timeline.list', view: 'timeline' },
-      { id: 'tone', title: '状态颜色', detail: '绿色表示完成，黄色表示需要留意，红色表示失败或阻止；请优先查看最靠前的一条。', target: 'timeline.item', view: 'timeline' },
-      { id: 'read-only', title: '只读排查入口', detail: '这里不会修改配置。遇到问题时先核对最近一条记录，再回到对应工作区处理。', target: 'timeline.list', view: 'timeline' },
+    title: '操作与诊断记录', summary: '查看最近操作、下一步建议，以及脱敏后的专业诊断信息。', steps: [
+      { id: 'activity', title: '先看人话摘要', detail: '每条记录都会说明发生了什么、结果如何和建议下一步。黄色或红色记录优先处理。', target: 'timeline.list', view: 'timeline' },
+      { id: 'details', title: '需要时再看诊断详情', detail: '展开后可查看 HTTP 状态、服务商错误代码和请求编号等脱敏字段；可复制摘要给服务商、搜索引擎或 AI。', target: 'timeline.item', view: 'timeline' },
+      { id: 'read-only', title: '只读排查入口', detail: '这里不会修改配置，也不会记录访问密钥、配置正文、请求内容或完整响应。', target: 'timeline.list', view: 'timeline' },
     ],
   },
   lab: {

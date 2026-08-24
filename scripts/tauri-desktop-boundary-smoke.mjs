@@ -155,7 +155,7 @@ assert(runtimeRs.includes('stage: "inference".to_string()'), 'Provider verificat
 assert(runtimeRs.includes('body.get("id").is_some()'), 'Provider verification must identify a standard Responses shape')
 assert(runtimeRs.includes('has_compatible_response_output(&body)'), 'Provider verification must recognize a compatible response with model output')
 assert(runtimeRs.includes('"response_shape_unconfirmed"'), 'Provider verification must distinguish an unconfirmed response shape from a provider failure')
-assert(runtimeRs.includes('mark_catalog_model_verified'), 'Successful inference verification must update the matching catalog model')
+assert(runtimeRs.includes('update_catalog_model_verification'), 'Successful inference verification must update the matching catalog model')
 assert(runtimeRs.includes('.timeout(Duration::from_secs(15))'), 'Compatibility probes must use the bounded 15-second timeout budget')
 assert(libRs.includes('async fn run_blocking_command'), 'Long-running desktop commands must use the dedicated background-command helper')
 assert(libRs.includes('tauri::async_runtime::spawn_blocking(operation)'), 'Blocking provider HTTP work must leave the Tauri UI thread')

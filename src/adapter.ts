@@ -545,9 +545,9 @@ export async function restoreLatestBackup(): Promise<AppState> {
   return structuredClone(mockState)
 }
 
-export async function prepareSwitch(profileId: string): Promise<SwitchPreflight> {
+export async function prepareSwitch(profileId: string, onEvent?: OperationEventHandler): Promise<SwitchPreflight> {
   if (isTauri) {
-    return invoke<SwitchPreflight>('prepare_switch', { profileId })
+    return invoke<SwitchPreflight>('prepare_switch', { profileId, onEvent: operationChannel(onEvent) })
   }
   const preflight = await tryWebBackend<SwitchPreflight>('/api/profiles/prepare-switch', apiPost({ profileId }))
   if (preflight) {

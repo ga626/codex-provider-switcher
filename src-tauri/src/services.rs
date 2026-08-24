@@ -137,7 +137,141 @@ pub(crate) fn activity_seed() -> ActivityItem {
         title: "工作台已加载".to_string(),
         detail: "已从本地服务商目录和 Codex 配置读取状态。".to_string(),
         tone: "info".to_string(),
+        occurred_at: now_label(),
+        event_name: "workspace.loaded".to_string(),
+        result: "info".to_string(),
+        next_step: "如需继续操作，请从服务商工作区开始。".to_string(),
+        subject: None,
+        correlation_id: None,
+        operation_kind: "workspace".to_string(),
+        operation_key: "workspace.loaded".to_string(),
+        problem_key: None,
+        stages: vec![ActivityStage {
+            state: "completed".to_string(),
+            title: "工作台已准备好".to_string(),
+            detail: "已从本地服务商目录和 Codex 配置读取状态。".to_string(),
+        }],
+        diagnostics: Vec::new(),
     }
+}
+
+fn activity_operation_kind(event_name: &str, title: &str) -> &'static str {
+    let event_name = event_name.to_ascii_lowercase();
+    if event_name.contains("verification") {
+        "verification"
+    } else if event_name.contains("model_catalog") {
+        "model_catalog"
+    } else if event_name.contains("switch") {
+        "switch"
+    } else if title.contains("恢复") {
+        "restore"
+    } else if title.contains("备份") {
+        "backup"
+    } else {
+        "workspace"
+    }
+}
+
+fn activity_stage_title(kind: &str) -> &'static str {
+    match kind {
+        "verification" => "开始检查服务商可用性",
+        "model_catalog" => "开始读取模型目录",
+        "switch" => "开始准备切换",
+        "restore" => "开始恢复配置",
+        "backup" => "开始创建恢复点",
+        _ => "开始处理本次操作",
+    }
+}
+
+fn activity_problem_key(
+    kind: &str,
+    provider_name: Option<&str>,
+    diagnostics: &[ActivityDiagnostic],
+    result: &str,
+    tone: &str,
+) -> Option<String> {
+    let needs_attention = matches!(result, "failure" | "warning") || matches!(tone, "warning" | "danger");
+    if !needs_attention {
+        return None;
+    }
+    let provider = provider_name.unwrap_or("workspace").trim().to_ascii_lowercase();
+    let cause = diagnostics
+        .iter()
+        .find(|item| matches!(item.key.as_str(), "provider.error_code" | "http.status_code" | "verification.status" | "model_catalog.status"))
+        .map(|item| item.value.trim().to_ascii_lowercase().replace(char::is_whitespace, "-"))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "attention".to_string());
+    Some(format!("{provider}:{kind}:{cause}"))
+}
+
+fn activity_stages(
+    kind: &str,
+    _title: &str,
+    detail: &str,
+    result: &str,
+    tone: &str,
+    diagnostics: &[ActivityDiagnostic],
+) -> Vec<ActivityStage> {
+    let mut stages = vec![ActivityStage {
+        state: "completed".to_string(),
+        title: activity_stage_title(kind).to_string(),
+        detail: "本次操作已开始，正在等待本机与服务商检查完成。".to_string(),
+    }];
+
+    for diagnostic in diagnostics {
+        let state = if diagnostic.key == "http.status_code" && diagnostic.value.parse::<u16>().map(|status| status >= 400).unwrap_or(false) {
+            "failed"
+        } else if matches!(diagnostic.key.as_str(), "provider.error_code" | "verification.status")
+            && !matches!(diagnostic.value.as_str(), "verified" | "success" | "ok" | "passed")
+        {
+            "attention"
+        } else {
+            "completed"
+        };
+        let stage_title = match diagnostic.key.as_str() {
+            "verification.stage" => "检查环节已返回",
+            "verification.status" => "可用性结果已返回",
+            "http.status_code" => "服务商响应已返回",
+            "provider.error_code" => "服务商说明了错误原因",
+            "model_catalog.count" => "已读取模型目录",
+            "switch.rollback_backup_created" => "已创建恢复点",
+            "switch.protected_fields_verified" => "受保护设置已核对",
+            _ => diagnostic.label.as_str(),
+        };
+        stages.push(ActivityStage {
+            state: state.to_string(),
+            title: stage_title.to_string(),
+            detail: format!("{}：{}", diagnostic.label, diagnostic.value),
+        });
+    }
+
+    let terminal_state = if result == "failure" || tone == "danger" {
+        "failed"
+    } else if result == "warning" || tone == "warning" {
+        let explicitly_unconfirmed = detail.contains("超时")
+            || diagnostics
+                .iter()
+                .any(|item| item.value.to_ascii_lowercase().contains("unconfirmed"));
+        if explicitly_unconfirmed {
+            "unconfirmed"
+        } else {
+            "attention"
+        }
+    } else {
+        "completed"
+    };
+    let terminal_title = match terminal_state {
+        "failed" => "本次操作未完成",
+        "unconfirmed" => "等待结束，结果尚未确认",
+        "attention" => "本次操作需要处理",
+        _ => "本次操作已完成",
+    };
+    stages.push(ActivityStage {
+        state: terminal_state.to_string(),
+        title: terminal_title.to_string(),
+        detail: detail.to_string(),
+    });
+    stages
 }
 
 pub(crate) fn load_activity() -> Result<Vec<ActivityItem>, SwitcherError> {
@@ -162,7 +296,87 @@ pub(crate) fn save_activity(items: &[ActivityItem]) -> Result<(), SwitcherError>
 }
 
 pub(crate) fn push_activity(title: &str, detail: &str, tone: &str) -> Result<(), SwitcherError> {
+    push_activity_diagnostics(
+        title,
+        detail,
+        tone,
+        "workspace.operation",
+        tone,
+        "可在此查看最近操作；如需排查，请展开诊断详情。",
+        None,
+        None,
+        Vec::new(),
+    )
+}
+
+pub(crate) fn diagnostic_field(
+    key: &str,
+    label: &str,
+    value: impl AsRef<str>,
+) -> Option<ActivityDiagnostic> {
+    const SENSITIVE_MARKERS: [&str; 9] = [
+        "api_key",
+        "apikey",
+        "authorization",
+        "bearer ",
+        "token",
+        "secret",
+        "password",
+        "cookie",
+        "auth.json",
+    ];
+    let key = key.trim();
+    let raw = value.as_ref().trim();
+    if key.is_empty() || raw.is_empty() {
+        return None;
+    }
+    let key_lower = key.to_ascii_lowercase();
+    let value_lower = raw.to_ascii_lowercase();
+    if SENSITIVE_MARKERS
+        .iter()
+        .any(|marker| key_lower.contains(marker) || value_lower.contains(marker))
+    {
+        return None;
+    }
+    let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return None;
+    }
+    let value = if normalized.chars().count() > 160 {
+        format!("{}…", normalized.chars().take(159).collect::<String>())
+    } else {
+        normalized
+    };
+    Some(ActivityDiagnostic {
+        key: key.to_string(),
+        label: label.trim().to_string(),
+        value,
+    })
+}
+
+pub(crate) fn push_activity_diagnostics(
+    title: &str,
+    detail: &str,
+    tone: &str,
+    event_name: &str,
+    result: &str,
+    next_step: &str,
+    provider_name: Option<&str>,
+    model: Option<&str>,
+    diagnostics: Vec<ActivityDiagnostic>,
+) -> Result<(), SwitcherError> {
     let mut items = load_activity()?;
+    let occurred_at = now_label();
+    let correlation_id = format!("diag-{}", Local::now().timestamp_millis());
+    let operation_kind = activity_operation_kind(event_name, title);
+    let provider_name = provider_name.map(str::trim).filter(|value| !value.is_empty());
+    let operation_key = format!(
+        "{}:{}",
+        provider_name.unwrap_or("workspace").to_ascii_lowercase(),
+        operation_kind
+    );
+    let problem_key = activity_problem_key(operation_kind, provider_name, &diagnostics, result, tone);
+    let stages = activity_stages(operation_kind, title, detail, result, tone, &diagnostics);
     items.insert(
         0,
         ActivityItem {
@@ -171,9 +385,32 @@ pub(crate) fn push_activity(title: &str, detail: &str, tone: &str) -> Result<(),
             title: title.to_string(),
             detail: detail.to_string(),
             tone: tone.to_string(),
+            occurred_at,
+            event_name: event_name.trim().to_string(),
+            result: result.trim().to_string(),
+            next_step: next_step.trim().to_string(),
+            subject: match (provider_name, model) {
+                (None, None) => None,
+                (provider_name, model) => Some(ActivitySubject {
+                    provider_name: provider_name
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToString::to_string),
+                    model: model
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToString::to_string),
+                }),
+            },
+            correlation_id: Some(correlation_id),
+            operation_kind: operation_kind.to_string(),
+            operation_key,
+            problem_key,
+            stages,
+            diagnostics,
         },
     );
-    items.truncate(50);
+    items.truncate(200);
     save_activity(&items)
 }
 
@@ -183,6 +420,31 @@ pub(crate) fn app_state_with_activity(
     tone: &str,
 ) -> Result<AppState, SwitcherError> {
     push_activity(title, detail, tone)?;
+    app_state()
+}
+
+pub(crate) fn app_state_with_activity_diagnostics(
+    title: &str,
+    detail: &str,
+    tone: &str,
+    event_name: &str,
+    result: &str,
+    next_step: &str,
+    provider_name: Option<&str>,
+    model: Option<&str>,
+    diagnostics: Vec<ActivityDiagnostic>,
+) -> Result<AppState, SwitcherError> {
+    push_activity_diagnostics(
+        title,
+        detail,
+        tone,
+        event_name,
+        result,
+        next_step,
+        provider_name,
+        model,
+        diagnostics,
+    )?;
     app_state()
 }
 

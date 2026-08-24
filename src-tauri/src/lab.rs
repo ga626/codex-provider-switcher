@@ -182,10 +182,29 @@ pub(crate) fn push_probe_observation(
     catalog.response_probes.truncate(100);
 }
 
-pub(crate) fn mark_catalog_model_verified(
+fn catalog_verification_state(verified: bool, verification_status: &str) -> &'static str {
+    if verified {
+        "verified"
+    } else if matches!(verification_status, "timed_out_unconfirmed" | "timeout") {
+        "timed_out_unconfirmed"
+    } else if matches!(
+        verification_status,
+        "not_checked" | "missing_key" | "invalid_profile"
+    ) {
+        "unknown"
+    } else {
+        "failed"
+    }
+}
+
+pub(crate) fn update_catalog_model_verification(
     catalog: &mut StoredCatalog,
     provider_id: &str,
     model_id: &str,
+    verified: bool,
+    verification_status: &str,
+    detail: &str,
+    verified_at: &str,
 ) -> Result<(), SwitcherError> {
     let Some(value) = catalog.model_catalogs.get(provider_id).cloned() else {
         return Ok(());
@@ -201,7 +220,11 @@ pub(crate) fn mark_catalog_model_verified(
         .iter_mut()
         .find(|model| model.id.eq_ignore_ascii_case(model_id.trim()))
     {
-        model.verified_for_responses = "verified".to_string();
+        model.verified_for_responses =
+            catalog_verification_state(verified, verification_status).to_string();
+        model.last_verification_at = Some(verified_at.to_string());
+        model.last_verification_status = Some(verification_status.to_string());
+        model.last_verification_detail = Some(detail.to_string());
         catalog.model_catalogs.insert(
             provider_id.to_string(),
             serde_json::to_value(model_catalog)?,
@@ -222,6 +245,9 @@ pub(crate) fn invalidate_catalog_model_verifications(
     };
     for model in &mut model_catalog.models {
         model.verified_for_responses = "unknown".to_string();
+        model.last_verification_at = None;
+        model.last_verification_status = None;
+        model.last_verification_detail = None;
     }
     if let Ok(value) = serde_json::to_value(model_catalog) {
         catalog
@@ -244,11 +270,15 @@ pub(crate) fn preserve_catalog_model_verifications(
         return;
     }
     for model in &mut next.models {
-        if previous.models.iter().any(|previous_model| {
-            previous_model.id.eq_ignore_ascii_case(&model.id)
-                && previous_model.verified_for_responses == "verified"
-        }) {
-            model.verified_for_responses = "verified".to_string();
+        if let Some(previous_model) = previous
+            .models
+            .iter()
+            .find(|previous_model| previous_model.id.eq_ignore_ascii_case(&model.id))
+        {
+            model.verified_for_responses = previous_model.verified_for_responses.clone();
+            model.last_verification_at = previous_model.last_verification_at.clone();
+            model.last_verification_status = previous_model.last_verification_status.clone();
+            model.last_verification_detail = previous_model.last_verification_detail.clone();
         }
     }
 }
@@ -277,4 +307,22 @@ pub(crate) fn preserve_previous_model_catalog(previous: Option<&Value>, next: &m
         previous_count,
         last_success
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::catalog_verification_state;
+
+    #[test]
+    fn catalog_state_does_not_keep_an_old_verified_badge_after_a_failure() {
+        assert_eq!(catalog_verification_state(true, "verified"), "verified");
+        assert_eq!(
+            catalog_verification_state(false, "timed_out_unconfirmed"),
+            "timed_out_unconfirmed"
+        );
+        assert_eq!(
+            catalog_verification_state(false, "endpoint_or_model_unavailable"),
+            "failed"
+        );
+    }
 }
