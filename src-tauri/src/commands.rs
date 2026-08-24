@@ -6,15 +6,27 @@
 //! boundary.
 
 use super::{
-    check_for_update_core, preview_models_core, refresh_models_core,
+    check_for_update_core, prepare_switch_core, preview_models_core, refresh_models_core,
     run_blocking_command_with_events, run_response_probe_for_model_core, verify_profile_core,
-    AppState, EditableProfile, ModelCatalog, OperationEventV1, SwitcherError, UpdateInfo,
+    AppState, EditableProfile, ModelCatalog, OperationEventV1, SwitchPreflight, SwitcherError,
+    UpdateInfo,
 };
 use tauri::ipc::Channel;
 
 #[tauri::command]
 pub(crate) async fn check_for_update() -> Result<UpdateInfo, SwitcherError> {
     super::run_blocking_command(check_for_update_core).await
+}
+
+#[tauri::command]
+pub(crate) async fn prepare_switch(
+    profile_id: String,
+    on_event: Channel<OperationEventV1>,
+) -> Result<SwitchPreflight, SwitcherError> {
+    run_blocking_command_with_events("prepare-switch", "provider", Some(on_event), move || {
+        prepare_switch_core(profile_id)
+    })
+    .await
 }
 
 #[tauri::command]

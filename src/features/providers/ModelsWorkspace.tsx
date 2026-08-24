@@ -2,6 +2,7 @@ import { Boxes, RefreshCcw, Search } from 'lucide-react'
 import { useState } from 'react'
 import type { ModelCatalog, ProviderProfile } from '../../types'
 import { isClearlyIncompatibleModel, modelSelectionRank, providerModelLabel } from './model-utils'
+import { verificationPresentation } from './verification-copy'
 
 export function ModelsWorkspace({
   selectedProfile,
@@ -69,8 +70,13 @@ export function ModelsWorkspace({
                   {model.aliases.length > 0 && <small>别名：{model.aliases.join(', ')}</small>}
                   <div className="model-meta">
                     <span>服务商目录</span>
-                    {selectedProfile?.model.toLocaleLowerCase() === model.id.toLocaleLowerCase() && model.verifiedForResponses === 'verified' && (
-                      <span>当前模型可用性测试通过</span>
+                    {selectedProfile?.model.toLocaleLowerCase() === model.id.toLocaleLowerCase() && model.verifiedForResponses !== 'unknown' && (
+                      <span>{verificationPresentation({
+                        verified: model.verifiedForResponses === 'verified',
+                        verificationStatus: model.lastVerificationStatus ?? (model.verifiedForResponses === 'timed_out_unconfirmed' ? 'timed_out_unconfirmed' : 'provider_error'),
+                        lastVerifiedAt: model.lastVerificationAt,
+                        lastVerificationDetail: model.lastVerificationDetail,
+                      }).summary}</span>
                     )}
                     {model.tags.map((tag) => <span key={tag}>{tag}</span>)}
                     {isClearlyIncompatibleModel(model) && <span className="model-incompatible">不适用于 Codex Responses</span>}

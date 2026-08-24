@@ -9,7 +9,10 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 use tauri::{ipc::Channel, Manager};
@@ -91,6 +94,115 @@ fn is_isolated_development_fixture(profile: &StoredProfile) -> bool {
     env::var_os("CODEX_PROVIDER_SWITCHER_BUILD_SHA").is_some()
         && profile.api_key.trim() == "development-placeholder"
         && profile.base_url.trim().ends_with(".example/v1")
+}
+
+fn verification_activity_diagnostics(profile: &StoredProfile) -> Vec<ActivityDiagnostic> {
+    [
+        diagnostic_field(
+            "verification.status",
+            "检查结果",
+            &profile.verification_status,
+        ),
+        profile
+            .last_verification_stage
+            .as_deref()
+            .and_then(|value| diagnostic_field("verification.stage", "检查环节", value)),
+        profile
+            .last_verification_http_status
+            .and_then(|value| diagnostic_field("http.status_code", "HTTP 状态", value.to_string())),
+        profile
+            .last_verification_provider_code
+            .as_deref()
+            .and_then(|value| diagnostic_field("provider.error_code", "服务商错误代码", value)),
+        profile
+            .verification_response_shape
+            .as_deref()
+            .and_then(|value| diagnostic_field("response.shape", "返回格式", value)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn model_catalog_activity_diagnostics(catalog: &ModelCatalog) -> Vec<ActivityDiagnostic> {
+    [
+        diagnostic_field("model_catalog.status", "目录结果", &catalog.status),
+        diagnostic_field(
+            "model_catalog.model_count",
+            "发现模型数",
+            catalog.models.len().to_string(),
+        ),
+        catalog
+            .http_status
+            .and_then(|value| diagnostic_field("http.status_code", "HTTP 状态", value.to_string())),
+        catalog
+            .provider_code
+            .as_deref()
+            .and_then(|value| diagnostic_field("provider.error_code", "服务商错误代码", value)),
+        catalog
+            .request_id
+            .as_deref()
+            .and_then(|value| diagnostic_field("request.id", "服务商请求编号", value)),
+        catalog.retry_after_seconds.and_then(|value| {
+            diagnostic_field("retry.after_seconds", "建议等待秒数", value.to_string())
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn response_probe_activity_diagnostics(
+    observation: &ResponseProbeObservation,
+) -> Vec<ActivityDiagnostic> {
+    let mut diagnostics = vec![
+        diagnostic_field("response_probe.status", "探针结果", &observation.status),
+        diagnostic_field(
+            "response_probe.version",
+            "探针版本",
+            &observation.probe_version,
+        ),
+        observation
+            .http_status
+            .and_then(|value| diagnostic_field("http.status_code", "HTTP 状态", value.to_string())),
+        observation
+            .request_id
+            .as_deref()
+            .and_then(|value| diagnostic_field("request.id", "服务商请求编号", value)),
+        observation
+            .actual_model
+            .as_deref()
+            .and_then(|value| diagnostic_field("response.actual_model", "实际返回模型", value)),
+        observation
+            .cost_source
+            .as_deref()
+            .and_then(|value| diagnostic_field("cost.source", "费用数据来源", value)),
+        observation
+            .cost_candidate
+            .as_deref()
+            .and_then(|value| diagnostic_field("cost.candidate", "费用候选值", value)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    if let Some(usage) = &observation.usage {
+        diagnostics.extend(
+            [
+                usage.input_tokens.and_then(|value| {
+                    diagnostic_field("usage.input_tokens", "输入 tokens", value.to_string())
+                }),
+                usage.output_tokens.and_then(|value| {
+                    diagnostic_field("usage.output_tokens", "输出 tokens", value.to_string())
+                }),
+                usage.total_tokens.and_then(|value| {
+                    diagnostic_field("usage.total_tokens", "总 tokens", value.to_string())
+                }),
+            ]
+            .into_iter()
+            .flatten(),
+        );
+    }
+    diagnostics
 }
 
 #[cfg(windows)]
@@ -205,8 +317,36 @@ where
         channel.as_ref(),
         "后台任务已开始；正在执行实际检查。",
     );
+    // A blocking provider request must never look like a frozen desktop. The
+    // heartbeat deliberately reports only the fact that we are still waiting;
+    // it does not claim to know whether the provider has accepted or cancelled
+    // the request.
+    let completed = Arc::new(AtomicBool::new(false));
+    if let Some(channel) = channel.as_ref() {
+        let completed = Arc::clone(&completed);
+        let channel = channel.clone();
+        let started = started.clone();
+        std::thread::spawn(move || {
+            let mut waited_seconds = 0_u64;
+            loop {
+                std::thread::sleep(Duration::from_secs(5));
+                if completed.load(Ordering::Relaxed) {
+                    return;
+                }
+                waited_seconds += 5;
+                if waited_seconds >= 15 {
+                    send_operation_detail(
+                        &started,
+                        Some(&channel),
+                        "服务商仍在处理，正在继续等待结果。",
+                    );
+                }
+            }
+        });
+    }
     let started_at = std::time::Instant::now();
     let result = run_blocking_command(operation).await;
+    completed.store(true, Ordering::Relaxed);
     let elapsed_ms = started_at.elapsed().as_millis() as u64;
     if let Some(channel) = channel.as_ref() {
         let event = match &result {
@@ -534,6 +674,9 @@ args = ["-NoProfile"]
                 source: "provider_models_api".to_string(),
                 tags: vec!["responses-candidate".to_string()],
                 verified_for_responses: "verified".to_string(),
+                last_verification_at: Some("2026-08-21 00:00:00".to_string()),
+                last_verification_status: Some("verified".to_string()),
+                last_verification_detail: Some("测试 fixture".to_string()),
             }],
         );
         let previous_value = serde_json::to_value(previous).unwrap();
@@ -1485,11 +1628,6 @@ pub fn reveal_profile_api_key_core(profile_id: String) -> Result<String, Switche
     Ok(profile.api_key)
 }
 
-#[tauri::command]
-fn prepare_switch(profile_id: String) -> Result<SwitchPreflight, SwitcherError> {
-    prepare_switch_core(profile_id)
-}
-
 pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, SwitcherError> {
     let mut catalog = load_catalog()?;
     let value = catalog
@@ -1521,11 +1659,19 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
     healthy_baseline_backup()?;
     let verification = verify_provider_auth_probe(&profile);
     let verified = verification.verified;
+    let status = verification.status.clone();
     let detail = verification.detail.clone();
-    apply_verification(&mut profile, verification, now_label());
-    if verified {
-        mark_catalog_model_verified(&mut catalog, &profile_id, &profile.model)?;
-    }
+    let verified_at = now_label();
+    apply_verification(&mut profile, verification, verified_at.clone());
+    update_catalog_model_verification(
+        &mut catalog,
+        &profile_id,
+        &profile.model,
+        verified,
+        &status,
+        &detail,
+        &verified_at,
+    )?;
     catalog
         .profiles
         .insert(profile_id.clone(), serde_json::to_value(&profile)?);
@@ -1566,6 +1712,54 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
         &switch_preflight_path()?,
         serde_json::to_string_pretty(&preflight)?.as_bytes(),
     )?;
+    let mut diagnostics = verification_activity_diagnostics(&profile);
+    diagnostics.extend(
+        [
+            diagnostic_field(
+                "switch_preflight.risk_acknowledgement_required",
+                "需要确认使用风险",
+                (!risks.is_empty()).to_string(),
+            ),
+            diagnostic_field(
+                "switch_preflight.protected_fields_verified",
+                "受保护设置检查",
+                "passed",
+            ),
+        ]
+        .into_iter()
+        .flatten(),
+    );
+    push_activity_diagnostics(
+        if risks.is_empty() {
+            "切换前检查已完成"
+        } else {
+            "切换前检查发现使用风险"
+        },
+        if risks.is_empty() {
+            "已确认目标服务商可检查，且候选配置未触及项目、MCP、插件和其他受保护设置。"
+        } else {
+            "已完成写入安全检查；目标服务商仍有使用风险，需要在切换确认窗口阅读并确认。"
+        },
+        if risks.is_empty() {
+            "success"
+        } else {
+            "warning"
+        },
+        "provider.switch_preflight",
+        if risks.is_empty() {
+            "success"
+        } else {
+            "warning"
+        },
+        if risks.is_empty() {
+            "如需切换，请在确认窗口继续；切换前会再核对候选状态。"
+        } else {
+            "请查看风险说明；确认理解后才能继续切换，或先回到服务商设置处理。"
+        },
+        Some(&profile.name),
+        Some(&profile.model),
+        diagnostics,
+    )?;
     Ok(SwitchPreflight {
         operation_id,
         profile_id,
@@ -1578,6 +1772,9 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
         availability_status: profile.verification_status.clone(),
         availability_detail: detail,
         availability_checked_at: profile.last_verified_at.clone().unwrap_or_else(now_label),
+        availability_stage: profile.last_verification_stage.clone(),
+        availability_http_status: profile.last_verification_http_status,
+        availability_provider_code: profile.last_verification_provider_code.clone(),
         risk_detail: (!risks.is_empty()).then(|| risks.join(" ")),
         expires_at: chrono::DateTime::from_timestamp(expires_at, 0)
             .map(|value| {
@@ -1649,7 +1846,7 @@ pub fn switch_profile_core(
         .profiles
         .insert(profile_id, serde_json::to_value(profile)?);
     save_catalog(&catalog)?;
-    app_state_with_activity(
+    app_state_with_activity_diagnostics(
         &format!("已切换到 {display_name}"),
         if has_risk {
             "已写入同一候选认证合同的 Codex 服务商配置并生成回滚备份；切换前自动检查提示的使用风险已由用户确认。"
@@ -1657,6 +1854,31 @@ pub fn switch_profile_core(
             "已写入同一候选认证合同的 Codex 服务商配置并生成回滚备份；切换前自动检查已通过。"
         },
         if has_risk { "warning" } else { "success" },
+        "provider.switch",
+        if has_risk { "warning" } else { "success" },
+        if has_risk {
+            "请在 Codex 重启或刷新后确认新服务商；如异常，可使用最近恢复点回退。"
+        } else {
+            "请在 Codex 重启或刷新后确认新服务商；如异常，可使用最近恢复点回退。"
+        },
+        Some(&display_name),
+        None,
+        [
+            diagnostic_field(
+                "switch.risk_acknowledged",
+                "已确认使用风险",
+                has_risk.to_string(),
+            ),
+            diagnostic_field(
+                "switch.protected_fields_verified",
+                "受保护设置检查",
+                "passed",
+            ),
+            diagnostic_field("switch.rollback_backup_created", "恢复点", "created"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
     )
 }
 
@@ -1673,31 +1895,56 @@ pub fn verify_profile_core(profile_id: String) -> Result<AppState, SwitcherError
     let verified = verification.verified;
     let status = verification.status.clone();
     let detail = verification.detail.clone();
-    apply_verification(&mut profile, verification, now_label());
-    if verified {
-        mark_catalog_model_verified(&mut catalog, &profile_id, &profile.model)?;
-    }
+    let verified_at = now_label();
+    apply_verification(&mut profile, verification, verified_at.clone());
+    update_catalog_model_verification(
+        &mut catalog,
+        &profile_id,
+        &profile.model,
+        verified,
+        &status,
+        &detail,
+        &verified_at,
+    )?;
     catalog
         .profiles
-        .insert(profile_id, serde_json::to_value(profile)?);
+        .insert(profile_id, serde_json::to_value(&profile)?);
     save_catalog(&catalog)?;
     if verified {
-        app_state_with_activity(
+        app_state_with_activity_diagnostics(
             "服务商可用性测试通过",
             &format!("{display_name} 已完成短时、已认证的可用性测试。"),
             "success",
+            "provider.verification",
+            "success",
+            "可以继续切换或刷新模型目录；实际使用仍取决于服务商额度和网络状况。",
+            Some(&display_name),
+            Some(&profile.model),
+            verification_activity_diagnostics(&profile),
         )
     } else if status == "response_shape_unconfirmed" || status == "response_unparseable" {
-        app_state_with_activity(
+        app_state_with_activity_diagnostics(
             "服务端已响应，结果待确认",
             &format!("{display_name} 的可用性测试未能确认模型输出：{detail}"),
             "warning",
+            "provider.verification",
+            "warning",
+            "请展开诊断详情，并用服务商请求编号或错误代码向服务商、搜索引擎或 AI 查询。",
+            Some(&display_name),
+            Some(&profile.model),
+            verification_activity_diagnostics(&profile),
         )
     } else {
-        app_state_with_activity(
+        app_state_with_activity_diagnostics(
             "服务商可用性测试未确认",
             &format!("{display_name} 的可用性测试未确认：{detail}"),
             "warning",
+            "provider.verification",
+            "warning",
+            "请展开诊断详情，先核对认证、模型名称、额度和网络，再重新检查。",
+            Some(&display_name),
+            Some(&profile.model),
+            verification_activity_diagnostics(&profile),
         )
     }
 }
@@ -1757,7 +2004,7 @@ pub fn run_response_probe_for_model_core(
         observation.http_status = Some(200);
         observation.request_id = Some(format!("development-{profile_id}"));
         observation.response_id = Some(format!("response-{profile_id}"));
-        observation.actual_model = Some(requested_model);
+        observation.actual_model = Some(requested_model.clone());
         observation.usage = Some(ProbeUsage {
             input_tokens: Some(12),
             output_tokens: Some(4),
@@ -1777,12 +2024,19 @@ pub fn run_response_probe_for_model_core(
         observation.cost_source = Some("response_usage".to_string());
         observation.detail = "已从服务商回包读取测试额度。".to_string();
         let detail = observation.detail.clone();
+        let diagnostics = response_probe_activity_diagnostics(&observation);
         push_probe_observation(&mut catalog, observation);
         save_catalog(&catalog)?;
-        return app_state_with_activity(
+        return app_state_with_activity_diagnostics(
             "返回能力探针已完成",
             &format!("{}：{detail}", profile.name),
             "success",
+            "provider.response_probe",
+            "success",
+            "可在费用实验室核对本次用量；如需对账，可用服务商请求编号查询后台。",
+            Some(&profile.name),
+            Some(&requested_model),
+            diagnostics,
         );
     }
     let client = configure_http_client(
@@ -1876,9 +2130,10 @@ pub fn run_response_probe_for_model_core(
     let succeeded = observation.status != "failed";
     let status = observation.status.clone();
     let detail = observation.detail.clone();
+    let diagnostics = response_probe_activity_diagnostics(&observation);
     push_probe_observation(&mut catalog, observation);
     save_catalog(&catalog)?;
-    app_state_with_activity(
+    app_state_with_activity_diagnostics(
         if succeeded {
             "返回能力探针已完成"
         } else {
@@ -1890,6 +2145,20 @@ pub fn run_response_probe_for_model_core(
         } else {
             "warning"
         },
+        "provider.response_probe",
+        if succeeded && status != "no_signal" {
+            "success"
+        } else {
+            "warning"
+        },
+        if succeeded {
+            "可在费用实验室核对本次用量；如需对账，可用服务商请求编号查询后台。"
+        } else {
+            "请展开诊断详情，先检查 HTTP 状态、请求编号、网络和服务商额度后再重试。"
+        },
+        Some(&profile.name),
+        Some(&requested_model),
+        diagnostics,
     )
 }
 
@@ -2037,14 +2306,21 @@ pub fn refresh_models_core(profile_id: String) -> Result<AppState, SwitcherError
             model_catalog.status = "ok".to_string();
             model_catalog.status_detail = "模型目录已刷新。".to_string();
             model_catalog.http_status = Some(200);
+            let diagnostics = model_catalog_activity_diagnostics(&model_catalog);
             catalog
                 .model_catalogs
                 .insert(profile_id, serde_json::to_value(&model_catalog)?);
             save_catalog(&catalog)?;
-            return app_state_with_activity(
+            return app_state_with_activity_diagnostics(
                 "模型目录已刷新",
                 &model_catalog.status_detail,
                 "success",
+                "provider.model_catalog.refresh",
+                "success",
+                "可以在模型列表中选择模型；如目录与服务商后台不一致，可根据请求编号向服务商查询。",
+                Some(&profile.name),
+                Some(&profile.model),
+                diagnostics,
             );
         }
     }
@@ -2052,18 +2328,30 @@ pub fn refresh_models_core(profile_id: String) -> Result<AppState, SwitcherError
     preserve_previous_model_catalog(previous_catalog.as_ref(), &mut model_catalog);
     preserve_catalog_model_verifications(previous_catalog.as_ref(), &mut model_catalog);
     let ok = model_catalog.status == "ok";
+    let detail = model_catalog.status_detail.clone();
+    let diagnostics = model_catalog_activity_diagnostics(&model_catalog);
     catalog
         .model_catalogs
         .insert(profile_id.clone(), serde_json::to_value(&model_catalog)?);
     save_catalog(&catalog)?;
-    app_state_with_activity(
+    app_state_with_activity_diagnostics(
         if ok {
             "模型目录已刷新"
         } else {
             "模型目录刷新失败"
         },
-        &model_catalog.status_detail,
+        &detail,
         if ok { "success" } else { "warning" },
+        "provider.model_catalog.refresh",
+        if ok { "success" } else { "warning" },
+        if ok {
+            "可以在模型列表中选择模型；如目录与服务商后台不一致，可根据请求编号向服务商查询。"
+        } else {
+            "请展开诊断详情，先核对 HTTP 状态、错误代码、认证和服务商限流信息后再重试。"
+        },
+        Some(&profile.name),
+        Some(&profile.model),
+        diagnostics,
     )
 }
 
@@ -2304,7 +2592,7 @@ pub fn run() {
             prepare_connection_environment,
             complete_onboarding,
             update_transport_options,
-            prepare_switch,
+            commands::prepare_switch,
             switch_profile,
             commands::verify_profile,
             commands::run_response_probe,

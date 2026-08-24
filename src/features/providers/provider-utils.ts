@@ -1,5 +1,6 @@
 import type { EditableProfile, ModelCatalog, ProviderProfile, ValidationCheck } from '../../types'
 import { providerModelLabel } from './model-utils'
+import { verificationPresentation } from './verification-copy'
 
 export function profileConfigurationChecks(
   profile: ProviderProfile | undefined,
@@ -34,7 +35,7 @@ export function profileConfigurationChecks(
       label: '模型名称',
       ok: model.length > 0,
       detail: model.length > 0
-        ? providerModelLabel(model) === model ? model : `${providerModelLabel(model)}（模型标识：${model}）`
+        ? providerModelLabel(model) === model ? model : `${providerModelLabel(model)}（服务商名称：${model}）`
         : '需要填写 Codex 使用的模型名称。',
       severity: 'required',
     },
@@ -54,11 +55,13 @@ export function providerAvailabilityChecks(
 ): ValidationCheck[] {
   if (!profile) return []
 
+  const availability = verificationPresentation(profile)
   const checks: ValidationCheck[] = [{
     id: 'provider-inference-probe',
     label: '服务商可用性测试',
     ok: profile.verified && profile.verificationStatus === 'verified',
-    detail: verificationDetail(profile),
+    detail: `${availability.summary}：${availability.detail} ${availability.nextStep}`,
+    technicalDetail: availability.technicalDetail,
     severity: 'warning',
   }]
 
@@ -69,7 +72,7 @@ export function providerAvailabilityChecks(
       label: '模型目录匹配',
       ok: modelIds.has(profile.model),
       detail: modelIds.has(profile.model)
-        ? '当前模型存在于最近一次服务商模型目录。'
+        ? '目录中列出了这个模型；是否能用仍以真实测试为准。'
         : '当前模型不在最近一次服务商模型目录中；这只影响模型选择提示，不代表模型不能调用。',
       severity: 'info',
     })
@@ -79,13 +82,8 @@ export function providerAvailabilityChecks(
 }
 
 export function verificationDetail(profile: ProviderProfile | undefined) {
-  if (!profile?.lastVerificationDetail) {
-    return '尚未运行连接测试。'
-  }
-
-  return profile.verified && profile.verificationStatus === 'verified'
-    ? '最近一次连接测试通过。'
-    : profile.lastVerificationDetail
+  const presentation = verificationPresentation(profile)
+  return `${presentation.summary}：${presentation.detail} ${presentation.nextStep}`
 }
 
 export function modelCatalogCanBeUsed(catalog: ModelCatalog | undefined): catalog is ModelCatalog {

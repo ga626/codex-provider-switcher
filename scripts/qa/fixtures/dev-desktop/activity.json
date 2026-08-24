@@ -1,5 +1,116 @@
 [
   { "id": "development-fixture-loaded", "time": "22:26", "title": "配置已加载", "detail": "服务商、模型和费用记录已准备就绪。", "tone": "info" },
   { "id": "development-fixture-check", "time": "22:13", "title": "配置安全检查完成", "detail": "当前配置已通过安全检查。", "tone": "success" },
-  { "id": "development-fixture-backup", "time": "22:11", "title": "恢复点已生成", "detail": "最近一次配置已保存，可随时恢复。", "tone": "success" }
+  { "id": "development-fixture-backup", "time": "22:11", "title": "恢复点已生成", "detail": "最近一次配置已保存，可随时恢复。", "tone": "success" },
+  {
+    "id": "fixture-hiyo-timeout",
+    "time": "10:18",
+    "title": "等待响应，结果尚未确认",
+    "detail": "等待超过 60 秒，尚未收到 Hiyo 的最终结果。",
+    "tone": "warning",
+    "occurredAt": "2026-08-25 10:18:41",
+    "eventName": "provider.verification",
+    "result": "warning",
+    "nextStep": "这不是服务商失败。请等待片刻后重新检查；系统没有自动重发请求，以避免重复推理或扣费。",
+    "operationKind": "verification",
+    "operationKey": "hiyo:verification",
+    "problemKey": "hiyo:verification:timed_out_unconfirmed",
+    "subject": { "providerName": "Hiyo", "model": "gpt-5.6-terra" },
+    "stages": [
+      { "state": "completed", "title": "已开始可用性检查", "detail": "已提交一次短时检查请求。" },
+      { "state": "completed", "title": "正在等待服务商响应", "detail": "连接仍保持正常。" },
+      { "state": "unconfirmed", "title": "等待结束，结果尚未确认", "detail": "超过等待时间仍未得到最终结果；未自动重发。" }
+    ],
+    "diagnostics": [
+      { "key": "verification.status", "label": "检查结果", "value": "timed_out_unconfirmed" },
+      { "key": "verification.stage", "label": "最后检查环节", "value": "inference_wait" }
+    ]
+  },
+  {
+    "id": "fixture-owl-401-latest",
+    "time": "10:12",
+    "title": "服务商可用性测试未完成",
+    "detail": "OWL 在认证环节返回了 401。",
+    "tone": "danger",
+    "occurredAt": "2026-08-25 10:12:23",
+    "eventName": "provider.verification",
+    "result": "failure",
+    "nextStep": "确认 OWL 的 API Key 是否有效，以及该密钥是否有 gpt-5.6-terra 的使用权限；完成后重新检查。",
+    "operationKind": "verification",
+    "operationKey": "owl:verification",
+    "problemKey": "owl:verification:401",
+    "subject": { "providerName": "OWL", "model": "gpt-5.6-terra" },
+    "stages": [
+      { "state": "completed", "title": "已读取服务商设置", "detail": "已使用保存的服务商地址和模型发起检查。" },
+      { "state": "failed", "title": "认证检查未通过", "detail": "服务商返回 HTTP 401 和 API_KEY_REQUIRED。" },
+      { "state": "completed", "title": "已停止后续写入", "detail": "没有改动 Codex 配置，也没有写入认证文件。" }
+    ],
+    "diagnostics": [
+      { "key": "verification.stage", "label": "检查环节", "value": "authentication" },
+      { "key": "http.status_code", "label": "HTTP 状态", "value": "401" },
+      { "key": "provider.error_code", "label": "服务商错误代码", "value": "API_KEY_REQUIRED" }
+    ]
+  },
+  {
+    "id": "fixture-owl-401-earlier",
+    "time": "10:07",
+    "title": "服务商可用性测试未完成",
+    "detail": "OWL 在认证环节返回了 401。",
+    "tone": "danger",
+    "occurredAt": "2026-08-25 10:07:11",
+    "eventName": "provider.verification",
+    "result": "failure",
+    "operationKind": "verification",
+    "operationKey": "owl:verification",
+    "problemKey": "owl:verification:401",
+    "subject": { "providerName": "OWL", "model": "gpt-5.6-terra" },
+    "stages": [{ "state": "failed", "title": "认证检查未通过", "detail": "服务商返回 HTTP 401。" }],
+    "diagnostics": [{ "key": "http.status_code", "label": "HTTP 状态", "value": "401" }]
+  },
+  {
+    "id": "fixture-modeflare-empty",
+    "time": "09:56",
+    "title": "模型目录需要确认",
+    "detail": "连接可用，但没有找到可选择的模型。",
+    "tone": "warning",
+    "occurredAt": "2026-08-25 09:56:08",
+    "eventName": "provider.model_catalog",
+    "result": "warning",
+    "nextStep": "检查该服务商是否为当前密钥开放模型目录，或手动确认要使用的模型名称。",
+    "operationKind": "model_catalog",
+    "operationKey": "modeflare:model_catalog",
+    "problemKey": "modeflare:model_catalog:empty",
+    "subject": { "providerName": "Modeflare" },
+    "stages": [
+      { "state": "completed", "title": "已连接模型目录", "detail": "服务商返回了可读取的目录响应。" },
+      { "state": "attention", "title": "没有可选择的模型", "detail": "当前目录为空，无法自动确认要使用的模型。" }
+    ],
+    "diagnostics": [
+      { "key": "model_catalog.count", "label": "可用模型数", "value": "0" },
+      { "key": "http.status_code", "label": "HTTP 状态", "value": "200" }
+    ]
+  },
+  {
+    "id": "fixture-hiyo-rate-limit",
+    "time": "09:42",
+    "title": "模型目录暂时无法刷新",
+    "detail": "服务商暂时限制了请求频率。",
+    "tone": "warning",
+    "occurredAt": "2026-08-25 09:42:20",
+    "eventName": "provider.model_catalog",
+    "result": "warning",
+    "nextStep": "请等待 30 秒后再试；连续重试不会更快恢复。",
+    "operationKind": "model_catalog",
+    "operationKey": "hiyo:model_catalog",
+    "problemKey": "hiyo:model_catalog:429",
+    "subject": { "providerName": "Hiyo" },
+    "stages": [
+      { "state": "completed", "title": "已发起模型目录刷新", "detail": "请求已到达服务商。" },
+      { "state": "attention", "title": "服务商暂时限制请求", "detail": "服务商返回 HTTP 429，建议等待后再试。" }
+    ],
+    "diagnostics": [
+      { "key": "http.status_code", "label": "HTTP 状态", "value": "429" },
+      { "key": "retry.after_seconds", "label": "建议等待", "value": "30" }
+    ]
+  }
 ]

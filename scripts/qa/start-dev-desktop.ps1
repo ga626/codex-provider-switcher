@@ -48,6 +48,12 @@ try {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($buildSha)) {
         throw "Unable to determine the source revision for the development window."
     }
+    # A development board can intentionally run an uncommitted implementation.
+    # Make that visible so its window never pretends to be the clean commit.
+    $workingTreeState = (git status --porcelain)
+    if (-not [string]::IsNullOrWhiteSpace(($workingTreeState -join ""))) {
+        $buildSha = "$buildSha-dirty"
+    }
     $environmentNames = @(
         "CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL",
         "CODEX_PROVIDER_SWITCHER_BUILD_SHA",

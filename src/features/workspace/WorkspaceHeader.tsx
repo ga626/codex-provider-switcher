@@ -39,8 +39,8 @@ export function WorkspaceHeader({
       note: '查看备份、受保护内容和恢复入口。',
     },
     timeline: {
-      title: '活动记录',
-      note: '切换、检查和配置变更按时间记录。',
+      title: '操作与诊断记录',
+      note: '先看结果和下一步；需要时再展开诊断详情。',
     },
     lab: {
       title: '实验室',

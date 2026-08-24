@@ -667,7 +667,7 @@ function App() {
     if (!selectedProfile || !canSwitch) return
     beginOperation('prepare-switch')
     try {
-      const preflight = await prepareSwitch(selectedProfile.id)
+      const preflight = await prepareSwitch(selectedProfile.id, handleOperationEvent)
       setSwitchConfirm(preflight)
 
       // The preflight probe persists the latest verification result. Refresh

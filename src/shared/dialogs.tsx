@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import type { UpdateInstallProgress } from '../adapter'
 import { createCompatibilityFeedback } from '../feedback'
 import type { AppState, BackupItem, ProviderProfile, SwitchPreflight, UpdateInfo } from '../types'
+import { verificationPresentation } from '../features/providers/verification-copy'
 import { ModalDialog } from './components'
 
 function errorMessage(error: unknown, fallback: string) {
@@ -135,10 +136,24 @@ export function RestoreConfirmDialog({ backup, busy, onCancel, onConfirm }: { ba
 export function SwitchConfirmDialog({ preflight, busy, onCancel, onConfirm }: { preflight: SwitchPreflight; busy: boolean; onCancel: () => void; onConfirm: (riskAcknowledged: boolean) => void }) {
   const [riskAcknowledged, setRiskAcknowledged] = useState(false)
   const hasRisk = Boolean(preflight.riskDetail)
-  const availabilityPassed = preflight.availabilityStatus === 'verified'
-  const availabilityAttempted = !['not_checked', 'missing_key', 'invalid_profile'].includes(preflight.availabilityStatus)
+  const availability = verificationPresentation({
+    verified: preflight.availabilityStatus === 'verified',
+    verificationStatus: preflight.availabilityStatus,
+    lastVerifiedAt: preflight.availabilityCheckedAt,
+    lastVerificationDetail: preflight.availabilityDetail,
+    lastVerificationStage: preflight.availabilityStage,
+    lastVerificationHttpStatus: preflight.availabilityHttpStatus,
+    lastVerificationProviderCode: preflight.availabilityProviderCode,
+  })
+  const canConfirm = !hasRisk || riskAcknowledged
+  const title = availability.tone === 'success'
+    ? `可以切换到 ${preflight.targetName}`
+    : availability.summary === '等待超时，尚未确认'
+      ? `可以切换，但连接尚未确认`
+      : `可以切换，但当前服务商还不能使用`
   return <ModalDialog className="switch-confirm-dialog" labelledBy="switch-dialog-title" onClose={onCancel}>
-    <div className="confirm-dialog-icon"><GitCompareArrows size={20} /></div><div><span className="eyebrow">切换影响确认</span><h2 id="switch-dialog-title">确认切换到 {preflight.targetName}？</h2><p>{availabilityPassed ? '切换前已重新完成可用性测试。确认时会再次核对当前配置没有变化，再创建新的恢复点；不会显示访问密钥或完整配置内容。' : '切换前已执行可用性测试，但本次没有确认目标服务商可用。确认时会再次核对当前配置没有变化；继续切换需要你明确承担使用风险。'}</p><dl className="switch-confirm-facts"><div><dt>目标模型</dt><dd>{preflight.targetModel}</dd></div><div><dt>恢复点</dt><dd>{preflight.backupDetail}</dd></div><div><dt>保护检查</dt><dd>{preflight.protectedDetail}</dd></div><div className={availabilityPassed ? 'preflight-availability passed' : 'preflight-availability warning'}><dt>本次可用性测试</dt><dd><strong>{availabilityPassed ? '已通过' : availabilityAttempted ? '已执行但未确认' : '未能发起'}</strong><span>{preflight.availabilityDetail}</span><small>检查时间：{preflight.availabilityCheckedAt}</small></dd></div>{preflight.riskDetail && <div><dt>使用风险</dt><dd>{preflight.riskDetail}</dd></div>}</dl>{hasRisk && <label className="risk-confirmation"><input type="checkbox" checked={riskAcknowledged} onChange={(event) => setRiskAcknowledged(event.target.checked)} data-dialog-initial-focus /><span>我已了解：这不会影响安全写入检查，但目标服务商的实际可用性尚未由本工具确认。</span></label>}<p>此预览有效至 {preflight.expiresAt}。完成后请关闭当前 Codex 会话，并在新的会话中确认实际 provider 使用情况。</p></div>
-    <div className="command-row"><button className="ghost-button" type="button" onClick={onCancel} disabled={busy} data-dialog-initial-focus={!hasRisk}>取消</button><button className="primary-button" type="button" onClick={() => onConfirm(riskAcknowledged)} disabled={busy || (hasRisk && !riskAcknowledged)}><PlugZap size={16} />确认切换</button></div>
+    <div className={`confirm-dialog-icon switch-confirm-icon ${availability.tone}`}><GitCompareArrows size={20} /></div>
+    <div className="switch-confirm-content"><span className="eyebrow">切换前检查</span><h2 id="switch-dialog-title">{title}</h2><p className="switch-target">{preflight.targetName} · {preflight.targetModel}</p><section className={`switch-availability-card ${availability.tone}`}><strong>{availability.summary}</strong><span>{availability.detail}</span><small>{availability.nextStep}</small></section><ul className="switch-safety-promises"><li><ShieldCheck size={16} />切换前自动创建恢复点</li><li><ShieldCheck size={16} />只更新服务商相关配置；MCP、插件和其他设置不动</li></ul>{hasRisk && <label className="risk-confirmation"><input type="checkbox" checked={riskAcknowledged} onChange={(event) => setRiskAcknowledged(event.target.checked)} data-dialog-initial-focus /><span>{availability.needsAcknowledgement ? '我知道：连接尚未确认，切换后可能仍无法使用。' : '我已了解当前配置的额外使用风险。'}</span></label>}<details className="switch-technical-detail"><summary>查看技术详情</summary><pre>{availability.technicalDetail ?? `检查时间：${preflight.availabilityCheckedAt}`}</pre></details><p className="switch-after-note">切换完成后，请在新的 Codex 对话中确认实际服务商。</p></div>
+    <div className="command-row switch-confirm-actions"><button className="ghost-button" type="button" onClick={onCancel} disabled={busy} data-dialog-initial-focus={!hasRisk}>取消</button><button className="primary-button" type="button" onClick={() => onConfirm(riskAcknowledged)} disabled={busy || !canConfirm}><PlugZap size={16} />确认切换</button></div>
   </ModalDialog>
 }

@@ -36,6 +36,7 @@ const codexDir = join(userHome, '.codex')
 const configPath = join(codexDir, 'config.toml')
 const authPath = join(codexDir, 'auth.json')
 const profilesPath = join(localAppData, 'CodeX Provider Switcher', 'profiles.json')
+const activityPath = join(localAppData, 'CodeX Provider Switcher', 'activity.json')
 let modelsProbeRequestCount = 0
 let responsesProbeRequestCount = 0
 const slowProviderDelayMs = 1200
@@ -192,6 +193,7 @@ async function runProfileRecovery(source, environment) {
 
 await mkdir(codexDir, { recursive: true })
 await mkdir(localAppData, { recursive: true })
+await mkdir(join(localAppData, 'CodeX Provider Switcher'), { recursive: true })
 
 const originalConfig = [
   'model = "baseline-model"',
@@ -402,10 +404,18 @@ const backend = spawn(exePath, ['--port', String(backendPort)], {
 
 try {
   await waitForBackend()
+  await writeFile(activityPath, JSON.stringify([{
+    id: 'legacy-activity',
+    time: '09:30',
+    title: '旧版活动记录',
+    detail: '这条记录没有诊断字段，仍应正常显示。',
+    tone: 'info',
+  }], null, 2), 'utf8')
   assert(await requestStatus('/C:/Windows/win.ini') === 400, 'local fallback accepted a drive-qualified static path')
   assert(await oversizedRequestStatus() === 413, 'local fallback did not reject an oversized request body')
   const initial = await api('/api/state')
   const initialActivityCount = initial.activity.length
+  assert(initial.activity.some((item) => item.id === 'legacy-activity'), 'legacy activity document did not remain readable')
   assert(initial.profiles.length === 0, 'a new product install must not include a preconfigured provider')
   assert(initial.connectionEnvironment?.status === 'needs_setup', 'a first product launch must ask the user to prepare its configuration layer')
   const initialBackup = initial.backups.find((item) => item.kind === 'initial_install')
@@ -786,6 +796,20 @@ try {
   assert(failedProfile?.verificationStatus === 'billing_unavailable', 'insufficient-credit status was not classified')
   assert(failedProfile?.lastVerificationStage === 'billing', 'insufficient-credit provider did not record the diagnostic stage')
   assert(failedProfile?.lastVerificationProviderCode === 'insufficient_quota', 'insufficient-credit provider did not record the provider code')
+  const failedVerificationActivity = failedVerification.activity[0]
+  assert(failedVerificationActivity?.eventName === 'provider.verification', 'verification did not create a stable diagnostic event name')
+  assert(failedVerificationActivity?.subject?.providerName === 'DasuAPI', 'verification activity did not retain the provider subject')
+  assert(failedVerificationActivity?.diagnostics?.some((item) => item.key === 'provider.error_code' && item.value === 'insufficient_quota'), 'verification activity did not retain the safe provider error code')
+  assert(failedVerificationActivity?.diagnostics?.some((item) => item.key === 'http.status_code' && item.value === '402'), 'verification activity did not retain the HTTP status')
+  assert(failedVerificationActivity?.nextStep?.includes('认证、模型名称、额度和网络'), 'verification activity did not provide a plain-language next step')
+  assert(failedVerificationActivity?.operationKind === 'verification', 'verification activity did not expose an operation kind for compact history')
+  assert(failedVerificationActivity?.operationKey?.includes('dasuapi:verification'), 'verification activity did not expose a stable operation key')
+  assert(failedVerificationActivity?.problemKey, 'attention activity did not expose a grouping key')
+  assert(failedVerificationActivity?.stages?.length >= 2, 'verification activity did not retain a readable diagnostic process')
+  assert(failedVerificationActivity?.stages?.at(-1)?.state === 'attention', 'verification activity did not classify its terminal diagnostic state')
+  const activityDocument = await readFile(activityPath, 'utf8')
+  assert(!activityDocument.includes('sk-no-credit'), 'activity document persisted an API key')
+  assert(!activityDocument.includes('auth.json'), 'activity document persisted a protected file name')
   assert(responsesProbeRequestCount >= 1, 'DasuAPI quota verification did not issue the real request probe')
   const responsesBeforeRiskPreflight = responsesProbeRequestCount
   const riskPreflight = await prepareSwitch(noCredit.id)

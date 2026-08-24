@@ -187,6 +187,12 @@ pub struct ProviderModel {
     pub source: String,
     pub tags: Vec<String>,
     pub verified_for_responses: String,
+    #[serde(default)]
+    pub last_verification_at: Option<String>,
+    #[serde(default)]
+    pub last_verification_status: Option<String>,
+    #[serde(default)]
+    pub last_verification_detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,12 +239,59 @@ pub struct ValidationCheck {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ActivitySubject {
+    #[serde(default)]
+    pub provider_name: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityDiagnostic {
+    pub key: String,
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityStage {
+    pub state: String,
+    pub title: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ActivityItem {
     pub id: String,
     pub time: String,
     pub title: String,
     pub detail: String,
     pub tone: String,
+    #[serde(default)]
+    pub occurred_at: String,
+    #[serde(default)]
+    pub event_name: String,
+    #[serde(default)]
+    pub result: String,
+    #[serde(default)]
+    pub next_step: String,
+    #[serde(default)]
+    pub subject: Option<ActivitySubject>,
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    #[serde(default)]
+    pub operation_kind: String,
+    #[serde(default)]
+    pub operation_key: String,
+    #[serde(default)]
+    pub problem_key: Option<String>,
+    #[serde(default)]
+    pub stages: Vec<ActivityStage>,
+    #[serde(default)]
+    pub diagnostics: Vec<ActivityDiagnostic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -430,6 +483,9 @@ pub struct SwitchPreflight {
     pub availability_status: String,
     pub availability_detail: String,
     pub availability_checked_at: String,
+    pub availability_stage: Option<String>,
+    pub availability_http_status: Option<u16>,
+    pub availability_provider_code: Option<String>,
     pub risk_detail: Option<String>,
     pub expires_at: String,
 }
@@ -703,9 +759,9 @@ pub(crate) fn validation_checks(config_text: &str) -> Vec<ValidationCheck> {
         Ok(value) => {
             checks.push(check(
                 "toml",
-                "TOML 语法",
+                "配置文件格式",
                 true,
-                "配置文件可以正常解析。",
+                "配置文件格式正常，可以安全读取。",
                 "required",
             ));
             let model_provider = value
@@ -722,25 +778,25 @@ pub(crate) fn validation_checks(config_text: &str) -> Vec<ValidationCheck> {
                 .unwrap_or(false);
             checks.push(check(
                 "root-model",
-                "Codex 模型",
+                "已选好使用的模型",
                 !root_model.trim().is_empty(),
                 if !root_model.trim().is_empty() {
-                    "根配置中已设置 model。"
+                    "当前已选择模型。"
                 } else {
-                    "根配置缺少 model，Codex 可能无法确定默认模型。"
+                    "还没有选择模型，Codex 不知道该使用哪个模型。"
                 },
                 "warning",
             ));
             checks.push(check(
                 "model-provider",
-                "model_provider 已锁定",
+                "服务商已选好",
                 model_provider == "custom",
                 if model_provider == "custom" {
-                    "Codex 保持在 custom 服务商分组。"
+                    "Codex 会使用当前选中的服务商。"
                 } else if model_provider.is_empty() {
                     "尚未选择服务商；保存并切换第一家服务商时会自动设置。"
                 } else {
-                    "model_provider 必须保持 custom，避免破坏历史记录和服务商分组行为。"
+                    "当前服务商选择不完整。请重新检查并切换，避免影响已有服务商记录。"
                 },
                 if model_provider.is_empty() {
                     "info"
@@ -750,22 +806,22 @@ pub(crate) fn validation_checks(config_text: &str) -> Vec<ValidationCheck> {
             ));
             checks.push(check(
                 "disable-response-storage",
-                "禁用 Response Storage",
+                "已关闭额外存储",
                 response_storage_disabled,
                 if response_storage_disabled {
-                    "disable_response_storage 已保持 true，第三方 responses 中转不会触发存储型压缩路径。"
+                    "已关闭 Codex 请求中的额外存储选项，减少第三方中转兼容问题。"
                 } else {
-                    "必须写入 disable_response_storage = true，避免第三方中转站在上下文压缩时触发 502。"
+                    "需要关闭额外存储选项，避免部分服务商在长对话中连接失败。"
                 },
                 "warning",
             ));
             let custom = value.get("model_providers").and_then(|v| v.get("custom"));
             checks.push(check(
                 "custom-provider",
-                "custom 服务商配置段",
+                "服务商信息已保存",
                 custom.is_some(),
                 if custom.is_some() {
-                    "[model_providers.custom] 存在。"
+                    "接口地址、模型和连接方式都已准备好。"
                 } else {
                     "尚未添加服务商；保存并切换第一家服务商时会自动创建。"
                 },
@@ -777,14 +833,14 @@ pub(crate) fn validation_checks(config_text: &str) -> Vec<ValidationCheck> {
                 .unwrap_or("");
             checks.push(check(
                 "wire-api",
-                "Responses 线路协议",
+                "连接方式已匹配",
                 wire_api == "responses",
                 if wire_api == "responses" {
-                    "wire_api 当前为 responses。"
+                    "会使用 Codex 需要的连接方式。"
                 } else if custom.is_none() {
-                    "尚未添加服务商；切换第一家服务商时会自动设置为 responses。"
+                    "尚未添加服务商；切换第一家服务商时会自动完成匹配。"
                 } else {
-                    "wire_api 必须保持 responses，才能兼容 Codex 原生请求。"
+                    "当前连接方式不适用于 Codex。请重新检查并切换。"
                 },
                 if custom.is_none() { "info" } else { "warning" },
             ));
@@ -794,14 +850,14 @@ pub(crate) fn validation_checks(config_text: &str) -> Vec<ValidationCheck> {
                 .unwrap_or("");
             checks.push(check(
                 "custom-base-url",
-                "当前接口地址",
+                "服务商地址已填写",
                 base_url.starts_with("http"),
                 if base_url.starts_with("http") {
-                    "custom 服务商已配置 base_url。"
+                    "可以使用这个地址连接服务商。"
                 } else if custom.is_none() {
                     "尚未添加服务商，因此当前没有接口地址。"
                 } else {
-                    "custom 服务商缺少有效 base_url。"
+                    "地址不完整或格式不正确，请检查服务商提供的地址。"
                 },
                 if custom.is_none() { "info" } else { "warning" },
             ));
@@ -827,30 +883,30 @@ pub(crate) fn validation_checks(config_text: &str) -> Vec<ValidationCheck> {
                 || requires_openai_auth
                 || (!requires_openai_auth && env_key.trim().is_empty());
             let authentication_detail = if !auth_command.trim().is_empty() {
-                "当前服务商使用 provider 级 auth.command 读取密钥；切换器会保留该认证合同。"
+                "服务商有自己的登录方式；切换器会保留它，不会改动密钥。"
             } else if requires_openai_auth && !env_key.trim().is_empty() {
-                "当前认证由 Codex 登录和环境变量共同管理；切换器不会读取或改写它们，切换后请在新会话确认可用性。"
+                "登录和本机环境共同管理认证；切换器不会读取或改动它们。切换后请在新对话确认可用。"
             } else if requires_openai_auth {
-                "当前服务商使用 Codex 登录认证；切换器不会读取或改写登录信息，无法代替 Codex 确认登录状态。"
+                "认证由 Codex 登录管理；切换器不会读取或改动登录信息。切换后请在新对话确认可用。"
             } else if !env_key.trim().is_empty() {
-                "当前服务商通过环境变量认证；切换器不会读取或改写环境变量，无法代替运行时确认其可用性。"
+                "认证由本机环境管理；切换器不会读取或改动它。实际可用性请在新对话确认。"
             } else {
-                "当前服务商未声明认证方式；按 Codex 规则视为无需认证，不会要求或写入 api_key。"
+                "没有额外认证设置；切换器不会要求或写入密钥。"
             };
             checks.push(check(
                 "custom-authentication-mode",
-                "当前认证方式",
+                "认证设置已保留",
                 authentication_is_visible,
                 authentication_detail,
                 "warning",
             ));
         }
-        Err(err) => {
+        Err(_) => {
             checks.push(check(
                 "toml",
-                "TOML 语法",
+                "配置文件格式",
                 false,
-                &err.to_string(),
+                "配置文件格式有问题，暂时不能安全读取或切换。",
                 "required",
             ));
         }

@@ -21,6 +21,7 @@ export type ProviderProfile = {
     | 'response_shape_unconfirmed'
     | 'response_unparseable'
     | 'service_error'
+    | 'timed_out_unconfirmed'
     | 'timeout'
     | 'network_error'
     | 'transport_error'
@@ -42,7 +43,10 @@ export type ProviderModel = {
   aliases: string[]
   source: 'provider_models_api' | 'mock' | 'manual'
   tags: string[]
-  verifiedForResponses: 'unknown' | 'verified' | 'failed'
+  verifiedForResponses: 'unknown' | 'verified' | 'timed_out_unconfirmed' | 'failed'
+  lastVerificationAt?: string
+  lastVerificationStatus?: ProviderProfile['verificationStatus']
+  lastVerificationDetail?: string
 }
 
 export type ModelCatalog = {
@@ -74,6 +78,7 @@ export type ValidationCheck = {
   label: string
   ok: boolean
   detail: string
+  technicalDetail?: string
   severity: 'required' | 'warning' | 'info'
 }
 
@@ -83,6 +88,28 @@ export type ActivityItem = {
   title: string
   detail: string
   tone: 'success' | 'warning' | 'danger' | 'info'
+  occurredAt?: string
+  eventName?: string
+  result?: 'success' | 'warning' | 'failure' | 'info' | string
+  nextStep?: string
+  subject?: {
+    providerName?: string
+    model?: string
+  }
+  correlationId?: string
+  operationKind?: 'verification' | 'model_catalog' | 'switch' | 'backup' | 'restore' | 'workspace' | string
+  operationKey?: string
+  problemKey?: string
+  stages?: Array<{
+    state: 'completed' | 'attention' | 'failed' | 'unconfirmed' | string
+    title: string
+    detail: string
+  }>
+  diagnostics?: Array<{
+    key: string
+    label: string
+    value: string
+  }>
 }
 
 export type CostCalibration = {
@@ -221,9 +248,12 @@ export type SwitchPreflight = {
   targetModel: string
   backupDetail: string
   protectedDetail: string
-  availabilityStatus: string
+  availabilityStatus: ProviderProfile['verificationStatus']
   availabilityDetail: string
   availabilityCheckedAt: string
+  availabilityStage?: string
+  availabilityHttpStatus?: number
+  availabilityProviderCode?: string
   riskDetail?: string
   expiresAt: string
 }
