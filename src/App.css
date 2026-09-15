@@ -1215,7 +1215,6 @@ label,
 .primary-button,
 .ghost-button,
 .danger-button,
-.provider-workflow-nav button,
 .top-nav-item {
   font-size: var(--type-label);
   line-height: var(--lh-caption);
@@ -1600,7 +1599,7 @@ select {
 .model-suggestions button:hover { border-color: var(--accent); background: var(--accent-soft); }
 .model-suggestions strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: var(--type-body); line-height: var(--lh-body); font-weight: 760; }
 
-/* Provider controls stay compact: the model catalog is a popover, never a permanent row. */
+/* The trigger stays compact; the catalog itself expands as a full-width row below. */
 .model-picker-field { grid-column: auto; }
 .model-combobox-wrap { position: relative; min-width: 0; flex: 1; }
 .model-combobox-wrap > input { width: 100%; padding-right: 34px; }
@@ -1778,39 +1777,6 @@ select {
   gap: 20px;
   padding-block: 12px;
   border-bottom: 1px solid var(--border);
-}
-
-.provider-workflow-nav {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  flex: 1;
-}
-
-.provider-workflow-nav button {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 2px;
-  color: var(--muted);
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  text-align: left;
-  font-size: 15px;
-  font-weight: 730;
-  cursor: pointer;
-}
-
-.provider-workflow-nav button:hover {
-  color: var(--accent);
-}
-
-.provider-workflow-nav button.selected {
-  color: var(--accent);
-  font-weight: 820;
 }
 
 .provider-switch-slot {
@@ -2126,15 +2092,6 @@ select {
 }
 
 @media (max-width: 900px) {
-  .provider-workflow-nav {
-    gap: 14px;
-  }
-
-  .provider-workflow-nav button {
-    min-height: 42px;
-    font-size: 14px;
-  }
-
   .lab-record-cost .lab-form,
   .lab-form,
   .lab-result-grid {
@@ -2190,6 +2147,361 @@ select {
   display: block;
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+.connection-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.connection-facts > div {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.connection-facts span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.connection-facts small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.connection-facts strong {
+  color: var(--text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.compatibility-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 13px;
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.compatibility-summary > div {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.compatibility-summary span {
+  display: grid;
+  gap: 2px;
+}
+
+.compatibility-summary strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.compatibility-summary small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.scenario-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, .85fr) minmax(340px, 1.15fr);
+  gap: 12px;
+}
+
+.scenario-list {
+  max-height: 350px;
+  display: grid;
+  gap: 5px;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+.scenario-list button {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  color: var(--text);
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.scenario-list button:hover,
+.scenario-list button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.scenario-list button:focus-visible,
+.model-row button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.scenario-list button span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.scenario-list button small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.scenario-detail {
+  min-width: 0;
+  padding: 13px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--green);
+  border-radius: var(--radius-sm);
+}
+
+.scenario-detail.medium { border-left-color: var(--amber); }
+.scenario-detail.high { border-left-color: var(--red); }
+
+.scenario-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.scenario-risk,
+.compatibility-badge {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 780;
+  line-height: 1.35;
+}
+
+.scenario-risk.low,
+.compatibility-badge.verified {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.scenario-risk.medium,
+.compatibility-badge.partial {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.scenario-risk.high,
+.compatibility-badge.unsupported {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.scenario-detail dl {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.scenario-detail dl > div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 9px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+}
+
+.scenario-detail dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.scenario-detail dd {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.scenario-detail > p,
+.scenario-preserved {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 10px 0 0;
+  padding: 8px 9px;
+  color: var(--muted);
+  background: var(--panel);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.scenario-preserved {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.account-state-simulator {
+  display: grid;
+  grid-template-columns: minmax(190px, .7fr) minmax(250px, 1fr);
+  gap: 10px 14px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.account-state-simulator > div:first-child {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+}
+
+.account-state-simulator > div:first-child strong { font-size: 12px; }
+
+.account-state-tabs {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.account-state-tabs button {
+  padding: 5px 8px;
+  color: var(--muted);
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.account-state-tabs button.active,
+.account-state-tabs button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.account-state-tabs button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.account-state-detail {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  padding: 9px 11px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius-sm);
+}
+
+.account-state-detail.good { border-left-color: var(--green); }
+.account-state-detail.warning { border-left-color: var(--amber); }
+.account-state-detail.danger { border-left-color: var(--red); }
+.account-state-detail strong { font-size: 12px; }
+.account-state-detail p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.account-state-detail small { color: var(--text); font-size: 10px; }
+
+.model-group {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.model-group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px 5px;
+  border-top: 1px solid var(--border);
+}
+
+.model-group > header > div {
+  display: grid;
+  gap: 1px;
+}
+
+.model-group > header strong { font-size: 12px; }
+.model-group > header span { color: var(--muted); font-size: 10px; }
+.model-group > header b { color: var(--muted); font-size: 11px; }
+
+.model-row.verified { border-left: 3px solid var(--green); }
+.model-row.partial { border-left: 3px solid var(--amber); }
+.model-row.unsupported {
+  color: var(--muted);
+  background: var(--panel-soft);
+  border-left: 3px solid var(--muted);
+}
+
+.model-title-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 2px;
+}
+
+.model-compatibility-copy {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.model-meta .model-incompatible {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.model-row.unsupported .model-meta .model-incompatible {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.muted-action { color: var(--muted); }
+.model-risk-dialog { max-width: 620px; }
+.risk-detail-list { margin: 10px 0; padding-left: 18px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+@media (max-width: 1100px) {
+  .connection-facts { grid-template-columns: 1fr; }
+  .scenario-layout { grid-template-columns: minmax(220px, .8fr) minmax(320px, 1.2fr); }
+  .account-state-simulator { grid-template-columns: 1fr; }
+  .account-state-tabs { justify-content: flex-start; }
 }
 
 .model-meta {
@@ -3453,8 +3765,8 @@ select {
 
 .lab-ranking-list {
   /* Header and records inherit the exact same seven-column contract. */
-  --ranking-columns: 48px minmax(210px, 1.4fr) minmax(150px, 1fr) minmax(150px, 1fr) 76px 56px 72px;
-  --ranking-gap: clamp(16px, 1.6vw, var(--space-5));
+  --ranking-columns: 44px minmax(170px, 1.25fr) minmax(124px, .9fr) minmax(128px, .9fr) minmax(130px, .95fr) 72px 52px 66px;
+  --ranking-gap: clamp(10px, 1vw, var(--space-4));
   min-width: 0;
 }
 
@@ -3524,6 +3836,11 @@ select {
   text-align: left;
 }
 
+.ranking-cell--rate {
+  justify-self: stretch;
+  text-align: left;
+}
+
 .lab-ranking-head .ranking-cell--cost {
   justify-content: flex-start;
 }
@@ -3588,6 +3905,21 @@ select {
   font-size: 13px;
 }
 
+.ranking-rate strong,
+.ranking-official strong {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--type-label);
+  line-height: var(--lh-label);
+}
+
+.ranking-rate small,
+.ranking-official small {
+  color: var(--muted);
+  font-size: var(--type-caption);
+  line-height: var(--lh-caption);
+}
+
 .ranking-score {
   text-align: right;
 }
@@ -3605,6 +3937,7 @@ select {
 }
 
 .ranking-official,
+.ranking-rate,
 .ranking-samples {
   min-width: 0;
   color: var(--muted);
@@ -3891,12 +4224,13 @@ select {
 
 /* Final cascade for the project UI contract. Keep this block last so feature
    styles cannot accidentally reintroduce a second control or type scale. */
-body { font-size: var(--type-body); line-height: var(--lh-body); }
-h1, h2, h3, h4 { color: var(--text); letter-spacing: 0; }
+body { font-size: var(--type-body); line-height: var(--lh-body); font-weight: var(--weight-regular); }
+h1, h2, h3, h4 { color: var(--text); font-family: var(--font-display); font-weight: var(--weight-strong); letter-spacing: 0; }
+strong, b { font-weight: var(--weight-strong); }
 .workspace-header h2, .confirm-dialog h2, .tour-card h2 { font-size: var(--type-title); line-height: var(--lh-title); }
 .workspace-header p, .section-description, .protection-hero p, .settings-section-heading p, .historical-backups p, .confirm-dialog p { font-size: var(--type-body); line-height: var(--lh-body); }
 .eyebrow, .section-meta, .panel-heading span, .model-toolbar span, .safety-summary span, .path-grid span { font-size: var(--type-caption); line-height: var(--lh-caption); letter-spacing: .04em; }
-label, .primary-button, .ghost-button, .danger-button, .provider-workflow-nav button, .top-nav-item { font-size: var(--type-label); line-height: var(--lh-caption); }
+label, .primary-button, .ghost-button, .danger-button, .top-nav-item { font-size: var(--type-label); line-height: var(--lh-caption); }
 input:not([type]), input[type='text'], input[type='password'], input[type='search'], input[type='url'], textarea, select { min-height: var(--control-height); font-size: var(--type-body); line-height: var(--lh-body); }
 .surface-panel, .inspector-section, .switch-card { border-radius: var(--radius-sm); }
 .surface-panel { padding: var(--panel-padding-large); }
@@ -3911,7 +4245,7 @@ input:not([type]), input[type='text'], input[type='password'], input[type='searc
 .model-picker-input .model-refresh-button:hover:not(:disabled) { color: var(--text); background: var(--panel); }
 .model-picker-input .model-refresh-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .model-picker-input .model-suggestions { z-index: 30; max-height: 248px; overscroll-behavior: contain; }
-.model-picker-input .model-combobox-wrap > input { font-size: var(--type-subtitle); font-weight: 760; }
+.model-picker-input .model-combobox-wrap > input { font-size: var(--type-body); font-weight: var(--weight-regular); }
 
 .protection-hero { padding: var(--panel-padding-large); }
 .protection-hero h3 { font-size: var(--type-title); line-height: var(--lh-title); }
@@ -3925,4 +4259,221 @@ input:not([type]), input[type='text'], input[type='password'], input[type='searc
 
 @media (max-width: 1120px) {
   .reprepare-environment-row { gap: var(--space-3); }
+}
+
+/* Provider source choice: official account, official API and relay never share
+   one ambiguous credential form. */
+.confirm-dialog.connection-source-dialog { width: min(620px, calc(100vw - 48px)); grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.connection-source-dialog .section-heading-row,
+.connection-source-dialog > p,
+.connection-source-dialog .connection-source-list { grid-column: 1 / -1; }
+.connection-source-lead { margin: -6px 0 2px; color: var(--muted); font-size: var(--type-body); line-height: var(--lh-body); }
+.connection-source-list { display: grid; gap: 8px; }
+.connection-source-card { width: 100%; min-height: 76px; display: grid; grid-template-columns: 40px minmax(0, 1fr) 20px; align-items: center; gap: 12px; padding: 12px 14px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); text-align: left; cursor: pointer; }
+.connection-source-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+.connection-source-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.connection-source-card.recommended { border-color: rgba(37, 99, 235, .38); box-shadow: inset 3px 0 0 var(--accent); }
+.connection-source-icon { width: 40px; height: 40px; display: grid; place-items: center; color: var(--accent); background: var(--accent-soft); border-radius: var(--radius-sm); }
+.connection-source-copy { min-width: 0; display: grid; gap: 3px; }
+.connection-source-copy > span { display: flex; align-items: center; gap: 8px; }
+.connection-source-copy strong { font-size: var(--type-body); line-height: var(--lh-body); }
+.connection-source-copy em { padding: 1px 6px; color: var(--accent); background: var(--accent-soft); border-radius: 999px; font-size: var(--type-caption); font-style: normal; font-weight: var(--weight-strong); }
+.connection-source-copy small { color: var(--muted); font-size: var(--type-label); line-height: 18px; }
+.connection-source-arrow { color: var(--faint); }
+
+.official-provider-preset select { width: 100%; padding: 0 10px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.chatgpt-account-setup { display: grid; gap: 14px; }
+.chatgpt-account-summary { display: flex; align-items: flex-start; gap: 12px; padding: 14px; background: var(--accent-soft); border: 1px solid rgba(37, 99, 235, .22); border-radius: var(--radius-sm); }
+.chatgpt-account-summary > span { width: 36px; height: 36px; flex: 0 0 36px; display: grid; place-items: center; color: var(--accent); background: var(--panel); border-radius: var(--radius-sm); }
+.chatgpt-account-summary strong { display: block; }
+.chatgpt-account-summary p { margin: 4px 0 0; color: var(--muted); line-height: 1.55; }
+.chatgpt-account-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.chatgpt-account-facts div { display: grid; gap: 3px; padding: 10px 12px; background: var(--panel-soft); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.chatgpt-account-facts small { color: var(--muted); }
+.chatgpt-account-preserve { display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px; color: var(--green); background: var(--green-soft); border: 1px solid rgba(21, 128, 61, .2); border-radius: var(--radius-sm); }
+.chatgpt-account-preserve span { display: grid; gap: 3px; }
+.chatgpt-account-preserve small { color: var(--muted); line-height: 1.45; }
+.oauth-preview-button { justify-self: start; }
+.oauth-login-panel { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.oauth-login-panel > div { min-width: 0; display: flex; align-items: flex-start; gap: 9px; }
+.oauth-login-panel > div > span:last-child { min-width: 0; display: grid; gap: 2px; }
+.oauth-login-panel small { color: var(--muted); font-size: var(--type-label); line-height: 18px; }
+.oauth-login-state-dot { width: 9px; height: 9px; flex: 0 0 9px; margin-top: 6px; background: var(--faint); border-radius: 999px; }
+.oauth-login-panel.waiting .oauth-login-state-dot { background: var(--amber); }
+.oauth-login-panel.connected .oauth-login-state-dot { background: var(--green); }
+.oauth-login-panel.failed .oauth-login-state-dot { background: var(--red); }
+.oauth-login-panel button { flex: 0 0 auto; }
+
+/* The catalog opens inline, but only its model list scrolls. */
+.inline-model-catalog-slot { grid-column: 1 / -1; min-width: 0; }
+.inline-model-catalog { display: grid; gap: 10px; padding: 12px; background: var(--panel-soft); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.inline-model-catalog-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.inline-model-catalog-head > div { min-width: 0; display: flex; align-items: flex-start; gap: 9px; color: var(--accent); }
+.inline-model-catalog-head > div span { display: grid; gap: 2px; }
+.inline-model-catalog-head > div strong { color: var(--text); }
+.inline-model-catalog-head > div small { color: var(--muted); line-height: 1.4; }
+.inline-model-catalog .model-search { width: min(300px, 42%); flex: 0 0 auto; background: var(--panel); }
+.inline-model-table { max-height: clamp(300px, 44vh, 500px); padding-right: 3px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; background: var(--panel); }
+.inline-model-table .model-table-head { position: sticky; top: 0; z-index: 2; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.inline-model-table .model-row { min-height: 62px; padding: 9px 10px; }
+.inline-model-table .model-group > header { position: sticky; top: 29px; z-index: 1; background: var(--panel); }
+.inline-model-table .model-title-line strong { font-family: var(--font); font-size: var(--type-body); line-height: var(--lh-body); }
+.inline-model-table .model-compatibility-copy { margin-top: 2px; font-size: var(--type-label); line-height: 18px; }
+.model-technical-detail { margin-top: 3px; color: var(--muted); font-size: var(--type-caption); }
+.model-technical-detail summary { width: fit-content; cursor: pointer; }
+.model-technical-detail code { display: block; margin-top: 3px; overflow-wrap: anywhere; font-family: var(--mono); }
+.model-open-button svg { transition: transform 140ms ease; }
+.model-open-button.open svg { transform: rotate(180deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .model-open-button svg { transition: none; }
+}
+
+@media (max-width: 1120px) {
+  .inline-model-catalog-head { align-items: stretch; flex-direction: column; }
+  .inline-model-catalog .model-search { width: 100%; }
+  .chatgpt-account-facts { grid-template-columns: 1fr; }
+  .inline-model-table { max-height: 310px; }
+  .oauth-login-panel { align-items: stretch; flex-direction: column; }
+  .oauth-login-panel button { align-self: flex-start; }
+}
+
+/* Final typography normalization: product copy uses one readable hierarchy.
+   Monospace remains limited to paths and exact identifiers. */
+.brand-mark, .setup-step-number, .top-nav-item, .primary-button, .ghost-button, .danger-button,
+.icon-button, .field-label, .section-meta, .eyebrow, .compatibility-badge, .connection-state,
+.model-table-head, .model-group > header b, .statusbar, .activity-state-badge { font-weight: var(--weight-strong); }
+.brand-lockup p, .muted-line, .inspector-note, .section-description, .model-compatibility-copy,
+.connection-source-copy small, .chatgpt-account-summary p, .chatgpt-account-preserve small { font-weight: var(--weight-regular); }
+.eyebrow, .model-table-head { text-transform: none; letter-spacing: 0; }
+
+@media (max-width: 1120px) {
+  .top-navigation { gap: 2px; }
+  .top-nav-item { gap: 5px; padding-inline: 6px; font-size: 12px; }
+  .top-nav-item span { max-width: none; opacity: 1; transform: none; }
+}
+
+/* Provider groups use quiet separators instead of three competing color blocks. */
+.provider-list { gap: 14px; }
+.provider-group { min-width: 0; display: grid; gap: 4px; }
+.provider-group + .provider-group { padding-top: 11px; border-top: 1px solid var(--border); }
+.provider-group > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px; color: var(--muted); font-size: 11px; line-height: 16px; font-weight: var(--weight-strong); }
+.provider-group > header small { color: var(--faint); font-size: 11px; font-weight: var(--weight-regular); }
+.provider-group.chatgpt-account > header { color: var(--accent); }
+.provider-group-list { display: grid; gap: 3px; }
+.provider-row { min-height: 52px; gap: 8px; padding: 6px 7px; border-radius: var(--radius-sm); }
+.provider-row strong { font-size: 13px; line-height: 18px; font-weight: var(--weight-strong); }
+.provider-row small { font-size: 11px; line-height: 16px; }
+.provider-row.selected { box-shadow: none; }
+.provider-row.active { box-shadow: inset 2px 0 0 var(--accent); }
+.provider-symbol { width: 28px; height: 28px; color: var(--muted); background: var(--panel-strong); border-radius: var(--radius-sm); }
+.provider-row.chatgpt-account .provider-symbol { color: var(--accent); background: var(--accent-soft); }
+.provider-row.official-api .provider-symbol { color: #406a8f; background: #e9f1f7; }
+
+/* Global type, icon and spacing contract. This sits after feature layers so
+   native controls and older rules cannot fall back to a different WebView
+   font or an arbitrary tiny type scale. */
+body, button, input, textarea, select, summary { font-family: var(--font); }
+input:not([type]), input[type='text'], input[type='password'], input[type='search'], input[type='url'], textarea, select {
+  font-size: var(--type-body);
+  line-height: var(--lh-body);
+  font-weight: var(--weight-regular);
+}
+.field-label, label { font-size: var(--type-label); line-height: var(--lh-label); font-weight: var(--weight-strong); }
+small, .section-meta, .eyebrow, .catalog-status, .activity-operation-meta, .activity-privacy,
+.activity-section-heading small, .activity-problem-copy small, .connection-copy small,
+.provider-row small, .inline-model-catalog-head small, .model-compatibility-copy,
+.dock-status-list dt, .ranking-score span, .lab-ranking-row small {
+  font-size: var(--type-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--weight-regular);
+}
+.primary-button, .ghost-button, .danger-button, .danger-text-button, .top-nav-item,
+.field-label, .section-heading-row, .panel-heading, .connection-banner, .activity-operation-heading {
+  column-gap: var(--gap-icon-text);
+}
+.primary-button, .ghost-button, .danger-button, .danger-text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+button > svg, summary > svg, .field-label > svg, .section-heading-row svg { flex: 0 0 auto; }
+.command-row, .top-navigation, .activity-overview-counts { gap: var(--gap-icon-icon); }
+.tour-card .getting-started-progress { margin-bottom: var(--space-4); }
+.tour-card-heading { grid-template-columns: 32px minmax(0, 1fr) 34px; gap: var(--space-3); align-items: start; }
+.tour-step-index { width: 30px; height: 30px; font-size: var(--type-label); line-height: var(--lh-label); font-weight: var(--weight-strong); }
+.tour-card-heading .eyebrow { display: block; margin-bottom: var(--space-1); }
+.tour-card-heading .icon-button { margin-top: -2px; }
+.guide-tour-actions { gap: var(--space-2); padding-top: var(--space-1); }
+.lab-record-cost .lab-form { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+
+@media (max-width: 1120px) {
+  .lab-ranking-list { overflow-x: auto; padding-bottom: var(--space-2); }
+  .lab-ranking-head, .lab-ranking-group { min-width: 900px; }
+  .lab-record-cost .lab-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .first-run-step-list { scroll-behavior: auto; }
+}
+
+/* Official account login is one guided flow, not a stack of unrelated cards. */
+.chatgpt-account-setup { gap: 0; }
+.chatgpt-login-intro { padding: 0 0 14px; border-bottom: 1px solid var(--border); }
+.chatgpt-login-intro strong { display: block; font-size: 14px; line-height: 20px; }
+.chatgpt-login-intro p { max-width: 720px; margin: 3px 0 0; color: var(--muted); font-size: 13px; line-height: 19px; }
+.oauth-login-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 0; padding: 16px 0; list-style: none; border-bottom: 1px solid var(--border); }
+.oauth-login-steps li { min-width: 0; display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 8px; padding-right: 14px; }
+.oauth-login-steps li + li { padding-left: 14px; border-left: 1px solid var(--border); }
+.oauth-login-steps li > span { width: 22px; height: 22px; display: grid; place-items: center; color: var(--muted); background: var(--panel-strong); border-radius: 999px; font-size: 11px; font-weight: var(--weight-strong); }
+.oauth-login-steps li.current > span { color: var(--accent); background: var(--accent-soft); }
+.oauth-login-steps li.complete > span { color: var(--green); background: var(--green-soft); }
+.oauth-login-steps li div { min-width: 0; display: grid; gap: 2px; }
+.oauth-login-steps strong { font-size: 13px; line-height: 18px; }
+.oauth-login-steps small { color: var(--muted); font-size: 12px; line-height: 17px; }
+.oauth-login-panel { padding: 14px 0; background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+.oauth-login-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.chatgpt-account-facts { margin: 0; padding: 13px 0; gap: 0; border-bottom: 1px solid var(--border); }
+.chatgpt-account-facts div { gap: 2px; padding: 0 14px; background: transparent; border: 0; border-radius: 0; }
+.chatgpt-account-facts div:first-child { padding-left: 0; }
+.chatgpt-account-facts div + div { border-left: 1px solid var(--border); }
+.chatgpt-account-facts dt { color: var(--muted); font-size: 11px; line-height: 16px; }
+.chatgpt-account-facts dd { margin: 0; font-size: 13px; line-height: 18px; font-weight: var(--weight-strong); }
+.chatgpt-account-preserve { margin-top: 12px; padding: 8px 0; color: var(--green); background: transparent; border: 0; border-radius: 0; }
+.chatgpt-account-preserve small { font-size: 12px; line-height: 17px; }
+
+/* The model catalog is a dense list: one frame, quiet section labels, flat rows. */
+.inline-model-catalog { gap: 0; padding: 0; overflow: hidden; background: var(--panel); }
+.inline-model-catalog-head { min-height: 58px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.inline-model-catalog-head > div strong { font-size: 13px; line-height: 18px; }
+.inline-model-catalog-head > div small { font-size: 11px; line-height: 16px; }
+.inline-model-catalog .model-search { width: min(260px, 42%); min-height: 34px; }
+.inline-model-catalog .model-search input { min-height: 32px; padding-block: 6px; font-size: 12px; }
+.inline-model-table { max-height: clamp(250px, 36vh, 360px); padding: 0 10px 8px; background: var(--panel); }
+.inline-model-table .model-group { gap: 0; margin: 0; }
+.inline-model-table .model-group > header { top: 0; min-height: 34px; padding: 8px 4px 5px; border-top: 0; border-bottom: 1px solid var(--border); }
+.inline-model-table .model-group > header > div { display: flex; align-items: baseline; gap: 4px; }
+.inline-model-table .model-group > header strong { font-size: 11px; line-height: 16px; }
+.inline-model-table .model-group > header span { font-size: 11px; line-height: 16px; }
+.inline-model-table .model-group > header b { font-size: 11px; line-height: 16px; }
+.inline-model-table .model-row { min-height: 50px; padding: 7px 4px 7px 8px; background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+.inline-model-table .model-row:last-child { border-bottom-color: transparent; }
+.inline-model-table .model-row.selected { background: var(--accent-soft); border-color: transparent; box-shadow: inset 2px 0 0 var(--accent); }
+.inline-model-table .model-row.verified { border-left: 2px solid var(--green); }
+.inline-model-table .model-row.partial { border-left: 2px solid var(--amber); }
+.inline-model-table .model-row.unsupported { border-left: 2px solid var(--faint); opacity: .78; }
+.inline-model-table .model-title-line { gap: 6px; margin: 0; }
+.inline-model-table .model-title-line strong { font-size: 13px; line-height: 18px; }
+.inline-model-table .compatibility-badge { padding: 1px 5px; font-size: 10px; line-height: 14px; }
+.inline-model-table .model-compatibility-copy { margin: 0; font-size: 11px; line-height: 16px; }
+.inline-model-table .compact-button { min-height: 28px; padding: 4px 9px; font-size: 11px; }
+
+@media (max-width: 1120px) {
+  .oauth-login-steps { grid-template-columns: 1fr; gap: 10px; }
+  .oauth-login-steps li { padding: 0; }
+  .oauth-login-steps li + li { padding: 10px 0 0; border-top: 1px solid var(--border); border-left: 0; }
+  .oauth-login-panel { align-items: stretch; }
+  .oauth-login-actions { justify-content: flex-start; }
+  .chatgpt-account-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .inline-model-table { max-height: 270px; }
 }

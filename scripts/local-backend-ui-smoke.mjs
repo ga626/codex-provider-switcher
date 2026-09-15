@@ -173,14 +173,18 @@ try {
   await page.getByRole('heading', { name: '基础配置' }).waitFor()
   await page.getByText('连接信息已填写').waitFor()
   await page.getByRole('complementary', { name: '连接与切换' }).waitFor()
-  await page.locator('.connection-dock .dock-status-list dt').filter({ hasText: '连接环境' }).waitFor()
-  await page.getByText('已准备', { exact: true }).first().waitFor()
+  const dockStatus = page.locator('.connection-dock .dock-status-list')
+  for (const label of ['环境', '设置', '模型', '测试']) {
+    await dockStatus.locator('dt').filter({ hasText: label }).waitFor()
+  }
+  await dockStatus.getByText('可用', { exact: true }).first().waitFor()
   await page.getByRole('button', { name: '检查并切换' }).click()
-  await page.getByRole('dialog', { name: '确认切换到 UI Fixture Provider？' }).waitFor()
-  await page.getByText('切换影响确认').waitFor()
-  await page.getByText('保护检查').first().waitFor()
+  const switchDialog = page.getByRole('dialog', { name: '可以切换到 UI Fixture Provider' })
+  await switchDialog.waitFor()
+  await switchDialog.getByText('切换前检查').waitFor()
+  await switchDialog.getByText('切换前自动创建恢复点').waitFor()
   await page.keyboard.press('Escape')
-  await page.getByRole('dialog', { name: '确认切换到 UI Fixture Provider？' }).waitFor({ state: 'detached' })
+  await switchDialog.waitFor({ state: 'detached' })
   await page.getByText('不保证', { exact: true }).count().then((count) => {
     if (count !== 0) throw new Error('connection dock must not expose duplicate disclaimer cards')
   })
@@ -193,13 +197,17 @@ try {
   await page.screenshot({ path: join(outputDir, 'switch-check.png'), fullPage: true })
   await page.getByRole('button', { name: /实验室/ }).click()
   await page.getByRole('heading', { name: '性价比中心' }).waitFor()
+  const creditUnits = await page.getByLabel('额度单位').locator('option').allTextContents()
+  for (const expectedUnit of ['美元额度（USD）', '人民币余额（CNY）', '平台额度/点数']) {
+    if (!creditUnits.includes(expectedUnit)) throw new Error(`cost calibration is missing credit unit: ${expectedUnit}`)
+  }
   await page.getByRole('button', { name: '运行固定测试' }).click()
   await page.getByText('已读取测试额度').waitFor()
-  if (await page.getByLabel('测试额度').inputValue() !== '0.000524') {
+  if (await page.getByLabel('本次真实扣减').inputValue() !== '0.000524') {
     throw new Error('cost test must prefill the provider cost candidate')
   }
-  await page.getByLabel('充值金额').fill('10')
-  await page.getByLabel('平台实际额度').fill('1000')
+  await page.getByLabel('实际支付人民币').fill('10')
+  await page.getByLabel('实际到账额度').fill('1000')
   await page.getByRole('button', { name: '计算并保存' }).click()
   await page.getByText('¥0.05').waitFor()
   await page.screenshot({ path: join(outputDir, 'cost-calibration.png'), fullPage: true })
@@ -208,9 +216,12 @@ try {
   await page.getByRole('button', { name: '检查并切换到 UI Fixture Provider' }).count().then((count) => {
     if (count !== 0) throw new Error('configuration protection must not expose a service-provider switch action')
   })
-  await page.getByRole('heading', { name: '切换时会保留这些设置' }).waitFor()
+  await page.getByRole('heading', { name: '切换不会改动这些内容' }).waitFor()
+  for (const groupName of ['工作内容', '扩展能力', '本机习惯']) {
+    await page.getByRole('heading', { name: groupName }).waitFor()
+  }
   await page.getByText('MCP 服务').waitFor()
-  await page.getByRole('heading', { name: '已保护的恢复点' }).waitFor()
+  await page.getByRole('heading', { name: '恢复点' }).waitFor()
   await page.getByText('首次基线', { exact: true }).waitFor()
   await page.getByText('自动保护', { exact: true }).waitFor()
   await page.getByText('手动保存', { exact: true }).waitFor()
@@ -239,8 +250,8 @@ try {
     throw new Error('application settings must be directly reachable in the compact desktop viewport')
   }
   await applicationSettingsButton.click()
-  await page.getByRole('heading', { name: '应用偏好' }).waitFor()
-  const applicationSettingsDialog = page.getByRole('dialog', { name: '应用偏好' })
+  await page.getByRole('heading', { name: '应用设置' }).waitFor()
+  const applicationSettingsDialog = page.getByRole('dialog', { name: '应用设置' })
   const applicationSettingsDialogBounds = await applicationSettingsDialog.boundingBox()
   if (!applicationSettingsDialogBounds || applicationSettingsDialogBounds.width < 480 || applicationSettingsDialogBounds.height > 752) {
     throw new Error('application settings dialog must use a readable single-column desktop layout')
@@ -263,7 +274,7 @@ try {
   await page.locator('.top-navigation .top-nav-item[aria-label="服务商"]').click()
   await page.locator('.provider-row').filter({ hasText: 'Risk Fixture Provider' }).click()
   await page.getByRole('complementary', { name: '连接与切换' }).getByRole('button', { name: '检查并切换' }).click()
-  const riskDialog = page.getByRole('dialog', { name: '确认切换到 Risk Fixture Provider？' })
+  const riskDialog = page.getByRole('dialog', { name: /可以切换/ }).filter({ hasText: 'Risk Fixture Provider' })
   await riskDialog.waitFor()
   const riskCheckbox = riskDialog.getByRole('checkbox')
   if (await riskCheckbox.count() !== 1) throw new Error('risk dialog must expose an acknowledgement checkbox')

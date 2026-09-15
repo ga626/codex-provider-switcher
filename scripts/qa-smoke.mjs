@@ -44,7 +44,7 @@ try {
   const desktopMetrics = await assertShell(desktop, 'Desktop')
 
   await desktop.getByRole('button', { name: '应用设置' }).click()
-  const settings = desktop.getByRole('dialog', { name: '应用偏好' })
+  const settings = desktop.getByRole('dialog', { name: '应用设置' })
   await settings.waitFor()
   await settings.getByRole('heading', { name: '更新' }).waitFor()
   if (!await settings.getByRole('button', { name: '检查更新' }).isDisabled()) {
@@ -56,7 +56,9 @@ try {
   await desktop.getByRole('heading', { name: '基础配置' }).waitFor()
   await desktop.getByRole('complementary', { name: '连接与切换' }).waitFor()
   const connectionDock = desktop.getByRole('complementary', { name: '连接与切换' })
-  await connectionDock.locator('.dock-status-list dt').filter({ hasText: '连接环境' }).waitFor()
+  for (const label of ['环境', '设置', '模型', '测试']) {
+    await connectionDock.locator('.dock-status-list dt').filter({ hasText: label }).waitFor()
+  }
   await connectionDock.getByRole('heading', { name: '服务商可用性' }).waitFor()
   await connectionDock.getByRole('button', { name: '运行可用性测试' }).waitFor()
   await connectionDock.getByRole('button', { name: '当前正在使用' }).waitFor()
@@ -66,13 +68,13 @@ try {
   if (await apiKey.getAttribute('type') !== 'text') throw new Error('The access-key eye must reveal the locally saved value')
   await desktop.getByRole('button', { name: '隐藏访问密钥' }).click()
 
-  const modelInput = desktop.getByPlaceholder('输入 5.6 搜索模型')
-  await modelInput.click()
+  await desktop.getByRole('button', { name: '展开模型目录' }).click()
+  const modelInput = desktop.getByPlaceholder('搜索模型、厂商或能力')
   await modelInput.fill('5.6')
   for (const model of ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
-    await desktop.locator('#model-options').getByRole('option', { name: new RegExp(model) }).waitFor()
+    await desktop.locator('#model-options .model-row').filter({ hasText: model }).waitFor()
   }
-  await desktop.keyboard.press('Escape')
+  await desktop.getByRole('button', { name: '收起模型目录' }).click()
   if (await desktop.getByRole('button', { name: '报告兼容问题' }).count()) {
     throw new Error('A verified provider must not show the compatibility feedback action')
   }
@@ -86,7 +88,7 @@ try {
   const guideHub = desktop.getByRole('dialog', { name: '选择要了解的功能' })
   await guideHub.waitFor()
   await guideHub.locator('.guide-chapter-card').filter({ hasText: '初始化配置' }).getByRole('button', { name: '开始' }).click()
-  await desktop.getByRole('heading', { name: '新增服务商' }).waitFor()
+  await desktop.getByRole('heading', { name: '选择连接来源' }).waitFor()
   if (await desktop.locator('.getting-started-progress').getAttribute('aria-label') !== '第 1 步，共 8 步') {
     throw new Error('The ready-state initialization guide did not skip the completed environment-preparation step')
   }
@@ -99,6 +101,12 @@ try {
   if (afterLeftWidth <= beforeLeftWidth) throw new Error('Keyboard splitter did not update the accessible width value')
   await desktop.screenshot({ path: join(outputDir, 'provider-workbench.png'), fullPage: true })
 
+  await desktop.locator('.provider-row').filter({ hasText: 'DeepSeek 官方 API' }).click()
+  const officialPresetBounds = await desktop.locator('.official-provider-preset select').boundingBox()
+  if (!officialPresetBounds || officialPresetBounds.width > 540) {
+    throw new Error('Official API provider selector must stay close to its option text instead of spanning the form')
+  }
+
   await desktop.locator('.provider-row').filter({ hasText: '服务商 D' }).click()
   const dockSwitch = desktop.getByRole('button', { name: '检查并切换' })
   await dockSwitch.waitFor()
@@ -106,15 +114,19 @@ try {
 
   await desktop.getByRole('button', { name: '实验室' }).click()
   await desktop.getByRole('heading', { name: '性价比中心' }).waitFor()
+  const creditUnits = await desktop.getByLabel('额度单位').locator('option').allTextContents()
+  for (const expectedUnit of ['美元额度（USD）', '人民币余额（CNY）', '平台额度/点数']) {
+    if (!creditUnits.includes(expectedUnit)) throw new Error(`Cost center is missing credit unit: ${expectedUnit}`)
+  }
   await desktop.getByRole('heading', { name: '服务商对比' }).waitFor()
   await desktop.getByRole('table', { name: '性价比排名' }).waitFor()
   await desktop.getByRole('button', { name: '运行固定测试' }).click()
   await desktop.getByText('已读取测试额度').waitFor()
-  if (await desktop.getByLabel('测试额度').inputValue() !== '0.000398') {
+  if (await desktop.getByLabel('本次真实扣减').inputValue() !== '0.000398') {
     throw new Error('The fixed demo test must prefill the returned provider cost')
   }
-  await desktop.getByLabel('充值金额').fill('10')
-  await desktop.getByLabel('平台实际额度').fill('1000')
+  await desktop.getByLabel('实际支付人民币').fill('10')
+  await desktop.getByLabel('实际到账额度').fill('1000')
   await desktop.getByRole('button', { name: '计算并保存' }).click()
   const demoRankingRow = desktop.locator('.lab-ranking-row').filter({ hasText: '服务商 D' })
   await demoRankingRow.waitFor()

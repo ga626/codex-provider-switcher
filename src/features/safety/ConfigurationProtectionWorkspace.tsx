@@ -1,4 +1,4 @@
-import { CheckCircle2, RefreshCcw, RotateCcw, Save, ShieldCheck } from 'lucide-react'
+import { Blocks, BriefcaseBusiness, CheckCircle2, RefreshCcw, RotateCcw, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import type { AppState, BackupItem, ConfigurationProtection } from '../../types'
 
 const backupTitle: Record<BackupItem['kind'], string> = {
@@ -9,6 +9,36 @@ const backupTitle: Record<BackupItem['kind'], string> = {
   before_restore: '恢复前备份',
   legacy_backup: '旧版备份',
   invalid_backup: '未完成的备份目录',
+}
+
+const protectionGroups = [
+  {
+    id: 'work',
+    title: '工作内容',
+    detail: '项目和聊天记录不属于服务商连接，切换不会读取或改写。',
+    itemIds: ['projects', 'history'],
+    icon: BriefcaseBusiness,
+  },
+  {
+    id: 'extensions',
+    title: '扩展能力',
+    detail: 'MCP、插件、插件市场和自动化规则继续按原样使用。',
+    itemIds: ['mcp-servers', 'plugins', 'marketplaces', 'hooks'],
+    icon: Blocks,
+  },
+  {
+    id: 'preferences',
+    title: '本机习惯',
+    detail: '桌面、功能与记忆设置不会因更换模型而重置。',
+    itemIds: ['desktop', 'features', 'memories', 'windows'],
+    icon: SlidersHorizontal,
+  },
+] as const
+
+function protectionStateLabel(state: ConfigurationProtection['items'][number]['state']) {
+  if (state === 'outside_write_scope') return '不读写'
+  if (state === 'not_configured') return '不新增'
+  return '保持原样'
 }
 
 export function ConfigurationProtectionWorkspace({
@@ -51,7 +81,6 @@ export function ConfigurationProtectionWorkspace({
       <section className="surface-panel protection-overview">
         <div className="protection-hero" data-guide-target="protection.baseline">
           <div>
-            <span className="eyebrow">备份状态</span>
             <h3>{protection.baselineStatus === 'ready' ? '首次启动基线备份已就绪' : protection.baselineStatus === 'empty' ? '首次启动记录已建立' : '首次启动基线备份需要处理'}</h3>
             <p>{protection.baselineDetail}</p>
           </div>
@@ -62,17 +91,28 @@ export function ConfigurationProtectionWorkspace({
           <button className="ghost-button" type="button" onClick={onOpenSetup} disabled={busy !== null}><RefreshCcw size={16} />重新准备连接环境</button>
         </div>
         <div className="protection-scope" data-guide-target="protection.scope">
-          <div><span className="eyebrow">本工具管理</span><strong>服务商、模型和接口地址</strong></div>
-          <div><span className="eyebrow">保持不变</span><strong>MCP、插件、项目设置和个人偏好</strong></div>
+          <div><span>本工具管理</span><strong>服务商、模型和接口地址</strong></div>
+          <div><span>保持不变</span><strong>MCP、插件、项目设置和个人偏好</strong></div>
         </div>
       </section>
       <section className="surface-panel protection-list-panel">
-        <div className="section-heading-row"><div><span className="eyebrow">保留的设置</span><h3>切换时会保留这些设置</h3></div><span className="section-meta">仅显示状态，不显示内容或密钥</span></div>
-        <div className="protection-grid">{protection.items.map((item) => <article className={`protection-item ${item.state}`} key={item.id}><CheckCircle2 size={17} aria-hidden="true" /><div><strong>{item.label}{typeof item.count === 'number' ? ` · ${item.count} 项` : ''}</strong></div></article>)}</div>
+        <div className="section-heading-row protection-list-heading"><div><h3>切换不会改动这些内容</h3><p className="section-description">Signalman 只替换服务商、模型和接口连接。下面只核对是否保留，不展示内容或密钥。</p></div><span className="section-meta">本机保护范围</span></div>
+        <div className="protection-groups">{protectionGroups.map((group) => {
+          const GroupIcon = group.icon
+          const items = protection.items.filter((item) => group.itemIds.some((id) => id === item.id))
+          if (items.length === 0) return null
+          return <section className="protection-group" key={group.id}>
+            <header className="protection-group-heading">
+              <div><span><GroupIcon size={17} aria-hidden="true" /></span><h4>{group.title}</h4><small>{items.length} 类</small></div>
+              <p>{group.detail}</p>
+            </header>
+            <ul>{items.map((item) => <li className={item.state} key={item.id} title={item.detail} aria-label={`${item.label}：${item.detail}`}><CheckCircle2 size={15} aria-hidden="true" /><strong>{item.label}{typeof item.count === 'number' ? ` · ${item.count} 项` : ''}</strong><small>{protectionStateLabel(item.state)}</small></li>)}</ul>
+          </section>
+        })}</div>
       </section>
       <section className="surface-panel recovery-panel">
         <div className="section-heading-row">
-          <div><span className="eyebrow">恢复中心</span><h3>已保护的恢复点</h3></div>
+          <div><h3>恢复点</h3></div>
           <div className="recovery-actions" data-guide-target="protection.manual-backup">
             <span className="section-meta">自动保护保留 {backupPolicy.automaticLimit} 个；手动保存保留 {backupPolicy.manualLimit} 个。</span>
             <button className="primary-button" type="button" onClick={() => { if (!manualBackupLimitReached) { onBackupRequested(); return } if (window.confirm(`已保留 ${backupPolicy.manualLimit} 个手动恢复点。继续将替换最早的手动恢复点，是否继续？`)) onBackupRequested('替换') }} disabled={busy !== null}><Save size={16} />立即备份当前状态</button>

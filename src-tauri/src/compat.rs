@@ -138,6 +138,7 @@ pub(crate) fn merge_legacy_profile_document(
             verified: false,
             verification_status: default_verification_status(),
             verification_response_shape: None,
+            capability_profile: None,
             default: legacy.default && !has_default,
             note: legacy.note.trim().to_string(),
             last_switched_at: None,

@@ -14,6 +14,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import './styles/first-run.css'
+import './styles/workbench.css'
 import {
   checkForUpdate,
   completeOnboarding,
@@ -55,18 +56,18 @@ import { ProviderWorkspace } from './features/providers/ProviderWorkspace'
 import { ConnectionDock as ConnectionDockFeature } from './features/providers/ConnectionDock'
 import { providerModelLabel } from './features/providers/model-utils'
 import { ProviderSidebar } from './features/providers/ProviderSidebar'
+import { ConnectionSourceDialog, type NewConnectionKind } from './features/providers/ConnectionSourceDialog'
 import {
   draftMatchesProfile,
   profileConfigurationChecks,
   providerAvailabilityChecks,
   requiresManualModelConfirmation,
 } from './features/providers/provider-utils'
-import { ModelsWorkspace } from './features/providers/ModelsWorkspace'
 import { TimelineWorkspace } from './features/timeline/TimelineWorkspace'
 import { SafetyWorkspace as SafetyWorkspaceFeature } from './features/safety/SafetyWorkspace'
 import { ConfigurationProtectionWorkspace as ConfigurationProtectionWorkspaceFeature } from './features/safety/ConfigurationProtectionWorkspace'
 import { LabWorkspace as LabWorkspaceFeature } from './features/lab/LabWorkspace'
-import { FirstRunShell, FIRST_RUN_STEP_COUNT, type FirstRunPhase } from './features/first-run/FirstRunShell'
+import { FirstRunShell, FIRST_RUN_STEP_COUNT, FIRST_RUN_STEP_INTERVAL_MS, type FirstRunPhase } from './features/first-run/FirstRunShell'
 import { WorkspaceHeader } from './features/workspace/WorkspaceHeader'
 import type { ViewId } from './shared/view-types'
 import {
@@ -154,13 +155,16 @@ function App() {
   const [guideProgress, setGuideProgress] = useState<GuideProgress>(readGuideProgress)
   const [setupDialogOpen, setSetupDialogOpen] = useState(false)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [connectionSourceOpen, setConnectionSourceOpen] = useState(false)
+  const [newConnectionKind, setNewConnectionKind] = useState<NewConnectionKind | null>(null)
   const [firstRun, setFirstRun] = useState<boolean | null>(null)
   const [firstRunPhase, setFirstRunPhase] = useState<FirstRunPhase>('consent')
   const [firstRunTransitioning, setFirstRunTransitioning] = useState(false)
   const [firstRunError, setFirstRunError] = useState<string | null>(null)
   const [preparationStep, setPreparationStep] = useState(0)
   const preparationTimer = useRef<number | null>(null)
-  const [paneWidths, setPaneWidths] = useState({ left: 276, right: 360 })
+  const workspaceScrollRef = useRef<HTMLDivElement>(null)
+  const [paneWidths, setPaneWidths] = useState({ left: 276, right: 380 })
   const [resizingPane, setResizingPane] = useState<'left' | 'right' | null>(null)
   const resizeStart = useRef<{ x: number; left: number; right: number } | null>(null)
   const initialGuideHandled = useRef(false)
@@ -196,6 +200,10 @@ function App() {
     const timer = window.setInterval(() => setOperationNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [activeOperation])
+
+  useEffect(() => {
+    workspaceScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' })
+  }, [activeView])
 
   useEffect(() => {
     if (__CODEX_RELEASE_CHANNEL__ !== 'development' || !('__TAURI_INTERNALS__' in window)) return
@@ -252,7 +260,7 @@ function App() {
       if (event.key === 'Enter') {
         return pane === 'left'
           ? { ...current, left: current.left === 220 ? 276 : 220 }
-          : { ...current, right: current.right === 320 ? 360 : 320 }
+          : { ...current, right: current.right === 320 ? 380 : 320 }
       }
       if (pane === 'left') {
         const next = event.key === 'Home' ? 220 : event.key === 'End' ? 380 : Math.max(220, Math.min(380, current.left + direction * step))
@@ -440,13 +448,13 @@ function App() {
     preparationTimer.current = window.setInterval(() => {
       phase = Math.min(FIRST_RUN_STEP_COUNT, phase + 1)
       setPreparationStep(phase)
-    }, 600)
+    }, FIRST_RUN_STEP_INTERVAL_MS)
     try {
       // The backend operation is real; the visible feed gives it enough time
       // to be understood instead of flashing straight to the result screen.
       const [next] = await Promise.all([
         prepareConnectionEnvironment(layerId, true),
-        new Promise((resolve) => window.setTimeout(resolve, FIRST_RUN_STEP_COUNT * 600 + 450)),
+        new Promise((resolve) => window.setTimeout(resolve, FIRST_RUN_STEP_COUNT * FIRST_RUN_STEP_INTERVAL_MS + 420)),
       ])
       setState(next)
       const selected = next.profiles.find((profile) => profile.id === selectedId) ?? next.profiles[0]
@@ -559,20 +567,21 @@ function App() {
     await saveEditableProfile(draft, 'save')
   }
 
-  async function selectModel(model: string) {
-    await saveEditableProfile({ ...draft, model }, 'save-model')
-  }
-
   function selectProfile(profile: ProviderProfile) {
     setSelectedId(profile.id)
     setDraft(toEditable(profile))
     setDraftModelCatalog(null)
+    setNewConnectionKind(null)
   }
 
-  function startNewProfile() {
+  function startNewProfile(kind: NewConnectionKind) {
     setSelectedId('')
-    setDraft(emptyProfile)
+    setDraft(kind === 'official-api'
+      ? { ...emptyProfile, name: 'DeepSeek 官方 API', baseUrl: 'https://api.deepseek.com/v1' }
+      : emptyProfile)
     setDraftModelCatalog(null)
+    setNewConnectionKind(kind)
+    setConnectionSourceOpen(false)
     setActiveView('providers')
   }
 
@@ -595,6 +604,7 @@ function App() {
       name: `${selectedProfile.name} 副本`,
       apiKey: '',
     })
+    setNewConnectionKind(null)
     setActiveView('providers')
   }
 
@@ -849,13 +859,15 @@ function App() {
         />
       )}
 
+      {connectionSourceOpen && <ConnectionSourceDialog busy={busy !== null} onClose={() => setConnectionSourceOpen(false)} onSelect={startNewProfile} />}
+
       <section className={`workbench ${['providers', 'models', 'switch-check'].includes(activeView) ? `provider-workbench ${activeView === 'providers' ? 'has-provider-dock' : ''}` : ''}`} style={{ '--provider-left': `${paneWidths.left}px`, '--provider-right': `${paneWidths.right}px` } as React.CSSProperties}>
         {['providers', 'models', 'switch-check'].includes(activeView) && <ProviderSidebar
           profiles={state.profiles}
           selectedId={selectedId}
           busy={busy !== null}
           onSelect={selectProfile}
-          onAdd={startNewProfile}
+          onAdd={() => setConnectionSourceOpen(true)}
           onMove={moveProvider}
         />}
         {['providers', 'models', 'switch-check'].includes(activeView) && <div className="pane-resizer pane-resizer-left" role="separator" aria-orientation="vertical" aria-label="调整服务商列表宽度" aria-controls="provider-object-pane" aria-valuemin={220} aria-valuemax={380} aria-valuenow={paneWidths.left} tabIndex={0} onPointerDown={(event) => beginResize('left', event)} onKeyDown={(event) => resizePaneWithKeyboard('left', event)} />}
@@ -869,7 +881,7 @@ function App() {
             selectedModelCatalog={selectedModelCatalog}
             onOpenGuide={() => openGuideChapter(guideChapterForView(activeView))}
           />
-          <div className="workspace-scroll">
+          <div className="workspace-scroll" ref={workspaceScrollRef}>
             {activeView === 'providers' && (
               <ProviderWorkspace
                 draft={draft}
@@ -892,16 +904,7 @@ function App() {
                 onOpenSetup={() => setSetupDialogOpen(true)}
                 onOpenFeedback={() => setFeedbackOpen(true)}
                 feedbackAvailable={Boolean(selectedProfile && (error || !selectedProfile.verified && selectedProfile.verificationStatus !== 'not_checked' || selectedModelCatalog?.status && !['ok', 'not_fetched'].includes(selectedModelCatalog.status) || availabilityChecks.some((check) => !check.ok)))}
-              />
-            )}
-            {activeView === 'models' && (
-              <ModelsWorkspace
-                key={selectedProfile?.id ?? 'no-provider'}
-                selectedProfile={selectedProfile}
-                selectedModelCatalog={selectedModelCatalog}
-                busy={busy}
-                selectModel={selectModel}
-                onRefreshModels={() => selectedProfile && void runAction('refresh-models', () => refreshModels(selectedProfile.id, handleOperationEvent))}
+                newConnectionKind={newConnectionKind}
               />
             )}
             {activeView === 'switch-check' && (

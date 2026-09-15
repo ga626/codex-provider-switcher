@@ -97,7 +97,7 @@ fn is_isolated_development_fixture(profile: &StoredProfile) -> bool {
 }
 
 fn verification_activity_diagnostics(profile: &StoredProfile) -> Vec<ActivityDiagnostic> {
-    [
+    let mut diagnostics: Vec<ActivityDiagnostic> = [
         diagnostic_field(
             "verification.status",
             "检查结果",
@@ -121,7 +121,46 @@ fn verification_activity_diagnostics(profile: &StoredProfile) -> Vec<ActivityDia
     ]
     .into_iter()
     .flatten()
-    .collect()
+    .collect();
+    if let Some(capability) = profile.capability_profile.as_ref() {
+        diagnostics.extend(
+            [
+                diagnostic_field(
+                    "capability.probe_version",
+                    "识别规则版本",
+                    &capability.probe_version,
+                ),
+                diagnostic_field("capability.protocol", "识别到的接口", &capability.protocol),
+                diagnostic_field("capability.streaming", "流式输出", &capability.streaming),
+                diagnostic_field("capability.completion", "完整结束", &capability.completion),
+                diagnostic_field(
+                    "capability.transport_retry_count",
+                    "连接重试次数",
+                    capability.transport_retry_count.to_string(),
+                ),
+                capability.response_header_ms.and_then(|value| {
+                    diagnostic_field(
+                        "timing.response_header_ms",
+                        "收到响应头",
+                        format!("{value} ms"),
+                    )
+                }),
+                capability.first_event_ms.and_then(|value| {
+                    diagnostic_field(
+                        "timing.first_event_ms",
+                        "收到首个事件",
+                        format!("{value} ms"),
+                    )
+                }),
+                capability.total_ms.and_then(|value| {
+                    diagnostic_field("timing.total_ms", "检查总耗时", format!("{value} ms"))
+                }),
+            ]
+            .into_iter()
+            .flatten(),
+        );
+    }
+    diagnostics
 }
 
 fn model_catalog_activity_diagnostics(catalog: &ModelCatalog) -> Vec<ActivityDiagnostic> {
@@ -654,6 +693,7 @@ args = ["-NoProfile"]
             verified: false,
             verification_status: default_verification_status(),
             verification_response_shape: None,
+            capability_profile: None,
             default: false,
             note: String::new(),
             last_switched_at: None,
@@ -729,6 +769,7 @@ api_key = "before-key"
             verified: false,
             verification_status: default_verification_status(),
             verification_response_shape: None,
+            capability_profile: None,
             default: false,
             note: String::new(),
             last_switched_at: None,
@@ -849,6 +890,7 @@ api_key = "old-key"
                 verified: false,
                 verification_status: default_verification_status(),
                 verification_response_shape: None,
+                capability_profile: None,
                 default: false,
                 note: String::new(),
                 last_switched_at: None,
@@ -920,6 +962,7 @@ api_key = "before-key"
             verified: false,
             verification_status: default_verification_status(),
             verification_response_shape: None,
+            capability_profile: None,
             default: false,
             note: String::new(),
             last_switched_at: None,
@@ -969,6 +1012,7 @@ api_key = "before-key"
             verified: false,
             verification_status: default_verification_status(),
             verification_response_shape: None,
+            capability_profile: None,
             default: false,
             note: String::new(),
             last_switched_at: None,
@@ -1061,6 +1105,7 @@ api_key = "before-key"
             verified: false,
             verification_status: default_verification_status(),
             verification_response_shape: None,
+            capability_profile: None,
             default: false,
             note: String::new(),
             last_switched_at: None,
@@ -1518,6 +1563,7 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
         verified: false,
         verification_status: default_verification_status(),
         verification_response_shape: None,
+        capability_profile: None,
         default: existing_profile
             .as_ref()
             .map(|p| p.default)
@@ -1685,6 +1731,15 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
     }
     if !verified {
         risks.push(format!("目标服务商的本次自动检查未确认可用：{detail}"));
+    } else if profile
+        .capability_profile
+        .as_ref()
+        .is_some_and(|capability| capability.streaming != "verified")
+    {
+        risks.push(
+            "目标服务商已完成基本调用，但尚未证明能完整传输 Codex 的流式响应；长任务或实时输出可能中断。"
+                .to_string(),
+        );
     }
     // A profile-key switch writes the selected key to auth.json in the same
     // transaction. Do not ask the user to acknowledge a generic external-auth
@@ -1775,6 +1830,7 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
         availability_stage: profile.last_verification_stage.clone(),
         availability_http_status: profile.last_verification_http_status,
         availability_provider_code: profile.last_verification_provider_code.clone(),
+        capability_profile: profile.capability_profile.clone(),
         risk_detail: (!risks.is_empty()).then(|| risks.join(" ")),
         expires_at: chrono::DateTime::from_timestamp(expires_at, 0)
             .map(|value| {
@@ -2263,6 +2319,7 @@ pub fn preview_models_core(profile: EditableProfile) -> Result<ModelCatalog, Swi
         verified: false,
         verification_status: default_verification_status(),
         verification_response_shape: None,
+        capability_profile: None,
         default: false,
         note: String::new(),
         last_switched_at: None,
@@ -2600,6 +2657,8 @@ pub fn run() {
             delete_cost_calibration,
             commands::refresh_models,
             commands::preview_models,
+            commands::begin_chatgpt_login,
+            commands::get_chatgpt_login_status,
             set_default_profile,
             sync_current_configuration,
             toggle_auto_start,

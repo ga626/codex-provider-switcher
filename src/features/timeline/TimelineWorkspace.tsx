@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { AlertTriangle, CheckCircle2, Clock3, Info, X, XCircle } from 'lucide-react'
 import type { ActivityItem, AppState } from '../../types'
 import { ModalDialog } from '../../shared/components'
 
@@ -18,9 +19,9 @@ type DiagnosticTarget = {
   occurrences: number
 }
 
-const views: Array<{ id: ActivityView; label: string; description: string }> = [
-  { id: 'all', label: '全部操作', description: '按时间查看每一次操作；颜色会标出已完成、待确认和需要处理的结果。' },
-  { id: 'needs_attention', label: '需要处理', description: '这里只保留尚未确认、失败或需要你决定下一步的问题。' },
+const views: Array<{ id: ActivityView; label: string }> = [
+  { id: 'all', label: '全部操作' },
+  { id: 'needs_attention', label: '需要处理' },
 ]
 
 function formattedTime(item: ActivityItem) {
@@ -64,6 +65,15 @@ function resultState(item: ActivityItem) {
   if (item.result === 'warning' || item.tone === 'warning') return 'attention'
   if (item.result === 'success' || item.tone === 'success') return 'completed'
   return 'recorded'
+}
+
+function resultVisual(item: ActivityItem) {
+  const state = resultState(item)
+  if (state === 'failed') return { state, icon: <XCircle size={17} /> }
+  if (state === 'attention') return { state, icon: <AlertTriangle size={17} /> }
+  if (state === 'unconfirmed') return { state, icon: <Clock3 size={17} /> }
+  if (state === 'completed') return { state, icon: <CheckCircle2 size={17} /> }
+  return { state, icon: <Info size={17} /> }
 }
 
 function problemState(item: ActivityItem): ProblemState {
@@ -125,8 +135,8 @@ function ProblemCard({ problem, onViewDiagnostic }: { problem: ActivityProblem; 
   return (
     <article className={`activity-problem activity-problem--${state}`}>
       <div className="activity-problem-topline">
-        <span className="activity-state-badge">{stateLabel}</span>
-        <time dateTime={latest.occurredAt}>{formattedTime(latest)} 最近发生</time>
+        <span className="activity-problem-icon" aria-hidden="true">{state === 'failed' ? <XCircle size={18} /> : state === 'unconfirmed' ? <Clock3 size={18} /> : <AlertTriangle size={18} />}</span>
+        <div><span className="activity-state-badge">{stateLabel}</span><time dateTime={latest.occurredAt}>{formattedTime(latest)}</time></div>
       </div>
       <div className="activity-problem-copy">
         <strong>{titleForProblem(latest)}</strong>
@@ -147,13 +157,16 @@ function ProblemCard({ problem, onViewDiagnostic }: { problem: ActivityProblem; 
 
 function OperationRow({ item, onViewDetail }: { item: ActivityItem; onViewDetail: (target: DiagnosticTarget) => void }) {
   const object = [item.subject?.providerName, item.subject?.model].filter(Boolean).join(' · ') || '当前工作区'
+  const visual = resultVisual(item)
   return (
-    <article className={`activity-operation activity-operation--${resultState(item)}`}>
-      <span className="activity-operation-marker" aria-hidden="true" />
-      <div className="activity-operation-identity"><time dateTime={item.occurredAt}>{formattedTime(item)}</time><span>{object}</span></div>
-      <strong className="activity-operation-title">{item.title}</strong>
-      <p className="activity-operation-description">{isAttention(item) ? humanReason(item) : item.detail}</p>
-      <div className="activity-operation-actions"><span className="activity-operation-result">{resultLabel(item)}</span><button className="ghost-button" type="button" onClick={() => onViewDetail({ item, occurrences: 1 })}>查看详情</button></div>
+    <article className={`activity-operation activity-operation--${visual.state}`} data-guide-target="timeline.item">
+      <span className="activity-operation-icon" aria-hidden="true">{visual.icon}</span>
+      <div className="activity-operation-main">
+        <div className="activity-operation-heading"><strong className="activity-operation-title">{item.title}</strong><span className="activity-operation-result">{resultLabel(item)}</span></div>
+        <p className="activity-operation-description">{isAttention(item) ? humanReason(item) : item.detail}</p>
+        <div className="activity-operation-meta"><time dateTime={item.occurredAt}>{formattedTime(item)}</time><span>{object}</span></div>
+      </div>
+      <button className="ghost-button activity-operation-detail" type="button" onClick={() => onViewDetail({ item, occurrences: 1 })}>查看</button>
     </article>
   )
 }
@@ -161,9 +174,18 @@ function OperationRow({ item, onViewDetail }: { item: ActivityItem; onViewDetail
 function DiagnosticDialog({ target, copied, onCopy, onClose }: { target: DiagnosticTarget; copied: boolean; onCopy: () => void; onClose: () => void }) {
   const { item, occurrences } = target
   const isProblem = isAttention(item)
+  const stages = stageList(item)
   return <ModalDialog className="activity-diagnostic-dialog" labelledBy="activity-diagnostic-title" onClose={onClose}>
-    <div className="section-heading-row"><div><span className="eyebrow">{isProblem ? '诊断详情' : '操作详情'}</span><h2 id="activity-diagnostic-title">{isProblem ? '完整诊断包' : '完整操作记录'}</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="关闭详情" data-dialog-initial-focus>×</button></div>
-    <pre className="activity-diagnostic-package">{copyDiagnosticPackage(item)}{occurrences > 1 ? `\n\n相同原因已合并：共 ${occurrences} 次。` : ''}</pre>
+    <div className="section-heading-row"><div><h2 id="activity-diagnostic-title">{isProblem ? '问题详情' : '操作详情'}</h2><p>{formattedTime(item)}{item.subject?.providerName ? ` · ${item.subject.providerName}` : ''}</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="关闭详情" data-dialog-initial-focus><X size={16} /></button></div>
+    <section className="activity-diagnostic-summary">
+      <span className={`activity-state-badge activity-state-badge--${resultState(item)}`}>{resultLabel(item)}</span>
+      <strong>{isProblem ? titleForProblem(item) : item.title}</strong>
+      <p>{isProblem ? humanReason(item) : item.detail}</p>
+      {occurrences > 1 && <small>相同原因共发生 {occurrences} 次，已合并显示。</small>}
+    </section>
+    {item.nextStep && <section className="activity-diagnostic-next"><strong>接下来怎么做</strong><p>{item.nextStep}</p></section>}
+    <section className="activity-diagnostic-stages"><h3>{isProblem ? '排查过程' : '执行过程'}</h3><ol className="activity-stage-list" aria-label={isProblem ? '排查过程' : '执行过程'}>{stages.map((stage, index) => <li className={`activity-stage activity-stage--${stage.state}`} key={`${stage.title}-${index}`}><span aria-hidden="true" /><div><strong>{stage.title}</strong><p>{stage.detail}</p></div></li>)}</ol></section>
+    {(item.diagnostics?.length || item.correlationId || item.eventName) && <details className="activity-diagnostic-technical"><summary>查看技术信息</summary><dl>{(item.diagnostics ?? []).map((entry) => <div key={entry.key}><dt>{entry.label}</dt><dd>{entry.value}</dd></div>)}{item.correlationId && <div><dt>关联编号</dt><dd>{item.correlationId}</dd></div>}{item.eventName && <div><dt>事件类型</dt><dd>{item.eventName}</dd></div>}</dl><p>以上内容已脱敏，不包含访问密钥或请求正文。</p></details>}
     <div className="command-row"><button className="ghost-button" type="button" onClick={onClose}>关闭</button><button className="primary-button" type="button" onClick={onCopy}>{copied ? '诊断包已复制' : '复制诊断包'}</button></div>
   </ModalDialog>
 }
@@ -195,6 +217,11 @@ export function TimelineWorkspace({ state }: { state: AppState }) {
       recentOperations: state.activity.filter(matchesQuery).slice(0, 40),
     }
   }, [query, state.activity])
+  const activityCounts = useMemo(() => ({
+    failed: openProblems.filter((problem) => problem.state === 'failed').length,
+    attention: openProblems.filter((problem) => problem.state !== 'failed').length,
+    completed: recentOperations.filter((item) => resultState(item) === 'completed').length,
+  }), [openProblems, recentOperations])
 
   async function copyDiagnostic() {
     if (!diagnosticTarget) return
@@ -206,13 +233,16 @@ export function TimelineWorkspace({ state }: { state: AppState }) {
     }
   }
 
-  const selectedView = views.find((item) => item.id === view) ?? views[0]
   return (
     <div className="workspace-stack activity-workspace">
       <section className="surface-panel activity-panel" data-guide-target="timeline.list">
-        <header className="activity-panel-heading"><div><span className="eyebrow">本机记录</span><h3>操作与诊断记录</h3><p>{selectedView.description}</p></div><small>只保留脱敏后的本机记录，不会记录密钥、配置正文、请求内容或完整响应。</small></header>
-        <div className="activity-toolbar"><div className="activity-view-tabs" role="tablist" aria-label="操作与问题视图">{views.map((option) => <button className={view === option.id ? 'active' : ''} type="button" role="tab" aria-selected={view === option.id} key={option.id} onClick={() => setView(option.id)}>{option.label}{option.id === 'needs_attention' && openProblems.length > 0 ? <span>{openProblems.length}</span> : null}</button>)}</div><label><span className="sr-only">搜索操作与问题</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索服务商、模型或原因" /></label></div>
-        {view === 'all' ? <section className="activity-section" aria-labelledby="all-operations-title"><div className="activity-section-heading"><div><span className="eyebrow">按时间排列</span><h4 id="all-operations-title">全部操作</h4></div><small>显示最近 {recentOperations.length} 条</small></div><div className="activity-operation-list">{recentOperations.length ? recentOperations.map((item) => <OperationRow key={item.id} item={item} onViewDetail={setDiagnosticTarget} />) : <div className="activity-empty"><strong>没有匹配的操作记录</strong><span>换个关键词再试。</span></div>}</div></section> : <section className="activity-section" aria-labelledby="attention-title"><div className="activity-section-heading"><div><span className="eyebrow">需要你关注</span><h4 id="attention-title">需要处理</h4></div><small>{openProblems.length ? `${openProblems.length} 个问题等待处理` : '现在没有未解决的问题'}</small></div>{openProblems.length ? <div className="activity-problem-list">{openProblems.map((problem) => <ProblemCard key={problem.key} problem={problem} onViewDiagnostic={setDiagnosticTarget} />)}</div> : <div className="activity-clear"><strong>现在没有需要处理的问题</strong><span>新的未确认或失败检查会显示在这里，并自动合并相同原因。</span></div>}</section>}
+        <div className={`activity-overview ${openProblems.length ? 'has-attention' : 'is-clear'}`}>
+          <div><strong>{openProblems.length ? `${openProblems.length} 个问题需要处理` : '目前没有需要处理的问题'}</strong><span>{openProblems.length ? '先处理失败和待确认记录；普通完成记录仍保留在下方。' : '最近的检查与切换结果都可以在这里快速回看。'}</span></div>
+          <div className="activity-overview-counts" aria-label="最近操作状态汇总"><span className="failed"><XCircle size={14} />{activityCounts.failed} 未完成</span><span className="attention"><Clock3 size={14} />{activityCounts.attention} 待确认</span><span className="completed"><CheckCircle2 size={14} />{activityCounts.completed} 已完成</span></div>
+        </div>
+        <div className="activity-toolbar"><div className="activity-view-tabs" role="tablist" aria-label="操作与问题视图">{views.map((option) => <button className={view === option.id ? 'active' : ''} type="button" role="tab" aria-selected={view === option.id} key={option.id} onClick={() => setView(option.id)}>{option.label}{option.id === 'needs_attention' && openProblems.length > 0 ? <span>{openProblems.length}</span> : null}</button>)}</div><label><span className="sr-only">搜索操作与问题</span><input name="activity-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索服务商、模型或原因" /></label></div>
+        <p className="activity-privacy">记录已脱敏，不包含密钥、配置正文或请求内容。</p>
+        {view === 'all' ? <section className="activity-section" aria-labelledby="all-operations-title"><div className="activity-section-heading"><h4 id="all-operations-title">最近操作</h4><small>{recentOperations.length} 条</small></div><div className="activity-operation-list">{recentOperations.length ? recentOperations.map((item) => <OperationRow key={item.id} item={item} onViewDetail={setDiagnosticTarget} />) : <div className="activity-empty"><strong>没有匹配的操作记录</strong><span>换个关键词再试。</span></div>}</div></section> : <section className="activity-section" aria-labelledby="attention-title"><div className="activity-section-heading"><h4 id="attention-title">需要处理</h4><small>{openProblems.length ? `${openProblems.length} 个问题` : '没有未解决的问题'}</small></div>{openProblems.length ? <div className="activity-problem-list">{openProblems.map((problem) => <ProblemCard key={problem.key} problem={problem} onViewDiagnostic={setDiagnosticTarget} />)}</div> : <div className="activity-clear"><strong>现在没有需要处理的问题</strong><span>新的未确认或失败检查会显示在这里，并自动合并相同原因。</span></div>}</section>}
       </section>
       {diagnosticTarget && <DiagnosticDialog target={diagnosticTarget} copied={copiedId === diagnosticTarget.item.id} onCopy={() => void copyDiagnostic()} onClose={() => setDiagnosticTarget(null)} />}
     </div>

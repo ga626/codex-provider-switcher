@@ -33,6 +33,7 @@ feedback-relay/.deployment.local.json
 # Local developer/agent instructions
 /AGENTS.md
 /.agents/
+/.21st/
 /.codex/worktrees/
 /.codex/runtime/
 /.codex-praetor/

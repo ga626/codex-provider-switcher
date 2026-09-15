@@ -18,6 +18,8 @@ export type ProviderProfile = {
     | 'endpoint_or_model_unavailable'
     | 'request_incompatible'
     | 'protocol_incompatible'
+    | 'chat_completions_only'
+    | 'stream_interrupted'
     | 'response_shape_unconfirmed'
     | 'response_unparseable'
     | 'service_error'
@@ -36,6 +38,16 @@ export type ProviderProfile = {
   lastVerificationHttpStatus?: number
   lastVerificationProviderCode?: string
   verificationResponseShape?: 'standard_responses' | 'compatible_response'
+  capabilityProfile?: {
+    probeVersion: string
+    protocol: 'responses' | 'chat_completions' | 'unknown' | string
+    streaming: 'verified' | 'not_streamed' | 'unsupported' | 'interrupted' | 'failed' | 'not_tested' | 'unknown' | string
+    completion: 'verified' | 'unconfirmed' | 'failed' | string
+    transportRetryCount: number
+    responseHeaderMs?: number
+    firstEventMs?: number
+    totalMs?: number
+  }
 }
 
 export type ProviderModel = {
@@ -218,6 +230,11 @@ export type UpdateInfo = {
   notes?: string
 }
 
+export type ChatGptLoginStatus = {
+  state: 'not_connected' | 'waiting' | 'connected'
+  detail: string
+}
+
 export type AppState = {
   runtimeMode: 'tauri_native' | 'local_web_backend' | 'browser_preview_mock'
   currentProfileId: string
@@ -254,6 +271,7 @@ export type SwitchPreflight = {
   availabilityStage?: string
   availabilityHttpStatus?: number
   availabilityProviderCode?: string
+  capabilityProfile?: ProviderProfile['capabilityProfile']
   riskDetail?: string
   expiresAt: string
 }

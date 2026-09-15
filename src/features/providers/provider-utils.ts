@@ -2,6 +2,23 @@ import type { EditableProfile, ModelCatalog, ProviderProfile, ValidationCheck } 
 import { providerModelLabel } from './model-utils'
 import { verificationPresentation } from './verification-copy'
 
+export type ProviderConnectionKind = 'chatgpt-account' | 'official-api' | 'relay'
+
+const officialApiHosts = [
+  'api.deepseek.com',
+  'api.openai.com',
+  'api.xiaomimimo.com',
+  'generativelanguage.googleapis.com',
+  'api.x.ai',
+]
+
+export function providerConnectionKind(profile: Pick<ProviderProfile, 'id' | 'name' | 'baseUrl'>): ProviderConnectionKind {
+  const identity = `${profile.id} ${profile.name} ${profile.baseUrl}`.toLocaleLowerCase()
+  if (identity.includes('chatgpt') || identity.includes('oauth') || identity.includes('backend-api/codex')) return 'chatgpt-account'
+  if (officialApiHosts.some((host) => identity.includes(host))) return 'official-api'
+  return 'relay'
+}
+
 export function profileConfigurationChecks(
   profile: ProviderProfile | undefined,
   draft: EditableProfile,

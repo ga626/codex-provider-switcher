@@ -349,10 +349,25 @@ const providerServer = createServer((request, response) => {
   }
   if (request.url === '/v1/responses') {
     responsesProbeRequestCount += 1
-    request.resume()
+    request.setEncoding('utf8')
+    let requestBody = ''
+    request.on('data', (chunk) => {
+      requestBody += chunk
+    })
     request.on('end', () => {
       const authorization = request.headers.authorization
       if (authorization === 'Bearer sk-fixture') {
+        const parsedBody = JSON.parse(requestBody || '{}')
+        if (parsedBody.stream === true) {
+          response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+          response.end(
+            'event: response.output_text.delta\n' +
+              'data: {"type":"response.output_text.delta","delta":"OK"}\n\n' +
+              'event: response.completed\n' +
+              'data: {"type":"response.completed"}\n\n',
+          )
+          return
+        }
         response.writeHead(200, { 'Content-Type': 'application/json' })
         response.end(JSON.stringify({ id: 'resp_fixture', object: 'response' }))
         return

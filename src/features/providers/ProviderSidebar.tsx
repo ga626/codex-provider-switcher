@@ -3,6 +3,13 @@ import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrate
 import { Plus } from 'lucide-react'
 import type { ProviderProfile } from '../../types'
 import { SortableProviderRow } from './SortableProviderRow'
+import { providerConnectionKind, type ProviderConnectionKind } from './provider-utils'
+
+const connectionGroups: Array<{ id: ProviderConnectionKind; label: string }> = [
+  { id: 'chatgpt-account', label: 'ChatGPT 官方账号' },
+  { id: 'official-api', label: '厂商官方 API' },
+  { id: 'relay', label: '中转站' },
+]
 
 export function ProviderSidebar({
   profiles,
@@ -23,6 +30,10 @@ export function ProviderSidebar({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
+  const groupedProfiles = connectionGroups.map((group) => ({
+    ...group,
+    profiles: profiles.filter((profile) => providerConnectionKind(profile) === group.id),
+  })).filter((group) => group.profiles.length > 0)
 
   function handleDragEnd({ active, over }: DragEndEvent) {
     if (!over || active.id === over.id) return
@@ -43,21 +54,30 @@ export function ProviderSidebar({
         </div>
 
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={profiles.map((profile) => profile.id)} strategy={verticalListSortingStrategy}>
-            <div className="provider-list scroll-region" role="listbox" aria-label="服务商列表" data-tour="provider-list" data-guide-target="providers.list">
-              {profiles.map((profile, index) => (
-                <SortableProviderRow
-                  key={profile.id}
-                  profile={profile}
-                  index={index}
-                  selected={profile.id === selectedId}
-                  disabled={busy}
-                  onSelect={() => onSelect(profile)}
-                  onMove={(targetIndex) => onMove(profile.id, Math.min(profiles.length - 1, targetIndex))}
-                />
-              ))}
+          <div className="provider-list scroll-region" role="listbox" aria-label="服务商列表" data-tour="provider-list" data-guide-target="providers.list">
+            {groupedProfiles.map((group) => <section className={`provider-group ${group.id}`} role="group" aria-labelledby={`provider-group-${group.id}`} key={group.id}>
+              <header><span id={`provider-group-${group.id}`}>{group.label}</span><small>{group.profiles.length}</small></header>
+              <SortableContext items={group.profiles.map((profile) => profile.id)} strategy={verticalListSortingStrategy}>
+                <div className="provider-group-list">
+                  {group.profiles.map((profile, index) => (
+                    <SortableProviderRow
+                      key={profile.id}
+                      profile={profile}
+                      kind={group.id}
+                      index={index}
+                      selected={profile.id === selectedId}
+                      disabled={busy}
+                      onSelect={() => onSelect(profile)}
+                      onMove={(targetIndex) => {
+                        const target = group.profiles[Math.max(0, Math.min(group.profiles.length - 1, targetIndex))]
+                        if (target) onMove(profile.id, profiles.findIndex((item) => item.id === target.id))
+                      }}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </section>)}
             </div>
-          </SortableContext>
         </DndContext>
       </section>
     </aside>
