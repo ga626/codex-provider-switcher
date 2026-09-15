@@ -1463,19 +1463,34 @@ fn prune_managed_backups(
             continue;
         };
         if manifest.retention_managed && candidate_bucket == bucket {
-            candidates.push((entry.file_name().to_string_lossy().to_string(), path));
+            let created = entry
+                .metadata()
+                .and_then(|metadata| metadata.created().or_else(|_| metadata.modified()))
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            candidates.push((
+                manifest.created_at,
+                created,
+                entry.file_name().to_string_lossy().to_string(),
+                path,
+            ));
         }
     }
-    candidates.sort_by(|left, right| right.0.cmp(&left.0));
+    candidates.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| right.2.cmp(&left.2))
+    });
     if let Some(index) = candidates
         .iter()
-        .position(|(label, _)| label == protected_label)
+        .position(|(_, _, label, _)| label == protected_label)
     {
         let protected = candidates.remove(index);
         candidates.insert(0, protected);
     }
     let mut removed = 0;
-    for (label, path) in candidates.into_iter().skip(limit) {
+    for (_, _, label, path) in candidates.into_iter().skip(limit) {
         if label == protected_label || pending.as_deref() == Some(label.as_str()) {
             continue;
         }
