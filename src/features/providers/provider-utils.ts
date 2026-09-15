@@ -12,10 +12,25 @@ const officialApiHosts = [
   'api.x.ai',
 ]
 
+export function providerEndpointHostname(baseUrl: string) {
+  try {
+    return new URL(baseUrl).hostname.toLocaleLowerCase().replace(/\.$/, '')
+  } catch {
+    return ''
+  }
+}
+
 export function providerConnectionKind(profile: Pick<ProviderProfile, 'id' | 'name' | 'baseUrl'>): ProviderConnectionKind {
-  const identity = `${profile.id} ${profile.name} ${profile.baseUrl}`.toLocaleLowerCase()
-  if (identity.includes('chatgpt') || identity.includes('oauth') || identity.includes('backend-api/codex')) return 'chatgpt-account'
-  if (officialApiHosts.some((host) => identity.includes(host))) return 'official-api'
+  const identity = `${profile.id} ${profile.name}`.toLocaleLowerCase()
+  const hostname = providerEndpointHostname(profile.baseUrl)
+  let pathname = ''
+  try {
+    pathname = new URL(profile.baseUrl).pathname.toLocaleLowerCase()
+  } catch {
+    // Invalid or incomplete draft URLs remain relays until the form validates them.
+  }
+  if (identity.includes('chatgpt') || identity.includes('oauth') || pathname.includes('/backend-api/codex')) return 'chatgpt-account'
+  if (officialApiHosts.includes(hostname)) return 'official-api'
   return 'relay'
 }
 

@@ -21,6 +21,7 @@ import type { OperationId } from '../../operations'
 import { FieldHint } from '../../shared/components'
 import type { NewConnectionKind } from './ConnectionSourceDialog'
 import { InlineModelCatalog } from './InlineModelCatalog'
+import { providerConnectionKind } from './provider-utils'
 
 const officialApiPresets = [
   { id: 'deepseek', label: 'DeepSeek 官方 API', name: 'DeepSeek 官方 API', baseUrl: 'https://api.deepseek.com/v1' },
@@ -81,15 +82,9 @@ export function ProviderWorkspace({
   const canRefreshDraftModels = Boolean(
     draft.name.trim() && draft.baseUrl.trim() && draft.apiKey.trim()
   )
-  const connectionIdentity = `${selectedProfile?.id ?? ''} ${selectedProfile?.name ?? ''} ${selectedProfile?.baseUrl ?? ''}`.toLocaleLowerCase()
-  const isChatGptAccount = newConnectionKind === 'chatgpt-account' || connectionIdentity.includes('chatgpt') || connectionIdentity.includes('oauth')
-  const isOfficialApi = newConnectionKind === 'official-api' || [
-    'api.deepseek.com',
-    'api.openai.com',
-    'api.xiaomimimo.com',
-    'generativelanguage.googleapis.com',
-    'api.x.ai',
-  ].some((host) => connectionIdentity.includes(host))
+  const selectedConnectionKind = selectedProfile ? providerConnectionKind(selectedProfile) : null
+  const isChatGptAccount = newConnectionKind === 'chatgpt-account' || selectedConnectionKind === 'chatgpt-account'
+  const isOfficialApi = newConnectionKind === 'official-api' || selectedConnectionKind === 'official-api'
 
   useEffect(() => {
     setKeyVisible(false)

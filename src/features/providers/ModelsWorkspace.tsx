@@ -20,6 +20,7 @@ import {
   providerModelLabel,
   type CodexCompatibilityLevel,
 } from './model-utils'
+import { providerConnectionKind, providerEndpointHostname } from './provider-utils'
 import { verificationPresentation } from './verification-copy'
 
 const levelOrder: CodexCompatibilityLevel[] = ['verified', 'partial', 'unsupported']
@@ -64,10 +65,11 @@ const accountStates = [
 
 function describeCurrentConnection(profile: ProviderProfile | undefined) {
   if (!profile) return { source: '未选择', auth: '未识别', billing: '未识别' }
-  const identity = `${profile.id} ${profile.name} ${profile.baseUrl}`.toLocaleLowerCase()
-  if (identity.includes('chatgpt') || identity.includes('oauth')) return { source: 'ChatGPT 官方 Codex 后端', auth: 'OAuth 官方账号', billing: 'ChatGPT 计划 / 工作区' }
-  if (identity.includes('api.openai.com') || identity.includes('openai-platform')) return { source: 'OpenAI Platform API', auth: 'Platform API key', billing: 'OpenAI API 项目' }
-  if (identity.includes('api.deepseek.com') || identity.includes('deepseek-official')) return { source: 'DeepSeek 官方 API', auth: 'DeepSeek API key', billing: 'DeepSeek 官方账户' }
+  const identity = `${profile.id} ${profile.name}`.toLocaleLowerCase()
+  const hostname = providerEndpointHostname(profile.baseUrl)
+  if (providerConnectionKind(profile) === 'chatgpt-account') return { source: 'ChatGPT 官方 Codex 后端', auth: 'OAuth 官方账号', billing: 'ChatGPT 计划 / 工作区' }
+  if (hostname === 'api.openai.com' || identity.includes('openai-platform')) return { source: 'OpenAI Platform API', auth: 'Platform API key', billing: 'OpenAI API 项目' }
+  if (hostname === 'api.deepseek.com' || identity.includes('deepseek-official')) return { source: 'DeepSeek 官方 API', auth: 'DeepSeek API key', billing: 'DeepSeek 官方账户' }
   if (identity.includes('hybrid') || identity.includes('mixed')) return { source: '实验性双通道', auth: 'OAuth + 第三方 key', billing: '必须实测确认' }
   return { source: '第三方中转 / 兼容 API', auth: '服务商 API key', billing: '当前服务商账户' }
 }
