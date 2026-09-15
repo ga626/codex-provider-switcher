@@ -42,7 +42,7 @@ try {
     }],
     ['03-activity.png', async () => {
       await page.getByRole('button', { name: '活动记录', exact: true }).click()
-      await page.getByRole('heading', { name: '活动记录' }).waitFor()
+      await page.getByRole('heading', { name: '操作与诊断记录' }).waitFor()
     }],
     ['04-cost-center.png', async () => {
       await page.getByRole('button', { name: '实验室', exact: true }).click()

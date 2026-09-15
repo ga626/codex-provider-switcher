@@ -75,6 +75,7 @@ pub(crate) fn catalog_profiles(catalog: &StoredCatalog, current_id: &str) -> Vec
                     last_verification_stage: profile.last_verification_stage,
                     last_verification_http_status: profile.last_verification_http_status,
                     last_verification_provider_code: profile.last_verification_provider_code,
+                    capability_profile: profile.capability_profile,
                 })
         })
         .collect()
@@ -190,15 +191,32 @@ fn activity_problem_key(
     result: &str,
     tone: &str,
 ) -> Option<String> {
-    let needs_attention = matches!(result, "failure" | "warning") || matches!(tone, "warning" | "danger");
+    let needs_attention =
+        matches!(result, "failure" | "warning") || matches!(tone, "warning" | "danger");
     if !needs_attention {
         return None;
     }
-    let provider = provider_name.unwrap_or("workspace").trim().to_ascii_lowercase();
+    let provider = provider_name
+        .unwrap_or("workspace")
+        .trim()
+        .to_ascii_lowercase();
     let cause = diagnostics
         .iter()
-        .find(|item| matches!(item.key.as_str(), "provider.error_code" | "http.status_code" | "verification.status" | "model_catalog.status"))
-        .map(|item| item.value.trim().to_ascii_lowercase().replace(char::is_whitespace, "-"))
+        .find(|item| {
+            matches!(
+                item.key.as_str(),
+                "provider.error_code"
+                    | "http.status_code"
+                    | "verification.status"
+                    | "model_catalog.status"
+            )
+        })
+        .map(|item| {
+            item.value
+                .trim()
+                .to_ascii_lowercase()
+                .replace(char::is_whitespace, "-")
+        })
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "attention".to_string());
     Some(format!("{provider}:{kind}:{cause}"))
@@ -219,11 +237,21 @@ fn activity_stages(
     }];
 
     for diagnostic in diagnostics {
-        let state = if diagnostic.key == "http.status_code" && diagnostic.value.parse::<u16>().map(|status| status >= 400).unwrap_or(false) {
-            "failed"
-        } else if matches!(diagnostic.key.as_str(), "provider.error_code" | "verification.status")
-            && !matches!(diagnostic.value.as_str(), "verified" | "success" | "ok" | "passed")
+        let state = if diagnostic.key == "http.status_code"
+            && diagnostic
+                .value
+                .parse::<u16>()
+                .map(|status| status >= 400)
+                .unwrap_or(false)
         {
+            "failed"
+        } else if matches!(
+            diagnostic.key.as_str(),
+            "provider.error_code" | "verification.status"
+        ) && !matches!(
+            diagnostic.value.as_str(),
+            "verified" | "success" | "ok" | "passed"
+        ) {
             "attention"
         } else {
             "completed"
@@ -369,13 +397,16 @@ pub(crate) fn push_activity_diagnostics(
     let occurred_at = now_label();
     let correlation_id = format!("diag-{}", Local::now().timestamp_millis());
     let operation_kind = activity_operation_kind(event_name, title);
-    let provider_name = provider_name.map(str::trim).filter(|value| !value.is_empty());
+    let provider_name = provider_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     let operation_key = format!(
         "{}:{}",
         provider_name.unwrap_or("workspace").to_ascii_lowercase(),
         operation_kind
     );
-    let problem_key = activity_problem_key(operation_kind, provider_name, &diagnostics, result, tone);
+    let problem_key =
+        activity_problem_key(operation_kind, provider_name, &diagnostics, result, tone);
     let stages = activity_stages(operation_kind, title, detail, result, tone, &diagnostics);
     items.insert(
         0,

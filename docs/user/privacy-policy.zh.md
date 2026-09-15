@@ -1,12 +1,14 @@
 # 隐私政策
 
-**生效日期：2026 年 8 月 19 日**
+**生效日期：2026 年 9 月 16 日**
 
 Signalman AI 是一个面向 Windows 的本地工具。本政策说明应用处理哪些信息、为什么处理，以及用户如何控制这些信息。
 
 ## 应用处理的信息
 
 当你主动添加或修改 provider 时，应用会在当前 Windows 用户的本地应用数据目录保存 provider 名称、接口地址、模型名称、备注和用于连接服务商的 API 密钥状态。切换器 profile 中保存的 API 密钥使用当前 Windows 用户的 DPAPI 保护；应用不会把密钥写入本项目仓库，也不会把它显示在普通界面或活动记录中。
+
+当你主动选择“ChatGPT 官方账号”并点击登录时，Signalman 只启动本机 Codex 提供的官方登录命令，并通过官方状态命令判断是否已经登录。账号、密码和授权确认在 OpenAI 官方页面完成；Signalman 不接收、读取、显示或保存 OAuth token。开发板只演示无凭据状态，不会打开真实登录或读取真实账号。
 
 首次打开时，应用会只读创建基线恢复点。当你主动确认切换时，应用会更新 Codex 的受管 provider 字段，并在写入前创建本地恢复点。未声明认证方式的 custom provider 不会要求或写入 `api_key`，也不会改写 `auth.json`；登录或环境变量认证尚未通过隔离 runtime 验证时，产品会停止自动切换。它保留其他 TOML section 和认证文件内容；检测到预览后的外部改动时会停止而不覆盖。恢复点、活动记录和 provider 目录保留在本机应用数据目录中。卸载应用不会自动删除这些数据，以便重新安装后恢复；你可以在确认不再需要后自行删除该目录。
 
@@ -15,7 +17,9 @@ Signalman AI 是一个面向 Windows 的本地工具。本政策说明应用处�
 网络请求只在相应功能被使用时发生：
 
 - 刷新模型目录时，请求你填写的 provider 接口；
-- 运行“服务商可用性测试”时，向你填写的 provider 发起一次短时、低 token 的已认证 Responses 请求；
+- 运行“服务商可用性测试”时，向你填写的 provider 发起低 token 的已认证能力请求，优先检查 Responses 流式完成，必要时再检查非流式 Responses 或普通 Chat Completions；活动记录只保存协议、阶段、耗时和状态等脱敏结果；
+- 运行实验室固定测试时，向所选 provider 发起独立的完整请求，用于取得 usage 或可用的费用候选；
+- 主动开始 ChatGPT 官方登录时，由本机 Codex 打开 OpenAI 官方授权页面并完成其自身认证；
 - GitHub 安装版检查更新时，访问本项目的 GitHub Release 接口；
 - Microsoft Store 安装版的更新由 Microsoft Store 管理，应用内入口只打开本产品的 Store 页面。
 
@@ -25,7 +29,7 @@ Signalman AI 是一个面向 Windows 的本地工具。本政策说明应用处�
 
 ## 不收集的内容
 
-当前版本没有独立的账号系统、广告 SDK、分析 SDK 或项目自建遥测服务。应用不会为了产品统计主动上传 provider 配置、API 密钥、Codex 配置、备份或活动记录。操作系统、Microsoft Store、GitHub 和你选择的 provider 仍可能按照各自政策记录其服务运行所需的技术日志。
+当前版本没有项目自建账号系统、广告 SDK、分析 SDK 或项目自建遥测服务。ChatGPT 官方账号登录属于 OpenAI/Codex 的官方认证流程，不会变成 Signalman 账号。应用不会为了产品统计主动上传 provider 配置、API 密钥、Codex 配置、备份或活动记录。OpenAI、操作系统、Microsoft Store、GitHub 和你选择的 provider 仍可能按照各自政策记录其服务运行所需的技术日志。
 
 ## 数据控制
 

@@ -1,7 +1,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { initialState } from './mockData'
 import type { DownloadEvent } from '@tauri-apps/plugin-updater'
-import type { AppState, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, ResponseProbeObservation, SwitchPreflight, UpdateInfo } from './types'
+import type { AppState, ChatGptLoginStatus, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, ResponseProbeObservation, SwitchPreflight, UpdateInfo } from './types'
 import type { OperationEventV1 } from './operations'
 
 export type OperationEventHandler = (event: OperationEventV1) => void
@@ -122,6 +122,28 @@ function normalizeId(value: string) {
 
 async function mockDelay() {
   await new Promise((resolve) => window.setTimeout(resolve, 160))
+}
+
+export async function beginChatGptLogin(): Promise<ChatGptLoginStatus> {
+  if (isTauri && __CODEX_RELEASE_CHANNEL__ !== 'development') {
+    return invoke<ChatGptLoginStatus>('begin_chatgpt_login')
+  }
+  await mockDelay()
+  return {
+    state: 'waiting',
+    detail: '开发板只演示等待授权，不会打开浏览器或读取真实账号。',
+  }
+}
+
+export async function getChatGptLoginStatus(): Promise<ChatGptLoginStatus> {
+  if (isTauri && __CODEX_RELEASE_CHANNEL__ !== 'development') {
+    return invoke<ChatGptLoginStatus>('get_chatgpt_login_status')
+  }
+  await mockDelay()
+  return {
+    state: 'connected',
+    detail: '开发板模拟连接成功，没有读取或保存真实账号。',
+  }
 }
 
 export async function loadState(): Promise<AppState> {

@@ -97,7 +97,7 @@ fn is_isolated_development_fixture(profile: &StoredProfile) -> bool {
 }
 
 fn verification_activity_diagnostics(profile: &StoredProfile) -> Vec<ActivityDiagnostic> {
-    [
+    let mut diagnostics: Vec<ActivityDiagnostic> = [
         diagnostic_field(
             "verification.status",
             "检查结果",
@@ -121,7 +121,46 @@ fn verification_activity_diagnostics(profile: &StoredProfile) -> Vec<ActivityDia
     ]
     .into_iter()
     .flatten()
-    .collect()
+    .collect();
+    if let Some(capability) = profile.capability_profile.as_ref() {
+        diagnostics.extend(
+            [
+                diagnostic_field(
+                    "capability.probe_version",
+                    "识别规则版本",
+                    &capability.probe_version,
+                ),
+                diagnostic_field("capability.protocol", "识别到的接口", &capability.protocol),
+                diagnostic_field("capability.streaming", "流式输出", &capability.streaming),
+                diagnostic_field("capability.completion", "完整结束", &capability.completion),
+                diagnostic_field(
+                    "capability.transport_retry_count",
+                    "连接重试次数",
+                    capability.transport_retry_count.to_string(),
+                ),
+                capability.response_header_ms.and_then(|value| {
+                    diagnostic_field(
+                        "timing.response_header_ms",
+                        "收到响应头",
+                        format!("{value} ms"),
+                    )
+                }),
+                capability.first_event_ms.and_then(|value| {
+                    diagnostic_field(
+                        "timing.first_event_ms",
+                        "收到首个事件",
+                        format!("{value} ms"),
+                    )
+                }),
+                capability.total_ms.and_then(|value| {
+                    diagnostic_field("timing.total_ms", "检查总耗时", format!("{value} ms"))
+                }),
+            ]
+            .into_iter()
+            .flatten(),
+        );
+    }
+    diagnostics
 }
 
 fn model_catalog_activity_diagnostics(catalog: &ModelCatalog) -> Vec<ActivityDiagnostic> {
@@ -654,6 +693,7 @@ args = ["-NoProfile"]
             verified: false,
             verification_status: default_verification_status(),
             verification_response_shape: None,
+            capability_profile: None,
             default: false,
             note: String::new(),
             last_switched_at: None,
@@ -729,6 +769,7 @@ api_key = "before-key"
             verified: false,
             verification_status: default_verification_status(),
             verification_response_shape: None,
+            capability_profile: None,
             default: false,
             note: String::new(),
             last_switched_at: None,
@@ -849,6 +890,7 @@ api_key = "old-key"
                 verified: false,
                 verification_status: default_verification_status(),
                 verification_response_shape: None,
+                capability_profile: None,
                 default: false,
                 note: String::new(),
                 last_switched_at: None,
@@ -920,6 +962,7 @@ api_key = "before-key"
             verified: false,
             verification_status: default_verification_status(),
             verification_response_shape: None,
+            capability_profile: None,
             default: false,
             note: String::new(),
             last_switched_at: None,
@@ -969,6 +1012,7 @@ api_key = "before-key"
             verified: false,
             verification_status: default_verification_status(),
             verification_response_shape: None,
+            capability_profile: None,
             default: false,
             note: String::new(),
             last_switched_at: None,
@@ -1061,6 +1105,7 @@ api_key = "before-key"
             verified: false,
             verification_status: default_verification_status(),
             verification_response_shape: None,
+            capability_profile: None,
             default: false,
             note: String::new(),
             last_switched_at: None,
@@ -1518,6 +1563,7 @@ pub fn save_profile_core(profile: EditableProfile) -> Result<AppState, SwitcherE
         verified: false,
         verification_status: default_verification_status(),
         verification_response_shape: None,
+        capability_profile: None,
         default: existing_profile
             .as_ref()
             .map(|p| p.default)
@@ -1685,6 +1731,15 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
     }
     if !verified {
         risks.push(format!("目标服务商的本次自动检查未确认可用：{detail}"));
+    } else if profile
+        .capability_profile
+        .as_ref()
+        .is_some_and(|capability| capability.streaming != "verified")
+    {
+        risks.push(
+            "目标服务商已完成基本调用，但尚未证明能完整传输 Codex 的流式响应；长任务或实时输出可能中断。"
+                .to_string(),
+        );
     }
     // A profile-key switch writes the selected key to auth.json in the same
     // transaction. Do not ask the user to acknowledge a generic external-auth
@@ -1775,6 +1830,7 @@ pub fn prepare_switch_core(profile_id: String) -> Result<SwitchPreflight, Switch
         availability_stage: profile.last_verification_stage.clone(),
         availability_http_status: profile.last_verification_http_status,
         availability_provider_code: profile.last_verification_provider_code.clone(),
+        capability_profile: profile.capability_profile.clone(),
         risk_detail: (!risks.is_empty()).then(|| risks.join(" ")),
         expires_at: chrono::DateTime::from_timestamp(expires_at, 0)
             .map(|value| {
@@ -2263,6 +2319,7 @@ pub fn preview_models_core(profile: EditableProfile) -> Result<ModelCatalog, Swi
         verified: false,
         verification_status: default_verification_status(),
         verification_response_shape: None,
+        capability_profile: None,
         default: false,
         note: String::new(),
         last_switched_at: None,
@@ -2488,6 +2545,10 @@ pub fn restore_latest_backup_core(confirmation: String) -> Result<AppState, Swit
     restore_backup_core(latest.label.clone(), confirmation)
 }
 
+fn restore_stage<T>(stage: &str, result: Result<T, SwitcherError>) -> Result<T, SwitcherError> {
+    result.map_err(|error| SwitcherError::Message(format!("恢复在{stage}阶段失败：{error}")))
+}
+
 #[tauri::command]
 fn restore_backup(backup_id: String, confirmation: String) -> Result<AppState, SwitcherError> {
     restore_backup_core(backup_id, confirmation)
@@ -2502,25 +2563,35 @@ pub fn restore_backup_core(
             "请在恢复确认窗口中输入“恢复”后再继续。".to_string(),
         ));
     }
-    let (backup_dir, manifest) = read_backup_manifest(&backup_id)?;
-    current_state_is_safe_to_restore(&manifest)?;
-    let config = config_path()?;
-    let auth = auth_path()?;
-    let (next_config, next_auth) = restored_owned_files(&backup_dir, &manifest)?;
-    let previous_config = capture_file(&config)?;
+    let (backup_dir, manifest) = restore_stage("读取恢复点", read_backup_manifest(&backup_id))?;
+    restore_stage("核对当前配置", current_state_is_safe_to_restore(&manifest))?;
+    let config = restore_stage("定位设置文件", config_path())?;
+    let auth = restore_stage("定位认证文件", auth_path())?;
+    let (next_config, next_auth) =
+        restore_stage("合并受管字段", restored_owned_files(&backup_dir, &manifest))?;
+    let previous_config = restore_stage("保存回滚快照", capture_file(&config))?;
     let rollback_label = unique_backup_label("before-restore");
-    let rollback_dir = create_backup_with_label(&rollback_label, "before_restore")?;
+    let rollback_dir = restore_stage(
+        "创建恢复前保护点",
+        create_backup_with_label(&rollback_label, "before_restore"),
+    )?;
     let rollback_id = rollback_dir
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| SwitcherError::Message("恢复点标识无效。".to_string()))?;
-    let before_fingerprint = current_owned_fingerprint()?;
-    begin_config_transaction(rollback_id, "restore", &before_fingerprint)?;
+    let before_fingerprint = restore_stage("核对恢复前指纹", current_owned_fingerprint())?;
+    restore_stage(
+        "建立原子写入回执",
+        begin_config_transaction(rollback_id, "restore", &before_fingerprint),
+    )?;
     if let Err(error) = write_bytes_atomically(&config, next_config.as_bytes()) {
         complete_config_transaction()?;
         return Err(error);
     }
-    update_config_transaction_phase("config_replaced")?;
+    restore_stage(
+        "记录设置写入",
+        update_config_transaction_phase("config_replaced"),
+    )?;
     if let Some(next_auth) = next_auth {
         if let Err(error) = write_bytes_atomically(&auth, next_auth.as_bytes()) {
             let config_rollback = restore_file_snapshot(&config, &previous_config);
@@ -2532,22 +2603,37 @@ pub fn restore_backup_core(
             complete_config_transaction()?;
             return Err(error);
         }
-        update_config_transaction_phase("auth_replaced")?;
+        restore_stage(
+            "记录认证写入",
+            update_config_transaction_phase("auth_replaced"),
+        )?;
     }
-    let current_auth = fs::read_to_string(&auth)?;
-    let restored_fingerprint = owned_configuration_fingerprint(&next_config, &current_auth)?;
-    record_backup_post_change(&rollback_dir, &restored_fingerprint)?;
-    record_operation_receipt(ConfigOperationReceipt {
-        id: unique_backup_label("restore-receipt"),
-        backup_id: backup_id.clone(),
-        kind: "restore".to_string(),
-        created_at: now_label(),
-        fingerprint_version: CURRENT_BACKUP_FINGERPRINT_VERSION,
-        before_fingerprint,
-        after_fingerprint: restored_fingerprint,
-    })?;
-    update_config_transaction_phase("verified")?;
-    complete_config_transaction()?;
+    let current_auth = restore_stage(
+        "复核认证文件",
+        fs::read_to_string(&auth).map_err(Into::into),
+    )?;
+    let restored_fingerprint = restore_stage(
+        "核对恢复后指纹",
+        owned_configuration_fingerprint(&next_config, &current_auth),
+    )?;
+    restore_stage(
+        "固化恢复前保护点",
+        record_backup_post_change(&rollback_dir, &restored_fingerprint),
+    )?;
+    restore_stage(
+        "记录恢复回执",
+        record_operation_receipt(ConfigOperationReceipt {
+            id: unique_backup_label("restore-receipt"),
+            backup_id: backup_id.clone(),
+            kind: "restore".to_string(),
+            created_at: now_label(),
+            fingerprint_version: CURRENT_BACKUP_FINGERPRINT_VERSION,
+            before_fingerprint,
+            after_fingerprint: restored_fingerprint,
+        }),
+    )?;
+    restore_stage("记录恢复验证", update_config_transaction_phase("verified"))?;
+    restore_stage("完成原子写入", complete_config_transaction())?;
 
     app_state_with_activity(
         if manifest.reason == "initial_install" {
@@ -2600,6 +2686,8 @@ pub fn run() {
             delete_cost_calibration,
             commands::refresh_models,
             commands::preview_models,
+            commands::begin_chatgpt_login,
+            commands::get_chatgpt_login_status,
             set_default_profile,
             sync_current_configuration,
             toggle_auto_start,

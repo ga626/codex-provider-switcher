@@ -46,24 +46,24 @@ export const GUIDE_CHAPTERS: Record<GuideChapterId, GuideChapter> = {
   initialization: {
     title: '初始化配置', summary: '准备连接环境并跑通第一个服务商。', steps: [
       { id: 'environment', title: '先准备连接环境', detail: '新电脑的 Codex 配置可能不同。先创建恢复点，再只统一 Signalman 管理的连接字段；项目、MCP、插件和历史记录不会被改动。', target: 'providers.environment', view: 'providers' },
-      { id: 'add', title: '新增服务商', detail: '点击加号新增一条连接；已有服务商直接从列表选择，不需要重复添加。', target: 'providers.add', view: 'providers' },
+      { id: 'add', title: '选择连接来源', detail: '点击加号后，先选择 ChatGPT 官方账号、厂商官方 API 或中转站。三种来源使用各自的登录或密钥配置，不会混在一起。', target: 'providers.add', view: 'providers' },
       { id: 'name', title: '填写服务商名称', detail: '给这条连接起一个容易认出的名字，例如“公司中转站”。', target: 'providers.name', view: 'providers' },
       { id: 'endpoint', title: '填写接口地址', detail: '粘贴服务商提供的 API 基地址。Codex 连接失败时，可尝试在末尾补上 /v1。', target: 'providers.endpoint', view: 'providers' },
       { id: 'key', title: '填写访问密钥', detail: '密钥默认隐藏；点击眼睛只会在本机临时显示，反馈内容不会包含密钥。', target: 'providers.key', view: 'providers' },
-      { id: 'model', title: '选择默认模型', detail: '填好名称、接口和密钥后就能点击刷新图标。目录先显示在表单里，不会保存配置；展开后可搜索和滚动选择。', target: 'providers.model', view: 'providers' },
+      { id: 'model', title: '选择默认模型', detail: '填好名称、接口和密钥后可刷新目录。绿色模型可直接选择，黄色模型会先提示风险，灰色模型暂时不能选择；目录支持搜索和内部滚动。', target: 'providers.model', view: 'providers' },
       { id: 'save', title: '保存配置', detail: '保存后，右侧检查会读取这条新配置。未保存的修改不能直接拿去测试或切换。', target: 'providers.save', view: 'providers' },
-      { id: 'availability', title: '运行可用性测试', detail: '这里会实际请求当前服务商，并分别显示超时、限流、鉴权或协议问题；它不会切换 Codex 配置。', target: 'providers.availability', view: 'providers' },
+      { id: 'availability', title: '运行可用性测试', detail: '这里会实际请求当前服务商，先识别 Responses 流式能力，再区分基本调用、仅普通聊天、传输中断、超时、限流和鉴权问题；它不会切换 Codex 配置。', target: 'providers.availability', view: 'providers' },
       { id: 'switch', title: '检查并切换', detail: '最后执行检查并切换。安全阻止不能绕过；使用风险会明确说明，并在确认前让你选择是否继续。', target: 'providers.switch', view: 'providers' },
     ],
   },
   providers: {
     title: '服务商', summary: '管理已有连接、模型、测试和切换。', steps: [
       { id: 'list', title: '服务商列表', detail: '点击条目开始编辑；可用拖动手柄或键盘调整显示顺序。', target: 'providers.list', view: 'providers' },
-      { id: 'add', title: '新增一条连接', detail: '加号会打开一条空白配置，不会覆盖现有服务商。', target: 'providers.add', view: 'providers' },
-      { id: 'form', title: '基础配置', detail: '名称、接口、默认模型和访问密钥在这里填写；备注只用于本机识别。', target: 'providers.form', view: 'providers' },
-      { id: 'model', title: '模型选择与刷新', detail: '未保存时，刷新会使用当前填写的接口和密钥，不写入本机目录；已保存时，刷新对应服务商的模型目录。模型框支持搜索和滚动选择。', target: 'providers.model', view: 'providers' },
+      { id: 'add', title: '新增连接', detail: '加号先让你选择三种来源：ChatGPT 官方账号使用 OpenAI 登录；厂商官方 API 使用厂商自己的密钥；中转站使用中转地址和密钥。新增不会覆盖已有连接。', target: 'providers.add', view: 'providers' },
+      { id: 'form', title: '登录或填写连接', detail: 'ChatGPT 官方账号会从本软件发起登录，并在 OpenAI 官方页面完成授权；官方 API 和中转站在这里填写名称、接口和密钥。账号密码不会交给 Signalman。', target: 'providers.form', view: 'providers' },
+      { id: 'model', title: '模型选择与刷新', detail: '未保存时，刷新使用当前填写的信息且不会保存；已保存时，刷新对应连接的模型目录。目录按适配程度分组，黄色需要确认风险，灰色会说明暂不可用的原因。', target: 'providers.model', view: 'providers' },
       { id: 'save', title: '保存与管理', detail: '保存后才会更新检查结果。这里还可以复制配置、设为默认或删除不再需要的服务商。', target: 'providers.actions', view: 'providers' },
-      { id: 'availability', title: '可用性测试', detail: '测试会请求当前服务商，不会改写 Codex 配置。结果会区分限流、鉴权、超时和响应格式。', target: 'providers.availability', view: 'providers' },
+      { id: 'availability', title: '先看四项状态', detail: '右侧先用“环境、设置、模型、测试”四项短结论告诉你是否准备好。“完整可用”表示流式响应正常结束；“基本可用”表示短请求成功但流式能力未完全证明；黄色需要确认，红色表示当前不能完成。', target: 'providers.availability', view: 'providers' },
       { id: 'switch', title: '检查并切换', detail: '切换前会重新核对当前配置并创建恢复点。安全检查和使用风险是两种不同状态。', target: 'providers.switch', view: 'providers' },
       { id: 'feedback', title: '报告兼容问题', detail: '服务商异常且需要维护者适配时会出现此按钮。提交内容不含密钥、配置正文、文件路径或响应原文。', target: 'providers.feedback', view: 'providers' },
     ],
@@ -79,9 +79,9 @@ export const GUIDE_CHAPTERS: Record<GuideChapterId, GuideChapter> = {
     ],
   },
   timeline: {
-    title: '操作与诊断记录', summary: '查看最近操作、下一步建议，以及脱敏后的专业诊断信息。', steps: [
-      { id: 'activity', title: '先看人话摘要', detail: '每条记录都会说明发生了什么、结果如何和建议下一步。黄色或红色记录优先处理。', target: 'timeline.list', view: 'timeline' },
-      { id: 'details', title: '需要时再看诊断详情', detail: '展开后可查看 HTTP 状态、服务商错误代码和请求编号等脱敏字段；可复制摘要给服务商、搜索引擎或 AI。', target: 'timeline.item', view: 'timeline' },
+    title: '活动记录', summary: '先看结果和待办，再按需展开脱敏诊断。', steps: [
+      { id: 'activity', title: '先看有没有事情要处理', detail: '顶部直接汇总未完成、待确认和已完成数量。“需要处理”会合并相同原因，避免同一个问题重复刷屏。', target: 'timeline.list', view: 'timeline' },
+      { id: 'details', title: '每条记录先说结论', detail: '标题、结果和人话原因放在前面，时间、服务商和模型退到下一层。点“查看”后才显示建议、排查过程与技术字段。', target: 'timeline.item', view: 'timeline' },
       { id: 'read-only', title: '只读排查入口', detail: '这里不会修改配置，也不会记录访问密钥、配置正文、请求内容或完整响应。', target: 'timeline.list', view: 'timeline' },
     ],
   },
@@ -89,18 +89,18 @@ export const GUIDE_CHAPTERS: Record<GuideChapterId, GuideChapter> = {
     title: '实验室', summary: '用同一固定测试记录费用并比较性价比。', steps: [
       { id: 'model', title: '固定测试模型', detail: '排名只比较同一模型和同一固定测试请求；切换模型后会显示它自己的结果。', target: 'lab.model', view: 'lab' },
       { id: 'ranking', title: '成本结果与排名', detail: '保存一条样本就会显示本次成本；有两个服务商后才会出现横向排名。', target: 'lab.ranking', view: 'lab' },
-      { id: 'official', title: '官方对照与评分', detail: '官方对照表示本次成本占官方估算成本的百分比；评分以本表最低成本为 100 分。', target: 'lab.ranking', view: 'lab' },
+      { id: 'official', title: '实际汇率与官方对照', detail: '实际汇率来自实付人民币和到账额度；官方对照按同一次测试的 token 用量与官方 API 标价估算。两者不是同一种汇率，也不能互相替代。', target: 'lab.ranking', view: 'lab' },
       { id: 'samples', title: '管理原始样本', detail: '展开某个服务商可查看原始样本并删除错误记录。多次样本会取中位数，建议测 3 次但不强制。', target: 'lab.ranking', view: 'lab' },
       { id: 'provider', title: '选择要测试的服务商', detail: '先选择服务商，再确认固定模型。测试不会切换 Codex 配置。', target: 'lab.provider', view: 'lab' },
       { id: 'probe', title: '运行固定测试', detail: '系统会发送一条极短请求；如果响应里有可用费用信息，会自动填入测试额度。', target: 'lab.probe', view: 'lab' },
-      { id: 'cost', title: '填写费用字段', detail: '充值金额填写人民币；平台实际额度和测试额度只需来自同一个平台余额体系，不需要与其他服务商统一单位。', target: 'lab.cost-fields', view: 'lab' },
-      { id: 'save', title: '计算并保存', detail: '人民币成本按充值金额乘以测试额度再除以平台实际额度计算。保存后会立即更新上方结果。', target: 'lab.save', view: 'lab' },
+      { id: 'cost', title: '填写费用字段', detail: '先按平台余额选择美元、人民币或平台点数，再填写实际支付人民币、实际到账额度和本次真实扣减。三项必须来自同一笔充值和同一余额体系。', target: 'lab.cost-fields', view: 'lab' },
+      { id: 'save', title: '计算并保存', detail: '实测人民币成本 = 实际支付 × 本次扣减 ÷ 实际到账额度；实际汇率 = 实际支付 ÷ 实际到账额度。缺少真实扣减时不会伪装成实测。', target: 'lab.save', view: 'lab' },
     ],
   },
   overview: {
     title: '整体功能', summary: '认识工作区、状态栏、设置、更新和反馈入口。', steps: [
       { id: 'navigation', title: '主工作区', detail: '顶部在服务商、安全与恢复、活动记录和实验室之间切换；模型目录和切换前检查属于服务商上下文。', target: 'overview.navigation' },
-      { id: 'current', title: '当前正在使用', detail: '这里显示当前 Codex 配置识别到的服务商和模型，不代表其他服务商已经被删除。', target: 'overview.current' },
+      { id: 'current', title: '当前正在使用', detail: '这里显示当前 Codex 配置识别到的连接和模型。切换来源不会删除其他连接，也不会删除 MCP、插件、钩子、项目或本地历史。', target: 'overview.current' },
       { id: 'help', title: '使用说明目录', detail: '任何时候都可以从问号或状态栏打开目录，选择需要重看的章节。', target: 'overview.help' },
       { id: 'settings', title: '应用设置', detail: '设置中包含开机启动、备份数量和检查更新；不会把你的本机资料上传到外部。', target: 'overview.settings' },
       { id: 'status', title: '状态栏', detail: '状态栏显示当前操作、连接环境状态和本机资料边界。', target: 'overview.statusbar-help' },

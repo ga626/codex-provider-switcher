@@ -64,6 +64,51 @@
       "last_verification_detail": "短时 Responses 请求返回可识别的模型输出。",
       "last_verification_stage": "inference",
       "last_verification_http_status": 200
+    },
+    "deepseek-official": {
+      "name": "DeepSeek 官方 API",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "development-placeholder",
+      "model": "deepseek-reasoner",
+      "model_reasoning_effort": "high",
+      "verified": false,
+      "verification_status": "not_checked",
+      "default": false,
+      "note": "厂商官方 API；使用独立 key 和官方账户额度。"
+    },
+    "openai-platform": {
+      "name": "OpenAI Platform API",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "development-placeholder",
+      "model": "gpt-5.6-terra",
+      "model_reasoning_effort": "high",
+      "verified": true,
+      "verification_status": "verified",
+      "verification_response_shape": "standard_responses",
+      "default": false,
+      "note": "按 OpenAI API 项目计费，不使用 ChatGPT 订阅额度。"
+    },
+    "chatgpt-oauth": {
+      "name": "ChatGPT 官方账号",
+      "base_url": "https://chatgpt.com/backend-api/codex",
+      "api_key": "",
+      "model": "gpt-5.6-terra",
+      "model_reasoning_effort": "high",
+      "verified": false,
+      "verification_status": "not_checked",
+      "default": false,
+      "note": "模拟已登录 OAuth；不保存或复制真实 token。"
+    },
+    "hybrid-mixed-auth": {
+      "name": "双认证实验模式",
+      "base_url": "https://hybrid-provider.example/v1",
+      "api_key": "development-placeholder",
+      "model": "gpt-5.6-terra",
+      "model_reasoning_effort": "high",
+      "verified": false,
+      "verification_status": "response_shape_unconfirmed",
+      "default": false,
+      "note": "仅用于模拟 OAuth 与第三方 key 并存的风险，不建议默认启用。"
     }
   },
   "model_catalogs": {
@@ -72,26 +117,78 @@
       "baseUrl": "https://provider-a.example/v1",
       "fetchedAt": "2026-08-07 20:10:00",
       "status": "ok",
-      "statusDetail": "已刷新 4 个可用模型。",
+      "statusDetail": "已刷新 13 个模型，已按 Codex 适配证据分级。",
       "models": [
-        { "id": "gpt-5.6-sol", "aliases": ["GPT-5.6 Sol"], "source": "mock", "tags": ["responses-candidate", "reasoning"], "verifiedForResponses": "verified" },
-        { "id": "gpt-5.6-terra", "aliases": ["GPT-5.6 Terra"], "source": "mock", "tags": ["responses-candidate", "reasoning"], "verifiedForResponses": "verified" },
-        { "id": "gpt-5.6-luna", "aliases": ["GPT-5.6 Luna"], "source": "mock", "tags": ["responses-candidate"], "verifiedForResponses": "unknown" },
-        { "id": "gpt-5.5", "aliases": ["GPT-5.5"], "source": "mock", "tags": ["responses-candidate"], "verifiedForResponses": "verified" }
+        { "id": "gpt-5.6-sol", "aliases": ["GPT-5.6 Sol"], "source": "mock", "tags": ["codex", "responses-verified", "tools-verified", "reasoning"], "verifiedForResponses": "verified" },
+        { "id": "gpt-5.6-terra", "aliases": ["GPT-5.6 Terra"], "source": "mock", "tags": ["codex", "responses-verified", "tools-verified", "reasoning"], "verifiedForResponses": "verified" },
+        { "id": "gpt-5.5", "aliases": ["GPT-5.5"], "source": "mock", "tags": ["codex", "responses-verified", "tools-verified"], "verifiedForResponses": "verified" },
+        { "id": "gpt-5.6-luna", "aliases": ["GPT-5.6 Luna"], "source": "mock", "tags": ["codex", "responses-candidate"], "verifiedForResponses": "verified" },
+        { "id": "deepseek-chat", "aliases": ["DeepSeek V3"], "source": "mock", "tags": ["deepseek", "chat-compatible"], "verifiedForResponses": "unknown" },
+        { "id": "deepseek-reasoner", "aliases": ["DeepSeek R1"], "source": "mock", "tags": ["deepseek", "responses-candidate", "reasoning"], "verifiedForResponses": "unknown" },
+        { "id": "kimi-k2.5", "aliases": ["Moonshot K2.5"], "source": "mock", "tags": ["kimi", "chat-compatible"], "verifiedForResponses": "unknown" },
+        { "id": "glm-4.7", "aliases": ["智谱 GLM"], "source": "mock", "tags": ["glm", "chat-compatible"], "verifiedForResponses": "unknown" },
+        { "id": "grok-4", "aliases": ["xAI Grok"], "source": "mock", "tags": ["grok", "responses-candidate"], "verifiedForResponses": "unknown" },
+        { "id": "gemini-2.5-pro", "aliases": ["Google Gemini"], "source": "mock", "tags": ["gemini", "chat-compatible"], "verifiedForResponses": "unknown" },
+        { "id": "mimo-v2-pro", "aliases": ["Xiaomi MIMO"], "source": "mock", "tags": ["mimo", "chat-compatible"], "verifiedForResponses": "unknown" },
+        { "id": "text-embedding-3-large", "aliases": ["Embedding"], "source": "mock", "tags": ["embedding"], "verifiedForResponses": "failed" },
+        { "id": "gemini-native-audio", "aliases": ["Gemini Native Audio"], "source": "mock", "tags": ["audio", "protocol-incompatible"], "verifiedForResponses": "failed" }
+      ]
+    },
+    "deepseek-official": {
+      "providerId": "deepseek-official",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "fetchedAt": "2026-09-11 18:00:00",
+      "status": "ok",
+      "statusDetail": "官方目录样本：2 个候选模型和 1 个非推理模型。",
+      "models": [
+        { "id": "deepseek-chat", "aliases": ["DeepSeek V3"], "source": "mock", "tags": ["deepseek", "chat-compatible"], "verifiedForResponses": "unknown" },
+        { "id": "deepseek-reasoner", "aliases": ["DeepSeek R1"], "source": "mock", "tags": ["deepseek", "responses-candidate"], "verifiedForResponses": "unknown" },
+        { "id": "deepseek-embedding", "aliases": ["Embedding"], "source": "mock", "tags": ["deepseek", "embedding"], "verifiedForResponses": "failed" }
+      ]
+    },
+    "openai-platform": {
+      "providerId": "openai-platform",
+      "baseUrl": "https://api.openai.com/v1",
+      "fetchedAt": "2026-09-11 18:00:00",
+      "status": "ok",
+      "statusDetail": "OpenAI Platform 模型样本；与 ChatGPT 订阅分开计费。",
+      "models": [
+        { "id": "gpt-5.6-terra", "aliases": ["GPT-5.6 Terra"], "source": "mock", "tags": ["codex", "responses-verified", "tools-verified"], "verifiedForResponses": "verified" },
+        { "id": "gpt-5.6-luna", "aliases": ["GPT-5.6 Luna"], "source": "mock", "tags": ["codex", "responses-candidate"], "verifiedForResponses": "verified" }
+      ]
+    },
+    "chatgpt-oauth": {
+      "providerId": "chatgpt-oauth",
+      "baseUrl": "https://chatgpt.com/backend-api/codex",
+      "fetchedAt": "2026-09-11 18:00:00",
+      "status": "ok",
+      "statusDetail": "OAuth 官方账号模拟；实际可用模型由账号计划与工作区决定。",
+      "models": [
+        { "id": "gpt-5.6-terra", "aliases": ["GPT-5.6 Terra"], "source": "mock", "tags": ["codex", "responses-verified", "tools-verified"], "verifiedForResponses": "verified" }
+      ]
+    },
+    "hybrid-mixed-auth": {
+      "providerId": "hybrid-mixed-auth",
+      "baseUrl": "https://hybrid-provider.example/v1",
+      "fetchedAt": "2026-09-11 18:00:00",
+      "status": "stale",
+      "statusDetail": "实验性双认证：实际上游与计费归属尚未确认。",
+      "models": [
+        { "id": "gpt-5.6-terra", "aliases": ["GPT-5.6 Terra"], "source": "mock", "tags": ["mixed-auth", "responses-candidate"], "verifiedForResponses": "unknown" }
       ]
     }
   },
   "cost_calibrations": [
-    { "id": "cost-demo-d", "providerId": "example-provider-d", "providerName": "服务商 D", "fundingMode": "prepaid", "paidCny": "10", "consumableCredit": "1000", "debitCredit": "0.000398", "creditUnitLabel": "同一平台额度", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "costSource": "response_usage", "probeId": "probe-demo-d", "sampleKind": "cold", "resultCny": "0.00000398", "state": "completed", "createdAt": "2026-08-07 20:16", "updatedAt": "2026-08-07 20:16" },
-    { "id": "cost-demo-a", "providerId": "example-provider-a", "providerName": "服务商 A", "fundingMode": "prepaid", "paidCny": "10", "consumableCredit": "1000", "debitCredit": "0.000524", "creditUnitLabel": "同一平台额度", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "costSource": "billing_log_manual", "probeId": "probe-demo-a", "sampleKind": "cold", "resultCny": "0.00000524", "state": "completed", "createdAt": "2026-08-07 20:12", "updatedAt": "2026-08-07 20:12" },
-    { "id": "cost-demo-a-repeat", "providerId": "example-provider-a", "providerName": "服务商 A", "fundingMode": "prepaid", "paidCny": "10", "consumableCredit": "1000", "debitCredit": "0.000548", "creditUnitLabel": "同一平台额度", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "costSource": "response_header", "probeId": "probe-demo-a-repeat", "sampleKind": "cold", "resultCny": "0.00000548", "state": "completed", "createdAt": "2026-08-07 20:15", "updatedAt": "2026-08-07 20:15" }
+    { "id": "cost-demo-d", "providerId": "example-provider-d", "providerName": "服务商 D", "fundingMode": "prepaid", "paidCny": "10", "consumableCredit": "1000", "debitCredit": "0.000398", "creditUnitLabel": "美元额度（USD）", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "costSource": "response_usage", "probeId": "probe-demo-d", "sampleKind": "cold", "resultCny": "0.00000398", "state": "completed", "createdAt": "2026-08-07 20:16", "updatedAt": "2026-08-07 20:16" },
+    { "id": "cost-demo-a", "providerId": "example-provider-a", "providerName": "服务商 A", "fundingMode": "prepaid", "paidCny": "10", "consumableCredit": "1000", "debitCredit": "0.000524", "creditUnitLabel": "美元额度（USD）", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "costSource": "billing_log_manual", "probeId": "probe-demo-a", "sampleKind": "cold", "resultCny": "0.00000524", "state": "completed", "createdAt": "2026-08-07 20:12", "updatedAt": "2026-08-07 20:12" },
+    { "id": "cost-demo-a-repeat", "providerId": "example-provider-a", "providerName": "服务商 A", "fundingMode": "prepaid", "paidCny": "10", "consumableCredit": "1000", "debitCredit": "0.000548", "creditUnitLabel": "美元额度（USD）", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "costSource": "response_header", "probeId": "probe-demo-a-repeat", "sampleKind": "cold", "resultCny": "0.00000548", "state": "completed", "createdAt": "2026-08-07 20:15", "updatedAt": "2026-08-07 20:15" }
   ],
   "response_probes": [
     { "id": "probe-demo-d", "providerId": "example-provider-d", "providerName": "服务商 D", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "observedAt": "2026-08-07 20:16", "status": "final_cost_inline", "httpStatus": 200, "requestId": "preview-demo-d", "usage": { "inputTokens": 12, "outputTokens": 4, "totalTokens": 16, "cachedTokens": 0, "cacheWriteTokens": 0, "reasoningTokens": 0 }, "costCandidate": "0.000398", "costSource": "response_usage", "detail": "已从响应中的用量字段读取费用。" },
     { "id": "probe-demo-a", "providerId": "example-provider-a", "providerName": "服务商 A", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "observedAt": "2026-08-07 20:12", "status": "correlation_only", "httpStatus": 200, "requestId": "preview-demo-a", "usage": { "inputTokens": 12, "outputTokens": 4, "totalTokens": 16, "cachedTokens": 0, "cacheWriteTokens": 0, "reasoningTokens": 0 }, "detail": "费用由平台账单记录补充。" },
     { "id": "probe-demo-a-repeat", "providerId": "example-provider-a", "providerName": "服务商 A", "model": "gpt-5.6-terra", "probeVersion": "cost-calibration-v2", "observedAt": "2026-08-07 20:15", "status": "final_cost_inline", "httpStatus": 200, "requestId": "preview-demo-a-repeat", "usage": { "inputTokens": 12, "outputTokens": 4, "totalTokens": 16, "cachedTokens": 0, "cacheWriteTokens": 0, "reasoningTokens": 0 }, "costCandidate": "0.000548", "costSource": "response_header", "detail": "已从响应头读取费用。" }
   ],
-  "profile_order": ["example-provider-c", "example-provider-b", "example-provider-d", "example-provider-a"],
+  "profile_order": ["example-provider-c", "example-provider-b", "example-provider-d", "example-provider-a", "deepseek-official", "openai-platform", "chatgpt-oauth", "hybrid-mixed-auth"],
   "auto_start": false,
   "backup_policy": { "automaticLimit": 3, "manualLimit": 3 },
   "invariants": {}

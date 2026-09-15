@@ -6,13 +6,15 @@
 //! provider rewrite.
 
 use crate::{
-    default_auth_mode, default_verification_status, ModelCatalog, ProviderModel,
-    ProviderVerificationOutcome, StoredProfile,
+    default_auth_mode, default_verification_status, ModelCatalog, ProviderCapabilityProfile,
+    ProviderModel, ProviderVerificationOutcome, StoredProfile,
 };
 use chrono::Local;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::time::Duration;
+use std::io::{BufRead, BufReader};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use super::{
     configure_http_client, is_isolated_development_fixture, response_header_id, SwitcherError,
@@ -50,6 +52,9 @@ const STANDARD_BEARER_ADAPTER: ProviderAdapter = ProviderAdapter {
 /// an upstream model. This is a bounded user-visible wait, not a promise that
 /// a provider has cancelled work after the client gives up.
 pub(crate) const PROVIDER_PROBE_TIMEOUT: Duration = Duration::from_secs(45);
+const PROVIDER_CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
+const PROVIDER_RETRY_DELAY: Duration = Duration::from_millis(750);
+const CAPABILITY_PROBE_VERSION: &str = "capability-negotiation-v1";
 
 const MODELFLARE_COMMAND_ADAPTER: ProviderAdapter = ProviderAdapter {
     id: "modelflare_command",
@@ -249,6 +254,13 @@ pub(crate) fn verification_outcome(
         http_status,
         provider_code,
         response_shape: None,
+        capability_profile: ProviderCapabilityProfile {
+            probe_version: CAPABILITY_PROBE_VERSION.to_string(),
+            protocol: "unknown".to_string(),
+            streaming: "unknown".to_string(),
+            completion: "unconfirmed".to_string(),
+            ..ProviderCapabilityProfile::default()
+        },
     }
 }
 
@@ -265,6 +277,13 @@ pub(crate) fn inference_outcome(
         http_status: Some(http_status),
         provider_code: None,
         response_shape: Some(response_shape.to_string()),
+        capability_profile: ProviderCapabilityProfile {
+            probe_version: CAPABILITY_PROBE_VERSION.to_string(),
+            protocol: "responses".to_string(),
+            streaming: "not_observed".to_string(),
+            completion: "verified".to_string(),
+            ..ProviderCapabilityProfile::default()
+        },
     }
 }
 
@@ -354,6 +373,7 @@ pub(crate) fn apply_verification(
     profile.last_verification_http_status = outcome.http_status;
     profile.last_verification_provider_code = outcome.provider_code;
     profile.verification_response_shape = outcome.response_shape;
+    profile.capability_profile = Some(outcome.capability_profile);
 }
 
 pub(crate) fn reset_profile_verification(profile: &mut StoredProfile, detail: &str) {
@@ -365,6 +385,7 @@ pub(crate) fn reset_profile_verification(profile: &mut StoredProfile, detail: &s
     profile.last_verification_stage = Some("profile".to_string());
     profile.last_verification_http_status = None;
     profile.last_verification_provider_code = None;
+    profile.capability_profile = None;
 }
 
 pub(crate) fn model_tags(model_id: &str) -> Vec<String> {
@@ -518,11 +539,92 @@ mod tests {
     use super::{
         build_model_catalog, has_compatible_response_output, has_provider_error,
         preferred_auth_mode, provider_adapter, provider_error_code, provider_failure_outcome,
-        provider_probe_endpoint, verification_outcome, PROVIDER_PROBE_TIMEOUT,
+        provider_probe_endpoint, verification_outcome, verify_provider_auth_probe,
+        PROVIDER_PROBE_TIMEOUT,
     };
     use crate::StoredProfile;
     use serde_json::json;
-    use std::time::Duration;
+    use std::{
+        io::{BufRead, BufReader, Read, Write},
+        net::TcpListener,
+        sync::mpsc,
+        thread,
+        time::Duration,
+    };
+
+    fn capability_test_profile(base_url: String) -> StoredProfile {
+        StoredProfile {
+            name: "Local capability fixture".to_string(),
+            base_url,
+            api_key: "test-key".to_string(),
+            api_key_protected: String::new(),
+            model: "test-model".to_string(),
+            auth_mode: "bearer_profile_key".to_string(),
+            model_reasoning_effort: "high".to_string(),
+            verified: false,
+            verification_status: "not_checked".to_string(),
+            verification_response_shape: None,
+            capability_profile: None,
+            default: false,
+            note: String::new(),
+            last_switched_at: None,
+            last_verified_at: None,
+            last_verification_detail: None,
+            last_verification_stage: None,
+            last_verification_http_status: None,
+            last_verification_provider_code: None,
+        }
+    }
+
+    fn serve_capability_responses(
+        responses: Vec<(&'static str, &'static str, &'static str)>,
+    ) -> (String, mpsc::Receiver<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind local capability fixture");
+        let address = listener.local_addr().expect("read fixture address");
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let mut paths = Vec::new();
+            for (status, content_type, body) in responses {
+                let (mut stream, _) = listener.accept().expect("accept capability request");
+                let mut reader = BufReader::new(stream.try_clone().expect("clone request stream"));
+                let mut request_line = String::new();
+                reader
+                    .read_line(&mut request_line)
+                    .expect("read request line");
+                paths.push(
+                    request_line
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap_or("")
+                        .to_string(),
+                );
+                let mut content_length = 0_usize;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).expect("read request header");
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        content_length = value.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut request_body = vec![0_u8; content_length];
+                reader
+                    .read_exact(&mut request_body)
+                    .expect("read request body");
+                let reply = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(reply.as_bytes())
+                    .expect("write fixture response");
+            }
+            sender.send(paths).expect("send observed paths");
+        });
+        (format!("http://{address}/v1"), receiver)
+    }
 
     #[test]
     fn builds_model_and_response_endpoints_from_api_base_url() {
@@ -655,6 +757,7 @@ mod tests {
             verified: false,
             verification_status: "not_checked".to_string(),
             verification_response_shape: None,
+            capability_profile: None,
             default: false,
             note: String::new(),
             last_switched_at: None,
@@ -687,6 +790,78 @@ mod tests {
             Some("2026-08-21 00:00:00")
         );
         assert_eq!(catalog.models.len(), 1);
+    }
+
+    #[test]
+    fn capability_probe_accepts_a_completed_responses_stream() {
+        let body = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\"}\n\n";
+        let (base_url, observed) =
+            serve_capability_responses(vec![("200 OK", "text/event-stream", body)]);
+        let outcome = verify_provider_auth_probe(&capability_test_profile(base_url));
+        assert!(outcome.verified);
+        assert_eq!(outcome.status, "verified");
+        assert_eq!(outcome.capability_profile.protocol, "responses");
+        assert_eq!(outcome.capability_profile.streaming, "verified");
+        assert_eq!(outcome.capability_profile.completion, "verified");
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(2)).unwrap(),
+            vec!["/v1/responses"]
+        );
+    }
+
+    #[test]
+    fn capability_probe_reports_a_stream_that_ends_without_completion() {
+        let body = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n";
+        let (base_url, observed) =
+            serve_capability_responses(vec![("200 OK", "text/event-stream", body)]);
+        let outcome = verify_provider_auth_probe(&capability_test_profile(base_url));
+        assert!(!outcome.verified);
+        assert_eq!(outcome.status, "stream_interrupted");
+        assert_eq!(outcome.capability_profile.streaming, "interrupted");
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(2)).unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
+    fn capability_probe_marks_non_stream_responses_as_basic_support() {
+        let body = "{\"id\":\"resp_fixture\",\"output\":[]}";
+        let (base_url, observed) =
+            serve_capability_responses(vec![("200 OK", "application/json", body)]);
+        let outcome = verify_provider_auth_probe(&capability_test_profile(base_url));
+        assert!(outcome.verified);
+        assert_eq!(outcome.capability_profile.protocol, "responses");
+        assert_eq!(outcome.capability_profile.streaming, "not_streamed");
+        assert_eq!(outcome.capability_profile.transport_retry_count, 0);
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(2)).unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
+    fn capability_probe_downgrades_to_chat_completions_only_when_responses_is_missing() {
+        let (base_url, observed) = serve_capability_responses(vec![
+            (
+                "404 Not Found",
+                "application/json",
+                "{\"error\":{\"message\":\"unknown endpoint\"}}",
+            ),
+            (
+                "200 OK",
+                "application/json",
+                "{\"choices\":[{\"message\":{\"content\":\"OK\"}}]}",
+            ),
+        ]);
+        let outcome = verify_provider_auth_probe(&capability_test_profile(base_url));
+        assert!(!outcome.verified);
+        assert_eq!(outcome.status, "chat_completions_only");
+        assert_eq!(outcome.capability_profile.protocol, "chat_completions");
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(2)).unwrap(),
+            vec!["/v1/responses", "/v1/chat/completions"]
+        );
     }
 }
 
@@ -921,6 +1096,377 @@ fn transport_failure_outcome(err: &reqwest::Error, base_url: &str) -> ProviderVe
     )
 }
 
+fn send_capability_request(
+    profile: &StoredProfile,
+    endpoint: &str,
+    body: &Value,
+) -> Result<(reqwest::blocking::Response, u8, Instant, u64), ProviderVerificationOutcome> {
+    for attempt in 0..=1_u8 {
+        let client = configure_http_client(
+            reqwest::blocking::Client::builder()
+                .connect_timeout(PROVIDER_CONNECT_TIMEOUT)
+                .timeout(PROVIDER_PROBE_TIMEOUT)
+                .http1_only(),
+        )
+        .build()
+        .map_err(|err| {
+            verification_outcome(
+                false,
+                "transport_error",
+                "transport",
+                &format!("创建验证连接失败：{err}"),
+                None,
+                None,
+            )
+        })?;
+        let started = Instant::now();
+        match client
+            .post(endpoint)
+            .bearer_auth(profile.api_key.trim())
+            .json(body)
+            .send()
+        {
+            Ok(response) => {
+                let header_ms = started.elapsed().as_millis() as u64;
+                return Ok((response, attempt, started, header_ms));
+            }
+            Err(err) if err.is_connect() && attempt == 0 => {
+                thread::sleep(PROVIDER_RETRY_DELAY);
+            }
+            Err(err) => {
+                let mut outcome = transport_failure_outcome(&err, &profile.base_url);
+                outcome.capability_profile.transport_retry_count = attempt;
+                outcome.capability_profile.total_ms = Some(started.elapsed().as_millis() as u64);
+                return Err(outcome);
+            }
+        }
+    }
+    unreachable!("bounded capability request loop always returns")
+}
+
+fn capability_outcome(
+    mut outcome: ProviderVerificationOutcome,
+    protocol: &str,
+    streaming: &str,
+    completion: &str,
+    retry_count: u8,
+    header_ms: u64,
+    first_event_ms: Option<u64>,
+    total_ms: u64,
+) -> ProviderVerificationOutcome {
+    outcome.capability_profile = ProviderCapabilityProfile {
+        probe_version: CAPABILITY_PROBE_VERSION.to_string(),
+        protocol: protocol.to_string(),
+        streaming: streaming.to_string(),
+        completion: completion.to_string(),
+        transport_retry_count: retry_count,
+        response_header_ms: Some(header_ms),
+        first_event_ms,
+        total_ms: Some(total_ms),
+    };
+    outcome
+}
+
+fn parse_responses_event_stream(
+    response: reqwest::blocking::Response,
+    retry_count: u8,
+    started: Instant,
+    header_ms: u64,
+) -> ProviderVerificationOutcome {
+    let status = response.status().as_u16();
+    let mut reader = BufReader::new(response);
+    let mut line = String::new();
+    let mut event_name = String::new();
+    let mut data = String::new();
+    let mut first_event_ms = None;
+    let mut bytes_read = 0_usize;
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(count) => {
+                bytes_read += count;
+                if bytes_read > 256 * 1024 {
+                    return capability_outcome(
+                        verification_outcome(
+                            false,
+                            "stream_interrupted",
+                            "stream",
+                            "流式响应超过健康检查读取上限，尚未收到正常结束事件。",
+                            Some(status),
+                            None,
+                        ),
+                        "responses",
+                        "interrupted",
+                        "unconfirmed",
+                        retry_count,
+                        header_ms,
+                        first_event_ms,
+                        started.elapsed().as_millis() as u64,
+                    );
+                }
+                let trimmed = line.trim_end_matches(['\r', '\n']);
+                if let Some(value) = trimmed.strip_prefix("event:") {
+                    event_name = value.trim().to_string();
+                    first_event_ms.get_or_insert(started.elapsed().as_millis() as u64);
+                } else if let Some(value) = trimmed.strip_prefix("data:") {
+                    if !data.is_empty() {
+                        data.push('\n');
+                    }
+                    data.push_str(value.trim());
+                    first_event_ms.get_or_insert(started.elapsed().as_millis() as u64);
+                }
+                if trimmed.is_empty() {
+                    let data_type = serde_json::from_str::<Value>(&data).ok().and_then(|value| {
+                        value
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string)
+                    });
+                    let event_type = if event_name.is_empty() {
+                        data_type.as_deref().unwrap_or("")
+                    } else {
+                        &event_name
+                    };
+                    if event_type == "response.completed" || data == "[DONE]" {
+                        return capability_outcome(
+                            inference_outcome(
+                                "standard_responses",
+                                "可用性测试已通过：当前模型完成了标准 Responses 流式生命周期。",
+                                status,
+                            ),
+                            "responses",
+                            "verified",
+                            "verified",
+                            retry_count,
+                            header_ms,
+                            first_event_ms,
+                            started.elapsed().as_millis() as u64,
+                        );
+                    }
+                    if event_type == "response.failed"
+                        || event_type == "response.incomplete"
+                        || event_type == "error"
+                    {
+                        return capability_outcome(
+                            verification_outcome(
+                                false,
+                                "provider_error",
+                                "stream",
+                                "平台已经开始流式响应，但随后返回失败事件。",
+                                Some(status),
+                                None,
+                            ),
+                            "responses",
+                            "failed",
+                            "failed",
+                            retry_count,
+                            header_ms,
+                            first_event_ms,
+                            started.elapsed().as_millis() as u64,
+                        );
+                    }
+                    event_name.clear();
+                    data.clear();
+                }
+            }
+            Err(_) => {
+                return capability_outcome(
+                    verification_outcome(
+                        false,
+                        "stream_interrupted",
+                        "stream",
+                        "平台已经开始返回，但流式连接在正常结束前中断。",
+                        Some(status),
+                        None,
+                    ),
+                    "responses",
+                    "interrupted",
+                    "unconfirmed",
+                    retry_count,
+                    header_ms,
+                    first_event_ms,
+                    started.elapsed().as_millis() as u64,
+                );
+            }
+        }
+    }
+    capability_outcome(
+        verification_outcome(
+            false,
+            "stream_interrupted",
+            "stream",
+            "平台已返回流式内容，但没有发送正常结束事件。",
+            Some(status),
+            None,
+        ),
+        "responses",
+        "interrupted",
+        "unconfirmed",
+        retry_count,
+        header_ms,
+        first_event_ms,
+        started.elapsed().as_millis() as u64,
+    )
+}
+
+fn parse_non_stream_responses(
+    response: reqwest::blocking::Response,
+    retry_count: u8,
+    started: Instant,
+    header_ms: u64,
+    streaming: &str,
+) -> ProviderVerificationOutcome {
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = response.text().unwrap_or_default();
+    let total_ms = started.elapsed().as_millis() as u64;
+    if !status.is_success() {
+        let outcome = enrich_provider_failure_detail(
+            provider_failure_outcome(Some(status.as_u16()), &body),
+            &headers,
+            &body,
+        );
+        return capability_outcome(
+            outcome,
+            "responses",
+            streaming,
+            "failed",
+            retry_count,
+            header_ms,
+            None,
+            total_ms,
+        );
+    }
+    let outcome = match serde_json::from_str::<Value>(&body) {
+        Ok(value) if has_provider_error(&value) => enrich_provider_failure_detail(
+            provider_failure_outcome(Some(status.as_u16()), &body),
+            &headers,
+            &body,
+        ),
+        Ok(value) if value.get("id").is_some() => inference_outcome(
+            "standard_responses",
+            if streaming == "unsupported" {
+                "当前模型支持 Responses，但没有完成流式生命周期；基本调用可用，Codex 流式兼容仍有风险。"
+            } else {
+                "可用性测试已通过：当前模型返回了标准 Responses 结果。"
+            },
+            status.as_u16(),
+        ),
+        Ok(value) if has_compatible_response_output(&value) => inference_outcome(
+            "compatible_response",
+            "当前模型返回了可识别的兼容响应，但标准 Responses 形状尚未完全确认。",
+            status.as_u16(),
+        ),
+        Ok(_) => verification_outcome(
+            false,
+            "response_shape_unconfirmed",
+            "response_shape",
+            "服务端已响应并返回 JSON，但本工具尚不能确认模型输出。",
+            Some(status.as_u16()),
+            None,
+        ),
+        Err(_) => verification_outcome(
+            false,
+            "response_unparseable",
+            "response_shape",
+            "服务端已响应，但返回内容无法按 JSON 解析。",
+            Some(status.as_u16()),
+            None,
+        ),
+    };
+    capability_outcome(
+        outcome,
+        "responses",
+        streaming,
+        "verified",
+        retry_count,
+        header_ms,
+        None,
+        total_ms,
+    )
+}
+
+fn probe_non_stream_responses(
+    profile: &StoredProfile,
+    endpoint: &str,
+) -> ProviderVerificationOutcome {
+    let body = json!({
+        "model": profile.model.trim(),
+        "input": "Reply with OK.",
+        "max_output_tokens": 16,
+        "store": false,
+    });
+    match send_capability_request(profile, endpoint, &body) {
+        Ok((response, retries, started, header_ms)) => {
+            parse_non_stream_responses(response, retries, started, header_ms, "unsupported")
+        }
+        Err(outcome) => outcome,
+    }
+}
+
+fn probe_chat_completions(profile: &StoredProfile) -> ProviderVerificationOutcome {
+    let endpoint = match provider_probe_endpoint(&profile.base_url, "chat/completions") {
+        Ok(endpoint) => endpoint,
+        Err(detail) => {
+            return verification_outcome(false, "invalid_profile", "profile", &detail, None, None)
+        }
+    };
+    let body = json!({
+        "model": profile.model.trim(),
+        "messages": [{"role": "user", "content": "Reply with OK."}],
+        "max_tokens": 16,
+        "stream": false,
+    });
+    let (response, retries, started, header_ms) =
+        match send_capability_request(profile, &endpoint, &body) {
+            Ok(result) => result,
+            Err(outcome) => return outcome,
+        };
+    let status = response.status();
+    let headers = response.headers().clone();
+    let text = response.text().unwrap_or_default();
+    let total_ms = started.elapsed().as_millis() as u64;
+    if status.is_success() {
+        let valid = serde_json::from_str::<Value>(&text)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("choices")
+                    .and_then(Value::as_array)
+                    .map(|choices| !choices.is_empty())
+            })
+            .unwrap_or(false);
+        if valid {
+            return capability_outcome(
+                verification_outcome(
+                    false,
+                    "chat_completions_only",
+                    "protocol",
+                    "已识别为普通 Chat Completions 接口，但尚不具备 Codex 所需的 Responses 合同。",
+                    Some(status.as_u16()),
+                    None,
+                ),
+                "chat_completions",
+                "not_tested",
+                "verified",
+                retries,
+                header_ms,
+                None,
+                total_ms,
+            );
+        }
+    }
+    let outcome = enrich_provider_failure_detail(
+        provider_failure_outcome(Some(status.as_u16()), &text),
+        &headers,
+        &text,
+    );
+    capability_outcome(
+        outcome, "unknown", "unknown", "failed", retries, header_ms, None, total_ms,
+    )
+}
+
 pub(crate) fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOutcome {
     if profile.api_key.trim().is_empty() {
         return verification_outcome(
@@ -943,11 +1489,17 @@ pub(crate) fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVer
         );
     }
     if is_isolated_development_fixture(profile) {
-        return inference_outcome(
+        let mut outcome = inference_outcome(
             "standard_responses",
             "服务商已返回可识别的 Responses 输出。",
             200,
         );
+        outcome.capability_profile.streaming = "verified".to_string();
+        outcome.capability_profile.completion = "verified".to_string();
+        outcome.capability_profile.response_header_ms = Some(18);
+        outcome.capability_profile.first_event_ms = Some(24);
+        outcome.capability_profile.total_ms = Some(31);
+        return outcome;
     }
     let endpoint = match provider_probe_endpoint(&profile.base_url, "responses") {
         Ok(endpoint) => endpoint,
@@ -956,87 +1508,75 @@ pub(crate) fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVer
         }
     };
 
-    let client = match configure_http_client(
-        reqwest::blocking::Client::builder()
-            .timeout(PROVIDER_PROBE_TIMEOUT)
-            .http1_only(),
-    )
-    .build()
-    {
-        Ok(client) => client,
-        Err(err) => {
-            return verification_outcome(
-                false,
-                "transport_error",
-                "transport",
-                &format!("创建验证连接失败：{err}"),
-                None,
-                None,
-            );
-        }
-    };
-    let request = client
-        .post(endpoint)
-        .bearer_auth(profile.api_key.trim())
-        .json(&json!({
-            "model": profile.model.trim(),
-            "input": "Reply with OK.",
-            "max_output_tokens": 16,
-            "store": false,
-        }));
-    let response = match request.send() {
-        Ok(response) => response,
-        Err(err) => return transport_failure_outcome(&err, &profile.base_url),
-    };
-
+    let body = json!({
+        "model": profile.model.trim(),
+        "input": "Reply with OK.",
+        "max_output_tokens": 16,
+        "store": false,
+        "stream": true,
+    });
+    let (response, retries, started, header_ms) =
+        match send_capability_request(profile, &endpoint, &body) {
+            Ok(result) => result,
+            Err(mut outcome) => {
+                outcome.detail.push_str(modelflare_permission_hint(profile));
+                return outcome;
+            }
+        };
     let status = response.status();
     let response_headers = response.headers().clone();
+    let content_type = response_headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if status.is_success() && content_type.contains("text/event-stream") {
+        return parse_responses_event_stream(response, retries, started, header_ms);
+    }
     if status.is_success() {
-        return match response.json::<Value>() {
-            Ok(body) if has_provider_error(&body) => {
-                enrich_provider_failure_detail(
-                    provider_failure_outcome(Some(status.as_u16()), &body.to_string()),
-                    &response_headers,
-                    &body.to_string(),
-                )
-            }
-            Ok(body) if body.get("id").is_some() => inference_outcome(
-                "standard_responses",
-                "可用性测试已通过：当前模型返回了标准 Responses 结果。本次检查不会写入 Codex 配置。",
-                status.as_u16(),
-            ),
-            Ok(body) if has_compatible_response_output(&body) => inference_outcome(
-                "compatible_response",
-                "可用性测试已通过：当前模型返回了可识别的兼容响应。标准 Responses 形状尚未完全确认。",
-                status.as_u16(),
-            ),
-            Ok(_) => verification_outcome(
-                false,
-                "response_shape_unconfirmed",
-                "response_shape",
-                "服务端已响应并返回 JSON，但本工具尚不能从中确认模型输出；这不代表服务商不能被 Codex 使用。",
-                Some(status.as_u16()),
-                None,
-            ),
-            Err(_) => verification_outcome(
-                false,
-                "response_unparseable",
-                "response_shape",
-                "服务端已响应，但返回内容无法按 JSON 解析；本工具无法确认模型输出。",
-                Some(status.as_u16()),
-                None,
-            ),
-        };
+        return parse_non_stream_responses(response, retries, started, header_ms, "not_streamed");
     }
 
     let error_body = response.text().unwrap_or_default();
-    let mut outcome = enrich_provider_failure_detail(
+    let mut original = enrich_provider_failure_detail(
         provider_failure_outcome(Some(status.as_u16()), &error_body),
         &response_headers,
         &error_body,
     );
-    outcome.detail.push_str(modelflare_permission_hint(profile));
-    outcome
+    original = capability_outcome(
+        original,
+        "responses",
+        "failed",
+        "failed",
+        retries,
+        header_ms,
+        None,
+        started.elapsed().as_millis() as u64,
+    );
+    original
+        .detail
+        .push_str(modelflare_permission_hint(profile));
+
+    if original.status == "request_incompatible" {
+        return probe_non_stream_responses(profile, &endpoint);
+    }
+    let lower = error_body.to_ascii_lowercase();
+    let mentions_model = [
+        "model_not_found",
+        "model not found",
+        "model unavailable",
+        "不存在此模型",
+        "模型不存在",
+    ]
+    .iter()
+    .any(|signal| lower.contains(signal));
+    if matches!(status.as_u16(), 404 | 405) && !mentions_model {
+        let chat = probe_chat_completions(profile);
+        if chat.status == "chat_completions_only" {
+            return chat;
+        }
+    }
+    original
 }
 
 fn enrich_provider_failure_detail(

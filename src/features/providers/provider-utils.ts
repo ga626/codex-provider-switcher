@@ -2,6 +2,38 @@ import type { EditableProfile, ModelCatalog, ProviderProfile, ValidationCheck } 
 import { providerModelLabel } from './model-utils'
 import { verificationPresentation } from './verification-copy'
 
+export type ProviderConnectionKind = 'chatgpt-account' | 'official-api' | 'relay'
+
+const officialApiHosts = [
+  'api.deepseek.com',
+  'api.openai.com',
+  'api.xiaomimimo.com',
+  'generativelanguage.googleapis.com',
+  'api.x.ai',
+]
+
+export function providerEndpointHostname(baseUrl: string) {
+  try {
+    return new URL(baseUrl).hostname.toLocaleLowerCase().replace(/\.$/, '')
+  } catch {
+    return ''
+  }
+}
+
+export function providerConnectionKind(profile: Pick<ProviderProfile, 'id' | 'name' | 'baseUrl'>): ProviderConnectionKind {
+  const identity = `${profile.id} ${profile.name}`.toLocaleLowerCase()
+  const hostname = providerEndpointHostname(profile.baseUrl)
+  let pathname = ''
+  try {
+    pathname = new URL(profile.baseUrl).pathname.toLocaleLowerCase()
+  } catch {
+    // Invalid or incomplete draft URLs remain relays until the form validates them.
+  }
+  if (identity.includes('chatgpt') || identity.includes('oauth') || pathname.includes('/backend-api/codex')) return 'chatgpt-account'
+  if (officialApiHosts.includes(hostname)) return 'official-api'
+  return 'relay'
+}
+
 export function profileConfigurationChecks(
   profile: ProviderProfile | undefined,
   draft: EditableProfile,

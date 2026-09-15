@@ -17,6 +17,13 @@ pub enum SwitcherError {
     Message(String),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatGptLoginStatus {
+    pub state: String,
+    pub detail: String,
+}
+
 /// Versioned lifecycle payload for long-running operations.
 ///
 /// The desktop and local-web adapters may transport this value independently
@@ -177,6 +184,28 @@ pub struct ProviderProfile {
     pub last_verification_stage: Option<String>,
     pub last_verification_http_status: Option<u16>,
     pub last_verification_provider_code: Option<String>,
+    pub capability_profile: Option<ProviderCapabilityProfile>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderCapabilityProfile {
+    #[serde(default)]
+    pub probe_version: String,
+    #[serde(default)]
+    pub protocol: String,
+    #[serde(default)]
+    pub streaming: String,
+    #[serde(default)]
+    pub completion: String,
+    #[serde(default)]
+    pub transport_retry_count: u8,
+    #[serde(default)]
+    pub response_header_ms: Option<u64>,
+    #[serde(default)]
+    pub first_event_ms: Option<u64>,
+    #[serde(default)]
+    pub total_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -486,6 +515,7 @@ pub struct SwitchPreflight {
     pub availability_stage: Option<String>,
     pub availability_http_status: Option<u16>,
     pub availability_provider_code: Option<String>,
+    pub capability_profile: Option<ProviderCapabilityProfile>,
     pub risk_detail: Option<String>,
     pub expires_at: String,
 }
@@ -659,6 +689,8 @@ pub struct StoredProfile {
     pub(crate) last_verification_http_status: Option<u16>,
     #[serde(default)]
     pub(crate) last_verification_provider_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) capability_profile: Option<ProviderCapabilityProfile>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -688,6 +720,7 @@ pub struct ProviderVerificationOutcome {
     pub(crate) http_status: Option<u16>,
     pub(crate) provider_code: Option<String>,
     pub(crate) response_shape: Option<String>,
+    pub(crate) capability_profile: ProviderCapabilityProfile,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

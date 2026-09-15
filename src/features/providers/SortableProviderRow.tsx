@@ -1,11 +1,13 @@
-import { GripVertical, Server, Star } from 'lucide-react'
+import { Building2, GripVertical, LogIn, Server, Star } from 'lucide-react'
 import { CSS } from '@dnd-kit/utilities'
 import { useSortable } from '@dnd-kit/sortable'
 import type { ProviderProfile } from '../../types'
 import { providerModelLabel } from './model-utils'
+import type { ProviderConnectionKind } from './provider-utils'
 
 export function SortableProviderRow({
   profile,
+  kind,
   index,
   selected,
   disabled,
@@ -13,6 +15,7 @@ export function SortableProviderRow({
   onMove,
 }: {
   profile: ProviderProfile
+  kind: ProviderConnectionKind
   index: number
   selected: boolean
   disabled: boolean
@@ -27,13 +30,14 @@ export function SortableProviderRow({
     transform: CSS.Transform.toString(transform),
     transition,
   }
+  const KindIcon = kind === 'chatgpt-account' ? LogIn : kind === 'official-api' ? Building2 : Server
 
   return (
     <div
       ref={setNodeRef}
       style={style}
       data-provider-id={profile.id}
-      className={`provider-row ${selected ? 'selected' : ''} ${profile.active ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isOver ? 'drag-over' : ''}`}
+      className={`provider-row ${kind} ${selected ? 'selected' : ''} ${profile.active ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isOver ? 'drag-over' : ''}`}
       role="option"
       aria-selected={selected}
       tabIndex={disabled ? -1 : 0}
@@ -63,7 +67,7 @@ export function SortableProviderRow({
       >
         <GripVertical size={15} aria-hidden="true" />
       </button>
-      <span className="provider-symbol" aria-hidden="true"><Server size={16} /></span>
+      <span className="provider-symbol" aria-hidden="true"><KindIcon size={16} /></span>
       <span className="provider-row-main">
         <strong>
           {profile.name}

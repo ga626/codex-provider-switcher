@@ -15,21 +15,28 @@ import type { AppState, ValidationCheck } from '../../types'
 export type FirstRunPhase = 'consent' | 'preparing' | 'review' | 'ready' | 'failed'
 
 const FIRST_RUN_FEED = [
-  { title: '读取配置位置', detail: '确认当前电脑上要管理的 Codex 配置层' },
-  { title: '检查配置文件', detail: '确认配置文件可以读取，避免覆盖未知内容' },
-  { title: '检查文件格式', detail: '确认现有配置可以安全读取' },
-  { title: '确认使用的模型', detail: '确认 Codex 知道该使用哪个模型' },
-  { title: '确认服务商信息', detail: '检查已有服务商记录能被安全识别' },
-  { title: '确认连接方式', detail: '确认服务商能按 Codex 的方式接收请求' },
-  { title: '检查认证方式', detail: '确认不会覆盖密钥或其他登录信息' },
-  { title: '创建恢复点', detail: '先保存原始配置，出现问题可以完整撤回' },
-  { title: '写入连接设置', detail: '只补齐 Signalman 管理范围内的连接字段' },
-  { title: '回读写入结果', detail: '重新读取刚刚写入的内容，确认没有写坏' },
-  { title: '复核保护范围', detail: '确认项目、MCP、插件和历史记录没有被改动' },
-  { title: '生成检查摘要', detail: '整理成你接下来可以查看的结果清单' },
+  { title: '定位 Codex 配置', detail: '找到当前电脑实际使用的配置位置' },
+  { title: '确认配置归属', detail: '确认这次只处理你选择的配置层' },
+  { title: '读取配置文件', detail: '安全读取现有内容，不提前写入任何设置' },
+  { title: '检查文件格式', detail: '确认现有配置能够被完整理解' },
+  { title: '盘点已有设置', detail: '识别项目、功能和桌面端等现有设置' },
+  { title: '确认默认模型', detail: '检查 Codex 当前使用的模型记录' },
+  { title: '识别服务商记录', detail: '整理已经存在的服务商连接信息' },
+  { title: '核对接口格式', detail: '确认请求地址符合 Codex 的连接方式' },
+  { title: '核对认证字段', detail: '识别密钥或登录方式，不读取账号内容' },
+  { title: '标记保护范围', detail: '锁定项目、MCP、插件、钩子和历史设置' },
+  { title: '创建恢复点', detail: '先保存原始配置，遇到问题可以完整撤回' },
+  { title: '准备连接字段', detail: '只整理 Signalman 负责管理的连接项目' },
+  { title: '写入连接设置', detail: '把确认后的连接字段安全写入配置' },
+  { title: '回读写入结果', detail: '重新读取刚写入的内容，确认可以正常使用' },
+  { title: '对比前后差异', detail: '确认变化只发生在允许管理的范围内' },
+  { title: '复核保护内容', detail: '确认项目、插件和历史记录保持原样' },
+  { title: '生成检查摘要', detail: '整理结果和下一步，准备交给你确认' },
 ] as const
 
 export const FIRST_RUN_STEP_COUNT = FIRST_RUN_FEED.length
+// Keep the flow readable without making a short local check feel stalled.
+export const FIRST_RUN_STEP_INTERVAL_MS = 680
 
 function getCheckVisual(check: { ok: boolean; severity: 'required' | 'warning' | 'info' }) {
   if (check.ok) return { icon: <CheckCircle2 size={16} />, className: 'ok' }
@@ -65,9 +72,10 @@ export function FirstRunShell({
   const [consented, setConsented] = useState(false)
   const [layerId, setLayerId] = useState(environment.selectedLayerId ?? environment.layers[0]?.id ?? '')
   const selectedLayer = environment.layers.find((layer) => layer.id === layerId)
-  const progress = phase === 'ready' || phase === 'review' ? 100 : phase === 'preparing' ? Math.min(96, Math.max(4, Math.round((activeStep / FIRST_RUN_FEED.length) * 100))) : 0
+  const activePreparationIndex = Math.min(activeStep, FIRST_RUN_FEED.length - 1)
+  const progress = phase === 'ready' || phase === 'review' ? 100 : phase === 'preparing' ? Math.min(96, Math.max(4, Math.round(((activePreparationIndex + 1) / FIRST_RUN_FEED.length) * 100))) : 0
   const showSetup = phase === 'consent' || phase === 'failed'
-  const activePreparation = FIRST_RUN_FEED[Math.min(activeStep, FIRST_RUN_FEED.length - 1)]
+  const activePreparation = FIRST_RUN_FEED[activePreparationIndex]
   const preparationListRef = useRef<HTMLDivElement>(null)
   // A provider model and endpoint do not exist until the user adds a provider.
   // Keep them in the normal workspace audit, but do not misrepresent them as
@@ -79,9 +87,18 @@ export function FirstRunShell({
   useEffect(() => {
     if (phase !== 'preparing') return
     const list = preparationListRef.current
-    const activeRow = list?.children.item(Math.min(activeStep, FIRST_RUN_FEED.length - 1))
-    if (activeRow instanceof HTMLElement) activeRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  }, [activeStep, phase])
+    const activeRow = list?.children.item(activePreparationIndex)
+    if (!(list && activeRow instanceof HTMLElement)) return
+    // Start at the top, append new checks downward, then scroll only after the
+    // viewport fills. Reserve one complete row for the next check so the
+    // current item is never clipped at the bottom edge.
+    const nextRowSpace = activePreparationIndex < FIRST_RUN_FEED.length - 1 ? 64 : 0
+    const top = activeRow.offsetTop - list.offsetTop - (list.clientHeight - activeRow.offsetHeight - nextRowSpace)
+    list.scrollTo({
+      top: Math.max(0, top),
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    })
+  }, [activePreparationIndex, phase])
 
   useEffect(() => {
     if (!layerId && environment.layers[0]) setLayerId(environment.layers[0].id)
@@ -117,16 +134,16 @@ export function FirstRunShell({
             <div className="first-run-progress-icon"><RefreshCcw className="spin" size={20} /></div>
             <div className="first-run-heading"><span className="first-run-kicker">正在准备</span><h1>把连接环境整理好</h1><p>Signalman 正在逐项检查并保存结果，请稍等片刻。</p></div>
           </div>
-          <div className="first-run-progress-meta"><span>准备进度</span><strong>{progress}%</strong></div>
-          <div className="first-run-progress-track" role="progressbar" aria-label="准备连接环境进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span style={{ width: `${progress}%` }} /></div>
-          <div ref={preparationListRef} className="first-run-step-list" aria-label="准备过程">
-            {FIRST_RUN_FEED.map((step, index) => <div className={`first-run-step ${index < activeStep ? 'done' : index === activeStep ? 'active' : ''}`} key={step.title}>
-              <span className="first-run-step-marker">{index < activeStep ? <CheckCircle2 size={15} /> : index === activeStep ? <RefreshCcw className="spin" size={15} /> : <span className="first-run-step-dot" />}</span>
+          <div className="first-run-progress-meta"><span>正在检查第 {activePreparationIndex + 1} / {FIRST_RUN_FEED.length} 项</span><strong>{progress}%</strong></div>
+          <div className="first-run-progress-track" role="progressbar" aria-label="准备连接环境进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span style={{ transform: `scaleX(${progress / 100})` }} /></div>
+          <div ref={preparationListRef} className="first-run-step-list" aria-label="准备过程" role="list">
+            {FIRST_RUN_FEED.slice(0, activePreparationIndex + 2).map((step, index) => <div className={`first-run-step ${index < activePreparationIndex ? 'done' : index === activePreparationIndex ? 'active' : ''}`} aria-current={index === activePreparationIndex ? 'step' : undefined} role="listitem" key={step.title}>
+              <span className="first-run-step-marker">{index < activePreparationIndex ? <CheckCircle2 size={16} /> : index === activePreparationIndex ? <RefreshCcw className="spin" size={16} /> : <span className="first-run-step-dot" />}</span>
               <span className="first-run-step-copy"><strong>{step.title}</strong><small>{step.detail}</small></span>
-              <span className="first-run-step-state">{index < activeStep ? '已完成' : index === activeStep ? '进行中' : '等待'}</span>
+              <span className="first-run-step-state">{index < activePreparationIndex ? '完成' : index === activePreparationIndex ? '检查中' : '等待'}</span>
             </div>)}
           </div>
-          <p className="first-run-live-line" aria-live="polite"><span className="first-run-live-dot" />{activePreparation.detail}</p>
+          <p className="first-run-live-line" aria-live="polite"><span className="first-run-live-dot" /><span><strong>当前检查</strong>{activePreparation.title} · {activePreparation.detail}</span></p>
           <p className="first-run-safety-note">不会上传配置或密钥。遇到问题会恢复原文件。</p>
         </div>}
         {phase === 'review' && <div className="first-run-review">
