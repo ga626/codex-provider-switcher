@@ -6,8 +6,8 @@ fn main() {
     if action.as_deref() == Some("--qa-emergency-restore") {
         match codex_switcher_tauri_lib::qa_emergency_restore() {
             Ok(()) => return,
-            Err(error) => {
-                eprintln!("{error}");
+            Err(_error) => {
+                eprintln!("紧急恢复未完成，请在 Signalman 中查看诊断信息。");
                 std::process::exit(1);
             }
         }
@@ -15,8 +15,8 @@ fn main() {
     if action.as_deref() == Some("--run-protocol-gateway") {
         match codex_switcher_tauri_lib::run_protocol_gateway() {
             Ok(()) => return,
-            Err(error) => {
-                eprintln!("{error}");
+            Err(_error) => {
+                eprintln!("协议网关启动失败，请在 Signalman 中查看诊断信息。");
                 std::process::exit(1);
             }
         }
