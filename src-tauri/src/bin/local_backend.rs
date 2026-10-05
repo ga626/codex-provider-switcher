@@ -1,10 +1,11 @@
 use codex_switcher_tauri_lib::{
     check_for_update_core, complete_onboarding_core, create_manual_backup_core,
     delete_cost_calibration_core, delete_profile_core, load_state_core,
-    prepare_connection_environment_core_with_onboarding, prepare_switch_core, preview_models_core,
+    initialize_with_progress, prepare_connection_environment_core_with_onboarding, prepare_switch_core, preview_models_core,
     refresh_models_core, reorder_profiles_core, restore_backup_core, restore_latest_backup_core,
-    reveal_profile_api_key_core, run_response_probe_for_model_core, save_cost_calibration_core,
-    save_profile_core, set_backup_policy_core, set_default_profile_core, switch_profile_core,
+    reveal_profile_api_key_core, run_response_probe_for_model_core,
+    save_codex_model_selection_core, save_cost_calibration_core, save_profile_core,
+    set_backup_policy_core, set_default_profile_core, switch_profile_core,
     sync_current_configuration_core, toggle_auto_start_core, verify_profile_core, AppState,
     CostCalibrationInput, EditableProfile, SwitcherError,
 };
@@ -324,8 +325,24 @@ fn handle_api(
     path: &str,
     body: &[u8],
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if method == "POST" && path == "/api/config/initialize-stream" {
+        let request = request_json(body)?;
+        let onboarding = request.get("onboarding").and_then(Value::as_bool).unwrap_or(true);
+        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n")?;
+        let mut report = initialize_with_progress(onboarding, &mut |step| {
+            if let Ok(mut bytes) = serde_json::to_vec(&json!({"step":step})) {
+                bytes.push(b'\n');
+                let _ = stream.write_all(&bytes);
+                let _ = stream.flush();
+            }
+        });
+        if let Some(state) = report.state.as_mut() { state.runtime_mode = "local_web_backend".into(); }
+        serde_json::to_writer(&mut *stream, &json!({"report":report}))?;
+        stream.write_all(b"\n")?;
+        return Ok(());
+    }
     let result = match (method, path.split('?').next().unwrap_or(path)) {
-        ("GET", "/api/health") => Ok(json!({ "ok": true, "runtimeMode": "local_web_backend" })),
+        ("GET", "/api/health") => Ok(json!({ "ok": true, "runtimeMode": "local_web_backend", "pid": std::process::id() })),
         ("GET", "/api/state") => load_state_core().map(state_json),
         ("GET", "/api/update/check") => check_for_update_core()
             .and_then(|value| serde_json::to_value(value).map_err(SwitcherError::from)),
@@ -408,6 +425,28 @@ fn handle_api(
             delete_cost_calibration_core(calibration_id).map(state_json)
         }
         ("POST", "/api/models/refresh") => refresh_models_core(profile_id(body)?).map(state_json),
+        ("POST", "/api/models/codex-selection") => {
+            let request = request_json(body)?;
+            let profile_id = request
+                .get("profileId")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let model_id = request
+                .get("modelId")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let enabled = request
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if profile_id.trim().is_empty() || model_id.trim().is_empty() {
+                Err(SwitcherError::Message("缺少服务商或模型标识。".into()))
+            } else {
+                save_codex_model_selection_core(profile_id, model_id, enabled).map(state_json)
+            }
+        }
         ("POST", "/api/models/preview") => {
             let profile = request_json(body)?
                 .get("profile")

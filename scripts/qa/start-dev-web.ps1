@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "start-scheduled-process.ps1")
 
 $runtime = & (Join-Path $PSScriptRoot "prepare-dev-runtime.ps1") -Reset:$Reset
 $projectRoot = $runtime.ProjectRoot
@@ -77,18 +78,57 @@ try {
     $out = Join-Path $webRuntime "backend.out.log"
     $err = Join-Path $webRuntime "backend.err.log"
     Remove-Item -LiteralPath $out, $err -Force -ErrorAction SilentlyContinue
-    $process = Start-Process -FilePath $backendExecutable -ArgumentList @("--host", "127.0.0.1", "--port", "$port") -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
-    Start-Sleep -Seconds 1
-    $health = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/health" -TimeoutSec 5
-    $state = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/state" -TimeoutSec 5
+    $launch = Start-SignalmanScheduledProcess -FilePath $backendExecutable -ArgumentList @("--host", "127.0.0.1", "--port", "$port") -WorkingDirectory $projectRoot -Environment @{
+        CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = "development"
+        CODEX_PROVIDER_SWITCHER_BUILD_SHA = (git rev-parse --short=8 HEAD).Trim()
+        CODEX_PROVIDER_SWITCHER_APP_DATA_DIR = $runtime.AppDataDir
+        CODEX_PROVIDER_SWITCHER_CODEX_HOME = $runtime.CodexHome
+        CODEX_PROVIDER_SWITCHER_DIST_DIR = $distDir
+    } -StdoutPath $out -StderrPath $err
+    $processId = $null
+    $process = $null
+    $processDeadline = (Get-Date).AddSeconds(10)
+    do {
+        Start-Sleep -Milliseconds 250
+        $process = @(Get-CimInstance Win32_Process -Filter "Name='local_backend.exe'" | Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -eq [System.IO.Path]::GetFullPath($backendExecutable)) } | Select-Object -First 1)
+        if ($process.Count -gt 0) { $processId = [int]$process[0].ProcessId }
+    } while ($null -eq $processId -and (Get-Date) -lt $processDeadline)
+    if ($null -eq $processId) { throw "Scheduled isolated web preview backend did not start." }
+    $health = $null
+    $state = $null
+    $ready = $false
+    $deadline = (Get-Date).AddSeconds(20)
+    do {
+        Start-Sleep -Milliseconds 250
+        $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+        if ($null -eq $process) {
+            $backendError = if (Test-Path -LiteralPath $err) { Get-Content -LiteralPath $err -Raw -Encoding UTF8 } else { "(no backend stderr log)" }
+            throw "Isolated web preview backend exited during startup: $backendError"
+        }
+        try {
+            $health = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/health" -TimeoutSec 2
+            $state = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/state" -TimeoutSec 2
+            if ($health.ok -and $state.runtimeMode -eq "local_web_backend") {
+                $ready = $true
+            }
+        } catch {
+            # The backend may still be binding its socket; keep polling until the deadline.
+        }
+    } while (-not $ready -and (Get-Date) -lt $deadline)
+    if (-not $ready) {
+        $backendError = if (Test-Path -LiteralPath $err) { Get-Content -LiteralPath $err -Raw -Encoding UTF8 } else { "(no backend stderr log)" }
+        throw "Isolated web preview did not become healthy within 20 seconds: $backendError"
+    }
     if (-not $health.ok -or $state.runtimeMode -ne "local_web_backend") {
         throw "Isolated web preview did not return the expected shared backend state."
     }
     [pscustomobject]@{
-        pid = $process.Id
+        pid = $processId
         port = $port
         url = "http://127.0.0.1:$port/"
         sharedRuntime = $runtime.RuntimeRoot
+        backendExecutable = [System.IO.Path]::GetFullPath($backendExecutable)
+        buildSha = (git rev-parse --short=8 HEAD).Trim()
         startedAt = (Get-Date).ToString("s")
     } | ConvertTo-Json | Set-Content -LiteralPath $stateFile -Encoding UTF8
     if (-not $NoOpen) {

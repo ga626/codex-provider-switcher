@@ -1,7 +1,27 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use thiserror::Error;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InitializationStep {
+    pub index: usize,
+    pub id: String,
+    pub label: String,
+    pub status: String,
+    pub detail: String,
+    pub action: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InitializationReport {
+    pub steps: Vec<InitializationStep>,
+    pub state: Option<AppState>,
+    pub can_continue: bool,
+}
 
 #[derive(Debug, Error)]
 pub enum SwitcherError {
@@ -22,6 +42,14 @@ pub enum SwitcherError {
 pub struct ChatGptLoginStatus {
     pub state: String,
     pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked_at: Option<String>,
 }
 
 /// Versioned lifecycle payload for long-running operations.
@@ -166,9 +194,13 @@ impl serde::Serialize for SwitcherError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderProfile {
+    #[serde(default)]
+    pub connection_kind: Option<String>,
     pub id: String,
     pub name: String,
     pub base_url: String,
+    #[serde(default = "default_endpoint_mode")]
+    pub endpoint_mode: String,
     pub model: String,
     pub reasoning_effort: String,
     pub note: String,
@@ -222,6 +254,8 @@ pub struct ProviderModel {
     pub last_verification_status: Option<String>,
     #[serde(default)]
     pub last_verification_detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,9 +282,13 @@ pub struct ModelCatalog {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditableProfile {
+    #[serde(default)]
+    pub connection_kind: Option<String>,
     pub id: String,
     pub name: String,
     pub base_url: String,
+    #[serde(default = "default_endpoint_mode")]
+    pub endpoint_mode: String,
     pub model: String,
     pub note: String,
     pub api_key: String,
@@ -333,6 +371,8 @@ pub struct CostCalibration {
     pub paid_cny: String,
     pub consumable_credit: String,
     pub debit_credit: String,
+    #[serde(default = "default_debit_confirmed")]
+    pub debit_confirmed: bool,
     pub credit_unit_label: String,
     pub model: String,
     pub probe_version: String,
@@ -360,6 +400,8 @@ pub struct CostCalibrationInput {
     pub paid_cny: String,
     pub consumable_credit: String,
     pub debit_credit: String,
+    #[serde(default = "default_debit_confirmed")]
+    pub debit_confirmed: bool,
     pub credit_unit_label: String,
     pub model: String,
     pub probe_version: String,
@@ -393,6 +435,20 @@ pub struct ResponseProbeObservation {
     #[serde(default)]
     pub cost_source: Option<String>,
     pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderStability {
+    pub provider_id: String,
+    pub provider_name: String,
+    pub sample_count: u32,
+    pub success_count: u32,
+    pub failed_count: u32,
+    pub timeout_count: u32,
+    pub total_tokens: u64,
+    pub last_observed_at: Option<String>,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -471,6 +527,20 @@ pub struct PendingConfigTransaction {
     pub(crate) phase: String,
     #[serde(default)]
     pub(crate) before_fingerprint: String,
+    #[serde(default)]
+    pub(crate) fingerprint_version: u8,
+    /// The process that owns an in-progress write. Readers must not mistake a
+    /// live writer for a previous crash and roll its transaction back.
+    #[serde(default)]
+    pub(crate) writer_pid: u32,
+    #[serde(default)]
+    pub(crate) config_path: Option<PathBuf>,
+    #[serde(default)]
+    pub(crate) auth_path: Option<PathBuf>,
+    #[serde(default)]
+    pub(crate) previous_environment: Option<StoredConnectionEnvironment>,
+    #[serde(default)]
+    pub(crate) candidate_fingerprint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -566,6 +636,8 @@ pub struct AppState {
     pub activity: Vec<ActivityItem>,
     pub cost_calibrations: Vec<CostCalibration>,
     pub response_probes: Vec<ResponseProbeObservation>,
+    #[serde(default)]
+    pub provider_stability: Vec<ProviderStability>,
     pub backups: Vec<BackupItem>,
     pub configuration_protection: ConfigurationProtection,
     pub connection_environment: ConnectionEnvironment,
@@ -598,6 +670,12 @@ pub struct StoredConnectionEnvironment {
     pub(crate) setup_completed: bool,
     #[serde(default)]
     pub(crate) onboarding_completed: bool,
+    /// Version of the one-time Signalman connection takeover that has run.
+    /// Older records deserialize as zero and are intentionally re-initialized.
+    #[serde(default)]
+    pub(crate) takeover_version: u32,
+    #[serde(default)]
+    pub(crate) takeover_backup_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -653,8 +731,12 @@ pub struct ConfigurationDrift {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredProfile {
+    #[serde(default)]
+    pub connection_kind: Option<String>,
     pub(crate) name: String,
     pub(crate) base_url: String,
+    #[serde(default = "default_endpoint_mode")]
+    pub(crate) endpoint_mode: String,
     #[serde(default)]
     pub(crate) api_key: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -727,6 +809,9 @@ pub struct ProviderVerificationOutcome {
 pub struct StoredCatalog {
     #[serde(default = "default_version")]
     pub(crate) version: String,
+    /// Monotonic on-disk revision used to reject stale read-modify-write saves.
+    #[serde(default)]
+    pub(crate) catalog_revision: u64,
     pub(crate) profiles: Map<String, Value>,
     #[serde(default)]
     pub(crate) model_catalogs: Map<String, Value>,
@@ -760,12 +845,23 @@ pub fn default_auth_mode() -> String {
     "bearer_profile_key".to_string()
 }
 
+pub fn default_endpoint_mode() -> String {
+    "auto".to_string()
+}
+
 pub fn default_transaction_phase() -> String {
     "prepared".to_string()
 }
 
 pub fn default_sample_kind() -> String {
     "cold".to_string()
+}
+
+pub fn default_debit_confirmed() -> bool {
+    // Records written before the explicit confirmation field existed were
+    // already saved through the old manual-cost flow. Keep them visible; new
+    // records must still pass the command-level confirmation gate.
+    true
 }
 
 pub(crate) fn check(

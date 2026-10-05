@@ -128,8 +128,10 @@ pub(crate) fn merge_legacy_profile_document(
 
         let profile_id = unique_profile_id(catalog, &legacy_id);
         let profile = StoredProfile {
+            connection_kind: None,
             name: legacy.name.trim().to_string(),
             base_url: legacy.base_url.trim().to_string(),
+            endpoint_mode: default_endpoint_mode(),
             api_key: legacy.api_key.trim().to_string(),
             api_key_protected: String::new(),
             model: legacy.model.trim().to_string(),
@@ -185,7 +187,7 @@ pub fn import_legacy_profile_document_core(document: String) -> Result<AppState,
     }
 
     backup_catalog_before_legacy_import()?;
-    save_catalog(&catalog)?;
+    save_catalog(&mut catalog)?;
     app_state_with_activity(
         "已恢复旧版服务商凭据",
         &format!(

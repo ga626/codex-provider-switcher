@@ -34,20 +34,19 @@ function updateProgressLabel(progress: UpdateInstallProgress | null) {
 export function RestartCodexNoticeDialog({ onClose }: { onClose: () => void }) {
   return <ModalDialog className="restart-notice-dialog" labelledBy="restart-notice-title" onClose={onClose}>
     <div className="confirm-dialog-icon"><RotateCcw size={20} /></div>
-    <div><span className="eyebrow">切换已完成</span><h2 id="restart-notice-title">请在新对话中确认</h2><p>新配置已经写入并创建了恢复点。已打开的 Codex 或 ChatGPT 桌面端 Codex 对话会保留创建时的连接信息，不能被安全热切换。请结束当前对话后新建一个 Codex 对话，再确认实际服务商。</p></div>
+    <div><span className="eyebrow">切换配置已写入</span><h2 id="restart-notice-title">重启 Codex 后回到原对话确认</h2><p>请先重启 Codex，再回到你原来使用的对话。旧对话是否跟着切换，取决于它保存的连接名称是否映射到本软件刚更新的连接。若重启后仍走旧地址，说明它还指向另一段旧配置；“切换成功”只证明配置文件写入和回读通过，不代表这条对话的实际请求已换路由。</p></div>
     <div className="command-row"><button className="primary-button" type="button" onClick={onClose} data-dialog-initial-focus>我知道了</button></div>
   </ModalDialog>
 }
 
 export function ConnectionEnvironmentDialog({ environment, busy, onClose, onConfirm }: { environment: AppState['connectionEnvironment']; busy: boolean; onClose: () => void; onConfirm: (layerId: string) => void }) {
-  const [layerId, setLayerId] = useState(environment.selectedLayerId ?? environment.layers[0]?.id ?? '')
-  const selectedLayer = environment.layers.find((layer) => layer.id === layerId)
+  const layerId = 'user-config'
+  const selectedLayer = environment.layers.find((layer) => layer.id === layerId) ?? environment.layers[0]
   return <ModalDialog className="connection-environment-dialog" labelledBy="connection-environment-title" onClose={onClose}>
     <div className="section-heading-row"><div><span className="eyebrow">开始使用</span><h2 id="connection-environment-title">准备连接环境</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="关闭准备连接环境"><X size={16} /></button></div>
-    <p>此操作会先创建恢复点，再确认 Signalman 写入的位置安全可控。此时不会创建没有地址、模型或密钥的空服务商；你保存并切换第一家服务商后才会一次性写入完整连接信息。项目、MCP、插件、hooks、历史记录和其他未知设置保持不变。</p>
-    {environment.layers.length > 1 && <label className="environment-layer-select">要管理的配置层<select value={layerId} onChange={(event) => setLayerId(event.target.value)}>{environment.layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.label}</option>)}</select></label>}
-    {selectedLayer && <div className="environment-preview"><strong>本次选择：{selectedLayer.label}</strong><span>{selectedLayer.detail}</span><ul><li>会确认后续配置与认证写入同一 Codex 目录</li><li>不会提前选择空的 custom 服务商</li><li>切换时会创建可恢复的备份并在写入后回读</li></ul></div>}
-    <div className="command-row"><button className="ghost-button" type="button" onClick={onClose} disabled={busy}>取消</button><button className="primary-button" type="button" disabled={!layerId || busy} onClick={() => onConfirm(layerId)} data-dialog-initial-focus><ShieldCheck size={16} />一键准备连接环境</button></div>
+    <p>此操作会先备份旧的 config.toml 和 auth.json，再清理官方账号、中转站和旧 custom 身份的冲突，固定使用 Signalman 的 custom 身份。项目、MCP、hooks、聊天历史和其他未知设置保持不变。</p>
+    {selectedLayer && <div className="environment-preview"><strong>固定接管：{selectedLayer.label}</strong><span>{selectedLayer.detail}</span><ul><li>先验证备份，再写入并回读；损坏旧备份会保留并创建新恢复点</li><li>已有 Signalman 连接会保留；未知旧身份和模型目录指针会清理</li><li>模型目录异常不阻止基本使用，可稍后刷新；不会自动重启 Codex</li></ul></div>}
+    <div className="command-row"><button className="ghost-button" type="button" onClick={onClose} disabled={busy}>取消</button><button className="primary-button" type="button" disabled={busy} onClick={() => onConfirm(layerId)} data-dialog-initial-focus><ShieldCheck size={16} />重新初始化 Signalman</button></div>
   </ModalDialog>
 }
 
@@ -128,8 +127,8 @@ export function ApplicationSettingsDialog({ autoStart, backupPolicy, desktopAvai
 export function RestoreConfirmDialog({ backup, busy, onCancel, onConfirm }: { backup: BackupItem; busy: boolean; onCancel: () => void; onConfirm: (confirmation: string) => void }) {
   const [confirmation, setConfirmation] = useState('')
   return <ModalDialog labelledBy="restore-dialog-title" onClose={onCancel}>
-    <div className="confirm-dialog-icon"><AlertTriangle size={20} /></div><div><span className="eyebrow">安全恢复 · {backup.time}</span><h2 id="restore-dialog-title">确认回到这个恢复点？</h2><p>将只回退本工具写入的服务商、模型、接口地址和本机登录信息。MCP、插件、项目设置和你后来新增的内容不会被覆盖。</p><label className="restore-confirmation-field">输入“恢复”后启用确认按钮<input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="恢复" data-dialog-initial-focus /></label></div>
-    <div className="command-row"><button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button><button className="danger-button" type="button" onClick={() => onConfirm(confirmation)} disabled={busy || confirmation.trim() !== '恢复'}><RotateCcw size={16} />确认恢复</button></div>
+    <div className="confirm-dialog-icon"><AlertTriangle size={20} /></div><div><span className="eyebrow">安全恢复 · {backup.time}</span><h2 id="restore-dialog-title">确认回到这个恢复点？</h2><p>输入“恢复”只回退本工具管理的连接设置。文件损坏时会提示改用“恢复全部配置”；若文件虽能读取但核心设置已被改乱，也可主动选择完整恢复。完整恢复会先加密留存原文件，再用此恢复点替换整个 config.toml，包括 MCP、插件和项目设置。auth.json 和当前 Codex 登录不变。</p><label className="restore-confirmation-field">输入“恢复”或“恢复全部配置”<input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="恢复" data-dialog-initial-focus /></label></div>
+    <div className="command-row"><button className="ghost-button" type="button" onClick={onCancel} disabled={busy}>取消</button><button className="danger-button" type="button" onClick={() => onConfirm(confirmation)} disabled={busy || !['恢复', '恢复全部配置'].includes(confirmation.trim())}><RotateCcw size={16} />确认恢复</button></div>
   </ModalDialog>
 }
 

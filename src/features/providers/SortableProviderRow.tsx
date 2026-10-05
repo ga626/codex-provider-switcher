@@ -70,7 +70,7 @@ export function SortableProviderRow({
       <span className="provider-symbol" aria-hidden="true"><KindIcon size={16} /></span>
       <span className="provider-row-main">
         <strong>
-          {profile.name}
+          <span>{profile.name}</span>
           {profile.isDefault && <Star size={12} />}
         </strong>
         <small>{profile.model ? `模型：${providerModelLabel(profile.model)}` : '尚未设置默认模型'}</small>

@@ -20,8 +20,8 @@ export function providerEndpointHostname(baseUrl: string) {
   }
 }
 
-export function providerConnectionKind(profile: Pick<ProviderProfile, 'id' | 'name' | 'baseUrl'>): ProviderConnectionKind {
-  const identity = `${profile.id} ${profile.name}`.toLocaleLowerCase()
+export function providerConnectionKind(profile: Pick<ProviderProfile, 'id' | 'name' | 'baseUrl' | 'connectionKind'>): ProviderConnectionKind {
+  if (profile.connectionKind) return profile.connectionKind
   const hostname = providerEndpointHostname(profile.baseUrl)
   let pathname = ''
   try {
@@ -29,7 +29,7 @@ export function providerConnectionKind(profile: Pick<ProviderProfile, 'id' | 'na
   } catch {
     // Invalid or incomplete draft URLs remain relays until the form validates them.
   }
-  if (identity.includes('chatgpt') || identity.includes('oauth') || pathname.includes('/backend-api/codex')) return 'chatgpt-account'
+  if (profile.id === 'chatgpt-official-account' || (hostname === 'chatgpt.com' && pathname.startsWith('/backend-api/codex'))) return 'chatgpt-account'
   if (officialApiHosts.includes(hostname)) return 'official-api'
   return 'relay'
 }
@@ -137,6 +137,7 @@ export function draftMatchesProfile(draft: EditableProfile, profile: ProviderPro
   return (
     draft.name.trim() === profile.name &&
     draft.baseUrl.trim() === profile.baseUrl &&
+    (draft.endpointMode ?? 'auto') === (profile.endpointMode ?? 'auto') &&
     draft.model.trim() === profile.model &&
     draft.note.trim() === profile.note &&
     draft.apiKey.trim().length === 0

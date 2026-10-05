@@ -35,6 +35,14 @@ pub(crate) fn backup_manifest_health(
     }
     for file_name in ["config.toml.dpapi", "auth.json.dpapi"] {
         if !manifest.files.iter().any(|file| file == file_name) {
+            let source_name = file_name.trim_end_matches(".dpapi");
+            if manifest.missing_files.iter().any(|file| file == source_name)
+            {
+                if backup_dir.join(file_name).exists() {
+                    return Err(SwitcherError::Message("恢复点的文件缺失记录与实际内容冲突。".into()));
+                }
+                continue;
+            }
             return Err(SwitcherError::Message(
                 "恢复点缺少完整的服务商设置。".to_string(),
             ));
@@ -48,21 +56,45 @@ pub(crate) fn backup_manifest_health(
             return Err(SwitcherError::Message("恢复点完整性校验失败。".to_string()));
         }
     }
-    let config = String::from_utf8(unprotect_secret(&fs::read_to_string(
-        backup_dir.join("config.toml.dpapi"),
-    )?)?)
-    .map_err(|_| SwitcherError::Message("恢复点中的设置文件不是 UTF-8 文本。".to_string()))?;
-    let auth = String::from_utf8(unprotect_secret(&fs::read_to_string(
-        backup_dir.join("auth.json.dpapi"),
-    )?)?)
-    .map_err(|_| SwitcherError::Message("恢复点中的认证文件不是 UTF-8 文本。".to_string()))?;
-    if backup_snapshot_fingerprint_match(manifest, &config, &auth)?.is_none() {
+    let config_missing = manifest.missing_files.iter().any(|file| file == "config.toml");
+    let config = if config_missing {
+        String::new()
+    } else {
+        String::from_utf8(unprotect_secret(&fs::read_to_string(backup_dir.join("config.toml.dpapi"))?)?)
+            .map_err(|_| SwitcherError::Message("恢复点中的设置文件不是 UTF-8 文本。".to_string()))?
+    };
+    let auth = if manifest
+        .missing_files
+        .iter()
+        .any(|file| file == "auth.json")
+    {
+        "{}".into()
+    } else {
+        String::from_utf8(unprotect_secret(&fs::read_to_string(
+            backup_dir.join("auth.json.dpapi"),
+        )?)?)
+        .map_err(|_| SwitcherError::Message("恢复点中的认证文件不是 UTF-8 文本。".to_string()))?
+    };
+    if !serde_json::from_str::<Value>(&auth)?.is_object() {
+        return Err(SwitcherError::Message("恢复点中的认证文件不是 JSON 对象。".into()));
+    }
+    toml::from_str::<toml::Value>(&config)?;
+    if config_missing {
+        if manifest.snapshot_fingerprint.is_some() || manifest.protected_fingerprint.is_some() {
+            return Err(SwitcherError::Message("空配置恢复点包含冲突的配置摘要。".into()));
+        }
+    } else if backup_snapshot_fingerprint_match(manifest, &config, &auth)?.is_none() {
         return Err(SwitcherError::Message(
             "恢复点与记录的配置摘要不一致。".to_string(),
         ));
     }
     if let Some(expected) = manifest.protected_fingerprint.as_deref() {
-        if protected_configuration_fingerprint(&config, &auth)? != expected {
+        let actual = if manifest.fingerprint_version <= 2 {
+            protected_configuration_fingerprint_legacy(&config, &auth)?
+        } else {
+            protected_configuration_fingerprint(&config, &auth)?
+        };
+        if actual != expected {
             return Err(SwitcherError::Message(
                 "恢复点的受保护配置摘要不一致。".to_string(),
             ));
@@ -72,20 +104,18 @@ pub(crate) fn backup_manifest_health(
 }
 
 pub(crate) fn healthy_baseline_backup() -> Result<(), SwitcherError> {
-    let backup_dir = backups_dir()?.join(INITIAL_BACKUP_LABEL);
-    let manifest: BackupManifest = serde_json::from_str(&fs::read_to_string(
-        backup_dir.join("manifest.json"),
-    )?)
-    .map_err(|_| SwitcherError::Message("首次启动基线备份说明损坏，已停止切换。".to_string()))?;
-
-    // A truly new Codex home has no files to encrypt yet. The manifest is still
-    // a valid audit record; switching may proceed and will create the first
-    // complete backup before writing a provider.
-    if is_empty_initial_backup(&manifest) {
+    if initial_backup_is_healthy() || takeover_backup_is_healthy(&load_connection_environment_record()) {
         return Ok(());
     }
+    Err(SwitcherError::Message("首次基线和接管恢复点均不可用，请重新准备连接环境；旧备份会保留，并验证新的恢复点。".into()))
+}
 
-    backup_manifest_health(&backup_dir, &manifest)
+pub(crate) fn initial_backup_is_healthy() -> bool {
+    let Ok(root) = backups_dir() else { return false };
+    let dir = root.join(INITIAL_BACKUP_LABEL);
+    fs::read_to_string(dir.join("manifest.json")).ok()
+        .and_then(|text| serde_json::from_str::<BackupManifest>(&text).ok())
+        .is_some_and(|manifest| backup_manifest_health(&dir, &manifest).is_ok())
 }
 
 pub(crate) fn is_empty_initial_backup(manifest: &BackupManifest) -> bool {
@@ -167,13 +197,6 @@ fn required_toml_string(value: &toml::Value, key: &str) -> Result<String, Switch
         .ok_or_else(|| SwitcherError::Message(format!("恢复点缺少必要的 {key} 设置，已拒绝恢复。")))
 }
 
-fn required_toml_bool(value: &toml::Value, key: &str) -> Result<bool, SwitcherError> {
-    value
-        .get(key)
-        .and_then(toml::Value::as_bool)
-        .ok_or_else(|| SwitcherError::Message(format!("恢复点缺少必要的 {key} 设置，已拒绝恢复。")))
-}
-
 fn optional_toml_bool(value: &toml::Value, key: &str) -> Option<bool> {
     value.get(key).and_then(toml::Value::as_bool)
 }
@@ -186,7 +209,6 @@ pub(crate) fn restored_owned_files(
         .files
         .iter()
         .any(|file| file == "config.toml.dpapi")
-        || !manifest.files.iter().any(|file| file == "auth.json.dpapi")
     {
         return Err(SwitcherError::Message(
             "恢复点不包含完整的服务商设置，已拒绝恢复。".to_string(),
@@ -199,23 +221,19 @@ pub(crate) fn restored_owned_files(
     let backup_config_value = toml::from_str::<toml::Value>(&backup_config)?;
     let backup_custom = backup_config_value
         .get("model_providers")
-        .and_then(|providers| providers.get("custom"))
-        .ok_or_else(|| SwitcherError::Message("恢复点缺少服务商设置，已拒绝恢复。".to_string()))?;
+        .and_then(|providers| providers.get("custom"));
     let current_config = read_config()?;
     let mut lines = current_config
         .lines()
         .map(ToString::to_string)
         .collect::<Vec<_>>();
-    upsert_root_string(
-        &mut lines,
-        "model",
-        &required_toml_string(&backup_config_value, "model")?,
-    );
-    upsert_root_string(
-        &mut lines,
-        "model_provider",
-        &required_toml_string(&backup_config_value, "model_provider")?,
-    );
+    for key in ["model", "model_provider"] {
+        if let Some(value) = backup_config_value.get(key).and_then(toml::Value::as_str) {
+            upsert_root_string(&mut lines, key, value);
+        } else {
+            remove_root_key(&mut lines, key);
+        }
+    }
     remove_root_key(&mut lines, "model_reasoning_effort");
     if let Some(reasoning_effort) = backup_config_value
         .get("model_reasoning_effort")
@@ -223,57 +241,114 @@ pub(crate) fn restored_owned_files(
     {
         upsert_root_string(&mut lines, "model_reasoning_effort", reasoning_effort);
     }
-    upsert_root_bool(
-        &mut lines,
-        "disable_response_storage",
-        required_toml_bool(&backup_config_value, "disable_response_storage")?,
-    );
-    let start = lines
-        .iter()
-        .position(|line| line.trim() == "[model_providers.custom]")
-        .ok_or_else(|| {
-            SwitcherError::Message("当前 Codex 设置缺少服务商段，已拒绝恢复。".to_string())
-        })?;
-    let mut end = lines
-        .iter()
-        .enumerate()
-        .skip(start + 1)
-        .find(|(_, line)| line.trim_start().starts_with('['))
-        .map(|(index, _)| index)
-        .unwrap_or(lines.len());
-    for key in ["name", "wire_api", "base_url"] {
-        upsert_section_string(
-            &mut lines,
-            start,
-            &mut end,
-            key,
-            &required_toml_string(backup_custom, key)?,
-        );
+    if let Some(value) = optional_toml_bool(&backup_config_value, "disable_response_storage") {
+        upsert_root_bool(&mut lines, "disable_response_storage", value);
+    } else {
+        remove_root_key(&mut lines, "disable_response_storage");
     }
-    remove_section_key(&mut lines, start, &mut end, "api_key");
-    for key in ["env_key", "experimental_bearer_token"] {
-        remove_section_key(&mut lines, start, &mut end, key);
+    if let Some(value) = backup_config_value
+        .get("model_catalog_json")
+        .and_then(toml::Value::as_str)
+    {
+        upsert_root_string(&mut lines, "model_catalog_json", value);
+    } else {
+        remove_root_key(&mut lines, "model_catalog_json");
     }
-    remove_section_key(&mut lines, start, &mut end, "requires_openai_auth");
-    if let Some(value) = optional_toml_bool(backup_custom, "requires_openai_auth") {
-        upsert_section_bool(&mut lines, start, &mut end, "requires_openai_auth", value);
-    }
-    remove_section(&mut lines, "[model_providers.custom.auth]");
-    if let Some(auth_lines) = section_block(&backup_config, "[model_providers.custom.auth]") {
-        let insert_at = lines
+    if let Some(backup_custom) = backup_custom {
+        if !lines
+            .iter()
+            .any(|line| line.trim() == "[model_providers.custom]")
+        {
+            lines.push("[model_providers.custom]".into());
+        }
+        let start = lines
+            .iter()
+            .position(|line| line.trim() == "[model_providers.custom]")
+            .ok_or_else(|| {
+                SwitcherError::Message("当前 Codex 设置缺少服务商段，已拒绝恢复。".to_string())
+            })?;
+        let mut end = lines
             .iter()
             .enumerate()
             .skip(start + 1)
             .find(|(_, line)| line.trim_start().starts_with('['))
             .map(|(index, _)| index)
             .unwrap_or(lines.len());
-        lines.splice(insert_at..insert_at, auth_lines);
+        for key in ["name", "wire_api", "base_url"] {
+            upsert_section_string(
+                &mut lines,
+                start,
+                &mut end,
+                key,
+                &required_toml_string(backup_custom, key)?,
+            );
+        }
+        remove_section_key(&mut lines, start, &mut end, "api_key");
+        for key in ["env_key", "experimental_bearer_token"] {
+            remove_section_key(&mut lines, start, &mut end, key);
+            if let Some(value) = backup_custom.get(key).and_then(toml::Value::as_str) {
+                upsert_section_string(&mut lines, start, &mut end, key, value);
+            }
+        }
+        remove_section_key(&mut lines, start, &mut end, "requires_openai_auth");
+        if let Some(value) = optional_toml_bool(backup_custom, "requires_openai_auth") {
+            upsert_section_bool(&mut lines, start, &mut end, "requires_openai_auth", value);
+        }
+        remove_section(&mut lines, "[model_providers.custom.auth]");
+        if let Some(auth_lines) = section_block(&backup_config, "[model_providers.custom.auth]") {
+            let insert_at = lines
+                .iter()
+                .enumerate()
+                .skip(start + 1)
+                .find(|(_, line)| line.trim_start().starts_with('['))
+                .map(|(index, _)| index)
+                .unwrap_or(lines.len());
+            lines.splice(insert_at..insert_at, auth_lines);
+        }
+    } else {
+        remove_section(&mut lines, "[model_providers.custom.auth]");
+        // Remove only managed keys, never foreign/custom extension settings.
+        if let Some(start) = lines
+            .iter()
+            .position(|line| line.trim() == "[model_providers.custom]")
+        {
+            let mut end = lines
+                .iter()
+                .enumerate()
+                .skip(start + 1)
+                .find(|(_, l)| l.trim_start().starts_with('['))
+                .map(|(i, _)| i)
+                .unwrap_or(lines.len());
+            for key in [
+                "name",
+                "base_url",
+                "wire_api",
+                "api_key",
+                "env_key",
+                "experimental_bearer_token",
+                "requires_openai_auth",
+            ] {
+                remove_section_key(&mut lines, start, &mut end, key);
+            }
+            if end == start + 1 || lines[start + 1..end].iter().all(|l| l.trim().is_empty()) {
+                lines.drain(start..end);
+            }
+        }
     }
     let next_config = lines.join("\r\n");
     if !protected_sections_match(&current_config, &next_config)? {
         return Err(SwitcherError::Message(
             "恢复已阻止：检测到 MCP、插件、项目或其他受保护设置会被改动。".to_string(),
         ));
+    }
+    let current_auth_text = read_auth()?;
+    let current_auth_value: Value = serde_json::from_str(&current_auth_text)?;
+    // Modern OAuth is owned by Codex, including token refreshes after backup.
+    if current_auth_value.get("tokens").is_some()
+        || current_auth_value.get("auth_mode").and_then(Value::as_str) == Some("chatgpt")
+        || !manifest.files.iter().any(|f| f == "auth.json.dpapi")
+    {
+        return Ok((next_config, None));
     }
     let backup_auth_text = String::from_utf8(unprotect_secret(&fs::read_to_string(
         backup_dir.join("auth.json.dpapi"),
@@ -297,6 +372,93 @@ pub(crate) fn restored_owned_files(
     ))
 }
 
+pub(crate) fn full_config_from_backup(
+    backup_dir: &Path,
+    manifest: &BackupManifest,
+) -> Result<String, SwitcherError> {
+    if !manifest
+        .files
+        .iter()
+        .any(|file| file == "config.toml.dpapi")
+    {
+        return Err(SwitcherError::Message(
+            "这个恢复点没有完整的 Codex 设置文件，无法救援。".to_string(),
+        ));
+    }
+    let protected = fs::read(backup_dir.join("config.toml.dpapi"))?;
+    let expected_digest = manifest
+        .file_digests
+        .get("config.toml.dpapi")
+        .ok_or_else(|| SwitcherError::Message("恢复点缺少完整性摘要。".to_string()))?;
+    if bytes_digest(&protected) != *expected_digest {
+        return Err(SwitcherError::Message("恢复点完整性校验失败。".to_string()));
+    }
+    let encoded = String::from_utf8(protected)
+        .map_err(|_| SwitcherError::Message("恢复点格式无效。".to_string()))?;
+    let bytes = unprotect_secret(&encoded)?;
+    let config = String::from_utf8(bytes)
+        .map_err(|_| SwitcherError::Message("恢复点中的设置文件不是 UTF-8 文本。".to_string()))?;
+    toml::from_str::<toml::Value>(&config).map_err(|_| {
+        SwitcherError::Message("恢复点中的设置文件也无法解析，不能安全救援。".to_string())
+    })?;
+    Ok(config)
+}
+
+pub(crate) fn preserve_damaged_config(
+    evidence_root: &Path,
+    original: Option<&[u8]>,
+) -> Result<PathBuf, SwitcherError> {
+    fs::create_dir_all(evidence_root)?;
+    let dir = evidence_root.join(unique_backup_label("damaged-config"));
+    fs::create_dir(&dir)?;
+    if let Some(original) = original {
+        let protected = protect_secret(original)?;
+        write_bytes_atomically(&dir.join("config.toml.dpapi"), protected.as_bytes())?;
+    }
+    let receipt = serde_json::json!({
+        "schema_version": 1,
+        "created_at": now_label(),
+        "file": if original.is_some() { "config.toml.dpapi" } else { "config.toml was missing" },
+        "sha256": original.map(bytes_digest),
+        "note": "损坏原件只在存在且可读取时加密留档；未包含认证文件。"
+    });
+    write_bytes_atomically(
+        &dir.join("manifest.json"),
+        serde_json::to_string_pretty(&receipt)?.as_bytes(),
+    )?;
+    Ok(dir)
+}
+
+pub(crate) fn recover_damaged_config(
+    config_path: &Path,
+    evidence_root: &Path,
+    backup_dir: &Path,
+    manifest: &BackupManifest,
+    confirmation: &str,
+) -> Result<PathBuf, SwitcherError> {
+    if confirmation.trim() != "恢复全部配置" {
+        return Err(SwitcherError::Message(
+            "完整救援必须输入“恢复全部配置”确认。".to_string(),
+        ));
+    }
+    let original = match fs::read(config_path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    let candidate = full_config_from_backup(backup_dir, manifest)?;
+    let evidence = preserve_damaged_config(evidence_root, original.as_deref())?;
+    write_recovery_target(config_path, candidate.as_bytes())?;
+    let restored = fs::read_to_string(config_path)?;
+    if restored != candidate || toml::from_str::<toml::Value>(&restored).is_err() {
+        return Err(SwitcherError::Message(
+            "完整恢复后的设置未通过回读校验；没有报告恢复成功。请保留恢复中心中的原件留档。"
+                .to_string(),
+        ));
+    }
+    Ok(evidence)
+}
+
 pub(crate) fn recover_pending_config_transaction() -> Result<(), SwitcherError> {
     let path = pending_transaction_path()?;
     if !path.exists() {
@@ -306,6 +468,50 @@ pub(crate) fn recover_pending_config_transaction() -> Result<(), SwitcherError> 
         .map_err(|_| {
         SwitcherError::Message("检测到损坏的配置事务回执；已拒绝继续写入。".to_string())
     })?;
+    if transaction_writer_is_active(transaction.writer_pid) {
+        // A running writer owns this transaction. Returning here lets state
+        // reads continue without rolling back an operation in another window.
+        return Ok(());
+    }
+    let config_target = transaction.config_path.clone().unwrap_or(config_path()?);
+    let auth_target = transaction.auth_path.clone().unwrap_or(auth_path()?);
+    if auth_target != auth_path()? || (transaction.reason != "initialization" && config_target != config_path()?)
+        || (transaction.reason == "initialization" && config_target != root_config_path()?) {
+        return Err(SwitcherError::Message("未完成事务的配置位置与当前环境不一致；已停止自动恢复。".into()));
+    }
+    if transaction.reason == "initialization" {
+        if transaction.phase != "verified" {
+            if let Some(candidate) = &transaction.candidate_fingerprint {
+                let current_config = if config_target.is_file() { fs::read_to_string(&config_target)? } else { String::new() };
+                let current_auth = if auth_target.is_file() { fs::read_to_string(&auth_target)? } else { "{}".into() };
+                let current = owned_configuration_fingerprint(&current_config, &current_auth)?;
+                if current != *candidate && current != transaction.before_fingerprint {
+                    return Err(SwitcherError::Message("初始化中断后配置又被外部修改；事务已保留，请使用安全恢复。".into()));
+                }
+            }
+            let (backup_dir, manifest) = read_backup_manifest(&transaction.backup_id)?;
+            let original = if manifest.missing_files.iter().any(|name| name == "config.toml") {
+                String::new()
+            } else {
+                String::from_utf8(unprotect_secret(&fs::read_to_string(backup_dir.join("config.toml.dpapi"))?)?)
+                    .map_err(|_| SwitcherError::Message("初始化恢复点不是 UTF-8 文本。".into()))?
+            };
+            let current = if config_target.is_file() { fs::read_to_string(&config_target)? } else { String::new() };
+            if !initialization_owned_change_only(&original, &current)? {
+                return Err(SwitcherError::Message("初始化中断后受保护配置被外部修改；原件和事务已保留，请使用安全恢复。".into()));
+            }
+            recover_initialization_files_at(&backup_dir, &manifest, &config_target, &auth_target)?;
+            if let Some(previous) = &transaction.previous_environment {
+                save_connection_environment_record(previous)?;
+            }
+        }
+        return complete_config_transaction();
+    }
+    // The write and its receipt already passed verification. A crash while
+    // deleting the journal must not undo a successfully completed operation.
+    if transaction.phase == "verified" {
+        return complete_config_transaction();
+    }
     let (backup_dir, manifest) = read_backup_manifest(&transaction.backup_id)?;
     let (next_config, next_auth) = restored_owned_files(&backup_dir, &manifest).map_err(|_| {
         SwitcherError::Message(
@@ -315,14 +521,63 @@ pub(crate) fn recover_pending_config_transaction() -> Result<(), SwitcherError> 
     write_bytes_atomically(&config_path()?, next_config.as_bytes()).map_err(|_| {
         SwitcherError::Message("检测到未完成的配置写入，但自动恢复失败；请勿继续切换。".to_string())
     })?;
-    if let Some(next_auth) = next_auth {
-        write_bytes_atomically(&auth_path()?, next_auth.as_bytes()).map_err(|_| {
-            SwitcherError::Message(
-                "检测到未完成的认证写入，但自动恢复失败；请勿继续切换。".to_string(),
-            )
-        })?;
+    if transaction.reason != "switch" {
+        if let Some(next_auth) = next_auth {
+            write_bytes_atomically(&auth_path()?, next_auth.as_bytes()).map_err(|_| {
+                SwitcherError::Message(
+                    "检测到未完成的认证写入，但自动恢复失败；请勿继续切换。".to_string(),
+                )
+            })?;
+        }
     }
     complete_config_transaction()
+}
+
+fn recover_initialization_files_at(backup: &Path, manifest: &BackupManifest, config: &Path, auth: &Path) -> Result<(), SwitcherError> {
+    backup_manifest_health(backup, manifest)?;
+    let missing_config = manifest.missing_files.iter().any(|name| name == "config.toml");
+    let bytes = if missing_config { Vec::new() } else { unprotect_secret(&fs::read_to_string(backup.join("config.toml.dpapi"))?)? };
+    let snapshot = FileSnapshot { exists: !missing_config, bytes };
+    restore_file_snapshot(config, &snapshot)?;
+    let confirmed = capture_file(config)?;
+    if confirmed.exists != snapshot.exists || confirmed.bytes != snapshot.bytes {
+        return Err(SwitcherError::Message("初始化中断恢复未通过回读；事务标记已保留。".into()));
+    }
+    // 初始化从不覆盖已有 OAuth；只撤销它为原本空环境创建的 {}。
+    if manifest.missing_files.iter().any(|name| name == "auth.json")
+        && auth.is_file() && fs::read(auth)? == b"{}" {
+        fs::remove_file(auth)?;
+    }
+    Ok(())
+}
+
+fn transaction_writer_is_active(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    if pid == std::process::id() {
+        return true;
+    }
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return false;
+        }
+        let mut exit_code = 0_u32;
+        let queried = GetExitCodeProcess(process, &mut exit_code);
+        CloseHandle(process);
+        queried != 0 && exit_code == STILL_ACTIVE as u32
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
 }
 
 pub(crate) fn list_backups() -> Result<Vec<BackupItem>, SwitcherError> {
@@ -526,7 +781,11 @@ pub(crate) fn configuration_protection(config_text: &str) -> ConfigurationProtec
         } else if baseline_status == "empty" {
             "首次启动时还没有完整的 Codex 配置；这是状态记录。保存并切换第一家服务商后会自动生成可恢复备份。".to_string()
         } else {
-            "首次启动基线备份尚未通过完整性检查；应用不会允许切换服务商。".to_string()
+            if takeover_backup_is_healthy(&load_connection_environment_record()) {
+                "首次基线已损坏，但接管恢复点健康，可以继续切换。旧基线保留；请在恢复点列表中选择健康恢复点，新恢复点不能还原丢失的安装前原件。".to_string()
+            } else {
+                "首次基线和接管恢复点不可用；请重新准备连接环境，保留旧件并创建健康恢复点。安全恢复入口仍可使用。".to_string()
+            }
         },
         items,
         restore_detail: "只恢复服务商设置；其他内容保持不变。".to_string(),
@@ -553,6 +812,7 @@ pub(crate) fn only_provider_owned_configuration_changed(
         "model_provider",
         "model_reasoning_effort",
         "disable_response_storage",
+        "model_catalog_json",
     ] {
         before.as_table_mut().and_then(|table| table.remove(key));
         after.as_table_mut().and_then(|table| table.remove(key));
@@ -602,7 +862,32 @@ pub(crate) fn only_provider_owned_configuration_changed(
     Ok(before == after)
 }
 
+pub(crate) fn initialization_owned_change_only(before: &str, after: &str) -> Result<bool, SwitcherError> {
+    let normalize = |text: &str| {
+        let mut lines = text.lines().map(str::to_string).collect::<Vec<_>>();
+        // Initialization explicitly owns these two old official-route overrides.
+        remove_root_key(&mut lines, "openai_base_url");
+        remove_root_key(&mut lines, "chatgpt_base_url");
+        lines.join("\n")
+    };
+    only_provider_owned_configuration_changed(&normalize(before), &normalize(after))
+}
+
 pub(crate) fn owned_configuration_fingerprint(
+    config_text: &str,
+    auth_text: &str,
+) -> Result<String, SwitcherError> {
+    let config = toml::from_str::<toml::Value>(config_text)?;
+    let snapshot = json!({
+        "provider_v2": owned_configuration_fingerprint_v2(config_text, auth_text)?,
+        "model_catalog_json": config.get("model_catalog_json"),
+        "model_reasoning_effort": config.get("model_reasoning_effort"),
+    });
+    Ok(bytes_digest(&serde_json::to_vec(&snapshot)?))
+}
+
+// v2 和 v1 是已交付的历史合同，不随新字段改变。
+pub(crate) fn owned_configuration_fingerprint_v2(
     config_text: &str,
     auth_text: &str,
 ) -> Result<String, SwitcherError> {
@@ -639,6 +924,14 @@ pub(crate) fn protected_configuration_fingerprint(
     config_text: &str,
     auth_text: &str,
 ) -> Result<String, SwitcherError> {
+    protected_configuration_fingerprint_with_catalog(config_text, auth_text, true)
+}
+
+fn protected_configuration_fingerprint_legacy(config_text: &str, auth_text: &str) -> Result<String, SwitcherError> {
+    protected_configuration_fingerprint_with_catalog(config_text, auth_text, false)
+}
+
+fn protected_configuration_fingerprint_with_catalog(config_text: &str, auth_text: &str, owns_catalog: bool) -> Result<String, SwitcherError> {
     let mut config = toml::from_str::<toml::Value>(config_text)?;
     let mut auth = serde_json::from_str::<Value>(auth_text)?;
     if let Some(root) = config.as_table_mut() {
@@ -650,6 +943,7 @@ pub(crate) fn protected_configuration_fingerprint(
         ] {
             root.remove(key);
         }
+        if owns_catalog { root.remove("model_catalog_json"); }
         if let Some(providers) = root
             .get_mut("model_providers")
             .and_then(toml::Value::as_table_mut)
@@ -717,6 +1011,122 @@ pub(crate) fn owned_configuration_fingerprint_v1(
     ))
 }
 
+#[cfg(test)]
+mod initialization_repair_tests {
+    use super::*;
+
+    fn fixture_root() -> PathBuf {
+        let root = env::temp_dir().join(unique_backup_label("signalman-initialization-test"));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn takeover_reuses_healthy_backup_and_preserves_invalid_originals() {
+        let root = fixture_root();
+        let config = root.join("config.toml");
+        let auth = root.join("auth.json");
+        fs::write(&config, "model='fixture'\n").unwrap();
+        fs::write(&auth, "{}").unwrap();
+        let backups = root.join("backups");
+        let first = ensure_takeover_backup_at(&backups, None, &config, &auth).unwrap();
+        assert_eq!(ensure_takeover_backup_at(&backups, Some(&first), &config, &auth).unwrap(), first);
+        for damage in ["missing", "truncated", "fingerprint", "manifest"] {
+            let broken = create_backup_at(&backups, damage, "signalman_initial_takeover", &config, &auth).unwrap();
+            match damage {
+                "missing" => fs::remove_file(broken.join("config.toml.dpapi")).unwrap(),
+                "truncated" => fs::write(broken.join("auth.json.dpapi"), "truncated").unwrap(),
+                "fingerprint" => {
+                    let path = broken.join("manifest.json");
+                    let mut manifest: BackupManifest = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+                    manifest.snapshot_fingerprint = Some("wrong".into());
+                    fs::write(path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+                }
+                _ => fs::write(broken.join("manifest.json"), "{").unwrap(),
+            }
+            let old_manifest = fs::read(broken.join("manifest.json")).unwrap();
+            let replacement = ensure_takeover_backup_at(&backups, Some(damage), &config, &auth).unwrap();
+            assert_ne!(replacement, damage);
+            assert!(broken.join("invalid-backup.json").is_file());
+            assert_eq!(fs::read(broken.join("manifest.json")).unwrap(), old_manifest);
+            let dir = backups.join(replacement);
+            let manifest = serde_json::from_str(&fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+            backup_manifest_health(&dir, &manifest).unwrap();
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn takeover_can_back_up_absent_config_and_optional_auth() {
+        let root = fixture_root();
+        let config = root.join("config.toml");
+        let auth = root.join("auth.json");
+        let backups = root.join("backups");
+        let label = ensure_takeover_backup_at(&backups, None, &config, &auth).unwrap();
+        let dir = backups.join(&label);
+        let manifest: BackupManifest = serde_json::from_str(&fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(manifest.missing_files.len(), 2);
+        backup_manifest_health(&dir, &manifest).unwrap();
+        fs::write(&config, "model='fixture'\n").unwrap();
+        let dir = create_backup_at(&backups, "without-auth", "manual", &config, &auth).unwrap();
+        let manifest = serde_json::from_str(&fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+        backup_manifest_health(&dir, &manifest).unwrap();
+        fs::write(&auth, "[]").unwrap();
+        assert!(create_backup_at(&backups, "invalid-auth", "manual", &config, &auth).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn historical_fingerprint_matches_frozen_pre_catalog_digest() {
+        let config = "model='fixture-model'\nmodel_provider='custom'\ndisable_response_storage=true\n[model_providers.custom]\nname='fixture'\nwire_api='responses'\nbase_url='https://fixture.invalid/v1'\napi_key='fixture-key'\n";
+        let auth = r#"{"OPENAI_API_KEY":"fixture-key"}"#;
+        let expected = "0428f1eb5a32df8cf119b9530c3aa61a1f34da847eb2658dec07bccdda589a21";
+        assert_eq!(owned_configuration_fingerprint_v1(config, auth).unwrap(), expected);
+        let with_catalog = format!("model_catalog_json='C:/fixture/catalog.json'\n{config}");
+        assert_eq!(owned_configuration_fingerprint_v1(&with_catalog, auth).unwrap(), expected);
+    }
+
+    #[test]
+    fn catalog_path_drift_is_detected_without_changing_historical_contracts() {
+        let original = "model='fixture'\nmodel_catalog_json='C:/fixture/old.json'\n";
+        let changed = original.replace("old.json", "new.json");
+        assert_ne!(owned_configuration_fingerprint(original, "{}").unwrap(), owned_configuration_fingerprint(&changed, "{}").unwrap());
+        assert_eq!(owned_configuration_fingerprint_v2(original, "{}").unwrap(), owned_configuration_fingerprint_v2(&changed, "{}").unwrap());
+        assert_eq!(owned_configuration_fingerprint_v1(original, "{}").unwrap(), owned_configuration_fingerprint_v1(&changed, "{}").unwrap());
+        let manifest = BackupManifest {
+            schema_version: 4, fingerprint_version: 2, created_at: "fixture".into(), reason: "manual".into(),
+            files: vec![], missing_files: vec![], post_change_fingerprint: None,
+            snapshot_fingerprint: Some(owned_configuration_fingerprint_v2(original, "{}").unwrap()),
+            protected_fingerprint: None, file_digests: BTreeMap::new(), retention_managed: true,
+        };
+        assert_eq!(backup_snapshot_fingerprint_match(&manifest, original, "{}").unwrap(), Some(2));
+        let mut new_manifest = manifest;
+        new_manifest.fingerprint_version = 3;
+        assert_eq!(backup_snapshot_fingerprint_match(&new_manifest, original, "{}").unwrap(), None);
+        new_manifest.snapshot_fingerprint = Some(owned_configuration_fingerprint(original, "{}").unwrap());
+        assert_eq!(backup_snapshot_fingerprint_match(&new_manifest, &changed, "{}").unwrap(), None);
+    }
+
+    #[test]
+    fn historical_protected_catalog_digest_is_checked_in_its_own_version() {
+        let root = fixture_root();
+        let config = root.join("config.toml");
+        let auth = root.join("auth.json");
+        let original = "model='fixture'\nmodel_catalog_json='C:/fixture/original.json'\n[mcp_servers.keep]\ncommand='keep'\n";
+        fs::write(&config, original).unwrap(); fs::write(&auth, "{}").unwrap();
+        let dir = create_backup_at(&root.join("backups"), "legacy", "manual", &config, &auth).unwrap();
+        let mut manifest: BackupManifest = serde_json::from_str(&fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+        manifest.fingerprint_version = 2;
+        manifest.snapshot_fingerprint = Some(owned_configuration_fingerprint_v2(original, "{}").unwrap());
+        manifest.protected_fingerprint = Some(protected_configuration_fingerprint_legacy(original, "{}").unwrap());
+        assert_ne!(manifest.protected_fingerprint.as_ref().unwrap(), &protected_configuration_fingerprint(original, "{}").unwrap());
+        backup_manifest_health(&dir, &manifest).unwrap();
+        manifest.protected_fingerprint = Some("wrong".into());
+        assert!(backup_manifest_health(&dir, &manifest).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
 pub(crate) fn backup_snapshot_fingerprint_match(
     manifest: &BackupManifest,
     config_text: &str,
@@ -728,7 +1138,12 @@ pub(crate) fn backup_snapshot_fingerprint_match(
     if owned_configuration_fingerprint(config_text, auth_text)? == expected {
         return Ok(Some(CURRENT_BACKUP_FINGERPRINT_VERSION));
     }
-    if manifest.fingerprint_version < CURRENT_BACKUP_FINGERPRINT_VERSION
+    if manifest.fingerprint_version <= 2
+        && owned_configuration_fingerprint_v2(config_text, auth_text)? == expected
+    {
+        return Ok(Some(2));
+    }
+    if manifest.fingerprint_version < 2
         && owned_configuration_fingerprint_v1(config_text, auth_text)? == expected
     {
         return Ok(Some(1));
@@ -757,6 +1172,9 @@ pub(crate) fn resolve_codex_home(
 }
 
 pub(crate) fn codex_home() -> Result<PathBuf, SwitcherError> {
+    if let Some((_, home)) = qa::runtime_override()? {
+        return Ok(home);
+    }
     let user_home = dirs::home_dir().ok_or(SwitcherError::MissingHome)?;
     Ok(resolve_codex_home(
         non_empty_environment_path(CODEX_HOME_ENV),
@@ -867,13 +1285,18 @@ pub(crate) fn configuration_layer_check() -> ValidationCheck {
             check(
                 "configuration-layer",
                 "连接环境",
-                record.setup_completed && selected_valid,
-                if record.setup_completed && selected_valid {
-                    "已选择并准备安全写入的 Codex 配置层。"
-                } else if layers.len() > 1 {
-                    "检测到多个 Codex 配置层。请在“开始使用”中选择本次要管理的配置层；程序不会猜测。"
+                record.setup_completed
+                    && selected_valid
+                    && record.takeover_version >= SIGNALMAN_TAKEOVER_VERSION
+                    && record.selected_layer_id.as_deref() == Some("user-config"),
+                if record.setup_completed
+                    && selected_valid
+                    && record.takeover_version >= SIGNALMAN_TAKEOVER_VERSION
+                    && record.selected_layer_id.as_deref() == Some("user-config")
+                {
+                    "已完成 Signalman 接管，当前固定写入用户级 Codex 配置。"
                 } else {
-                    "首次使用前请先准备连接环境；程序会创建恢复点并只写入服务商所需字段。"
+                    "首次使用前请先完成 Signalman 接管；程序会先备份旧配置，再固定写入 custom 身份。"
                 },
                 "required",
             )
@@ -888,11 +1311,15 @@ pub(crate) fn ensure_configuration_layer_is_unambiguous() -> Result<(), Switcher
             .map(|layers| layers.iter().any(|(id, _, _)| id == selected))
             .unwrap_or(false)
     });
-    if record.setup_completed && valid {
+    if record.setup_completed
+        && valid
+        && record.takeover_version >= SIGNALMAN_TAKEOVER_VERSION
+        && record.selected_layer_id.as_deref() == Some("user-config")
+    {
         return Ok(());
     }
     Err(SwitcherError::Message(
-        "切换已阻止：请先在“开始使用”中选择并准备要管理的 Codex 配置层。程序不会猜测写入位置。"
+        "切换已阻止：请先完成 Signalman 首次接管。程序会先备份旧配置，再固定使用 custom 身份。"
             .to_string(),
     ))
 }
@@ -902,6 +1329,9 @@ pub(crate) fn auth_path() -> Result<PathBuf, SwitcherError> {
 }
 
 pub(crate) fn app_data_dir() -> Result<PathBuf, SwitcherError> {
+    if let Some((app, _)) = qa::runtime_override()? {
+        return Ok(app);
+    }
     if let Some(path) = env::var_os(APP_DATA_DIR_ENV).filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(path));
     }
@@ -918,15 +1348,90 @@ pub(crate) fn activity_path() -> Result<PathBuf, SwitcherError> {
 }
 
 pub(crate) fn backups_dir() -> Result<PathBuf, SwitcherError> {
+    // New installs keep recovery material beside the installed application,
+    // separate from the user's Codex home. Existing app-data backups remain
+    // the source of truth until explicitly migrated; never move or delete
+    // them implicitly.
+    // An explicit app-data root is used by isolated QA/functional runs and is
+    // authoritative there; never let a stale target/build-directory backup
+    // shadow that fixture.
+    let has_explicit_app_data_root = env::var_os(APP_DATA_DIR_ENV)
+        .is_some_and(|value| !value.is_empty());
+    if !is_development_release_channel() && !has_explicit_app_data_root {
+        if let Ok(executable) = std::env::current_exe() {
+            if let Some(install_dir) = executable.parent() {
+                let preferred = install_dir.join(INSTALL_BACKUP_DIR);
+                let has_existing_app_backups = app_data_dir()
+                    .map(|root| root.join(BACKUPS_DIR).join(INITIAL_BACKUP_LABEL).exists())
+                    .unwrap_or(false);
+                if !has_existing_app_backups && backup_directory_is_writable(&preferred) {
+                    return Ok(preferred);
+                }
+            }
+        }
+    }
     Ok(app_data_dir()?.join(BACKUPS_DIR))
+}
+
+fn backup_directory_is_writable(path: &Path) -> bool {
+    if fs::create_dir_all(path).is_err() {
+        return false;
+    }
+    let probe = path.join(format!(".write-test-{}", std::process::id()));
+    match OpenOptions::new().create_new(true).write(true).open(&probe) {
+        Ok(_) => {
+            let _ = fs::remove_file(probe);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 pub(crate) fn pending_transaction_path() -> Result<PathBuf, SwitcherError> {
     Ok(app_data_dir()?.join(PENDING_TRANSACTION_FILE))
 }
 
+fn catalog_write_lock_path() -> Result<PathBuf, SwitcherError> {
+    Ok(app_data_dir()?.join("profiles.write.lock"))
+}
+
+fn lock_catalog_write() -> Result<File, SwitcherError> {
+    let path = catalog_write_lock_path()?;
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(path)?;
+    file.try_lock().map_err(|_| {
+        SwitcherError::Message(
+            "另一项服务商资料操作正在保存，请等待完成后重新加载再试。".to_string(),
+        )
+    })?;
+    Ok(file)
+}
+
 pub(crate) fn switch_preflight_path() -> Result<PathBuf, SwitcherError> {
     Ok(app_data_dir()?.join(SWITCH_PREFLIGHT_FILE))
+}
+
+pub(crate) fn write_codex_model_catalog(bytes: &[u8]) -> Result<PathBuf, SwitcherError> {
+    let directory = app_data_dir()?.join("model-catalogs");
+    fs::create_dir_all(&directory)?;
+    let digest = format!("{:x}", Sha256::digest(bytes));
+    // Deterministic repair names keep preview and commit on the same candidate
+    // path even when the canonical file is corrupt. Never overwrite old content.
+    for attempt in 0..32 {
+        let name = if attempt == 0 { format!("{}.json", &digest[..24]) } else { format!("{digest}-repair-{attempt}.json") };
+        let path = directory.join(name);
+        if path.exists() {
+            if fs::read(&path).is_ok_and(|existing| existing == bytes) { return Ok(path); }
+            continue;
+        }
+        write_bytes_atomically(&path, bytes)?;
+        if fs::read(&path)? != bytes { return Err(SwitcherError::Message("模型目录写入回读不一致。".into())); }
+        return Ok(path);
+    }
+    Err(SwitcherError::Message("模型目录存在多份不可用文件，无法安全生成；旧件未覆盖。".into()))
 }
 
 pub(crate) fn operation_receipts_path() -> Result<PathBuf, SwitcherError> {
@@ -948,14 +1453,45 @@ pub(crate) fn begin_config_transaction(
     reason: &str,
     before_fingerprint: &str,
 ) -> Result<(), SwitcherError> {
+    begin_config_transaction_at(backup_id, reason, before_fingerprint, config_path()?, auth_path()?, None, None)
+}
+
+pub(crate) fn begin_config_transaction_at(
+    backup_id: &str,
+    reason: &str,
+    before_fingerprint: &str,
+    config: PathBuf,
+    auth: PathBuf,
+    previous_environment: Option<StoredConnectionEnvironment>,
+    candidate_fingerprint: Option<String>,
+) -> Result<(), SwitcherError> {
+    let path = pending_transaction_path()?;
+    if path.exists() {
+        let existing: PendingConfigTransaction = serde_json::from_str(&fs::read_to_string(&path)?)
+            .map_err(|_| {
+                SwitcherError::Message("检测到损坏的配置事务回执；已拒绝继续写入。".to_string())
+            })?;
+        if transaction_writer_is_active(existing.writer_pid) {
+            return Err(SwitcherError::Message(
+                "另一项配置切换仍在进行，请完成或关闭它后再试。".to_string(),
+            ));
+        }
+        recover_pending_config_transaction()?;
+    }
     let transaction = PendingConfigTransaction {
         backup_id: backup_id.to_string(),
         reason: reason.to_string(),
         phase: default_transaction_phase(),
         before_fingerprint: before_fingerprint.to_string(),
+        fingerprint_version: CURRENT_BACKUP_FINGERPRINT_VERSION,
+        writer_pid: std::process::id(),
+        config_path: Some(config),
+        auth_path: Some(auth),
+        previous_environment,
+        candidate_fingerprint,
     };
     write_bytes_atomically(
-        &pending_transaction_path()?,
+        &path,
         serde_json::to_string_pretty(&transaction)?.as_bytes(),
     )
 }
@@ -1000,24 +1536,18 @@ pub(crate) fn record_operation_receipt(
 }
 
 pub(crate) fn current_owned_fingerprint() -> Result<String, SwitcherError> {
-    owned_configuration_fingerprint(
-        &fs::read_to_string(config_path()?)?,
-        &fs::read_to_string(auth_path()?)?,
-    )
+    owned_configuration_fingerprint(&fs::read_to_string(config_path()?)?, &read_auth()?)
 }
 
 pub(crate) fn current_state_is_safe_to_restore(
     manifest: &BackupManifest,
 ) -> Result<(), SwitcherError> {
     let config = fs::read_to_string(config_path()?)?;
-    let auth = fs::read_to_string(auth_path()?)?;
+    let auth = read_auth()?;
     if backup_snapshot_fingerprint_match(manifest, &config, &auth)?.is_some() {
         return Ok(());
     }
     let current = owned_configuration_fingerprint(&config, &auth)?;
-    let legacy_current = (manifest.fingerprint_version < CURRENT_BACKUP_FINGERPRINT_VERSION)
-        .then(|| owned_configuration_fingerprint_v1(&config, &auth))
-        .transpose()?;
     let receipts = load_operation_receipts()?;
     let latest = receipts.last().ok_or_else(|| {
         SwitcherError::Message(
@@ -1025,8 +1555,10 @@ pub(crate) fn current_state_is_safe_to_restore(
         )
     })?;
     let current_matches_receipt = latest.after_fingerprint == current
-        || (latest.fingerprint_version < CURRENT_BACKUP_FINGERPRINT_VERSION
-            && legacy_current.as_deref() == Some(latest.after_fingerprint.as_str()));
+        || (latest.fingerprint_version <= 2
+            && latest.after_fingerprint == owned_configuration_fingerprint_v2(&config, &auth)?)
+        || (latest.fingerprint_version < 2
+            && latest.after_fingerprint == owned_configuration_fingerprint_v1(&config, &auth)?);
     if !current_matches_receipt {
         return Err(SwitcherError::Message(
             "检测到服务商或认证设置在上次 Signalman 操作后发生变化；已停止自动恢复。".to_string(),
@@ -1165,6 +1697,39 @@ pub(crate) fn write_bytes_atomically(
     Ok(())
 }
 
+pub(crate) fn write_recovery_target(destination: &Path, bytes: &[u8]) -> Result<(), SwitcherError> {
+    let metadata = match fs::metadata(destination) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return write_bytes_atomically(destination, bytes);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let mut permissions = metadata.permissions();
+    let was_readonly = permissions.readonly();
+    if was_readonly {
+        permissions.set_readonly(false);
+        fs::set_permissions(destination, permissions)?;
+    }
+    match write_bytes_atomically(destination, bytes) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if was_readonly {
+                let mut original_permissions = fs::metadata(destination)?.permissions();
+                original_permissions.set_readonly(true);
+                fs::set_permissions(destination, original_permissions).map_err(
+                    |restore_error| {
+                        SwitcherError::Message(format!(
+                            "恢复写入失败：{error}；同时无法还原原文件只读属性：{restore_error}"
+                        ))
+                    },
+                )?;
+            }
+            Err(error)
+        }
+    }
+}
+
 #[cfg(windows)]
 pub(crate) fn replace_file_atomically(
     temporary: &Path,
@@ -1244,6 +1809,18 @@ pub(crate) fn restore_file_snapshot(
     } else {
         Ok(())
     }
+}
+
+pub(crate) fn rollback_config_transaction(config: &Path, original: &str) -> Result<(), SwitcherError> {
+    let current = fs::read_to_string(config).map_err(|_| SwitcherError::Message("无法确认当前配置内容；事务已保留，请使用安全恢复。".into()))?;
+    if !only_provider_owned_configuration_changed(original, &current)? {
+        return Err(SwitcherError::Message("操作期间受保护配置被外部修改；事务已保留，不会自动覆盖，请使用安全恢复。".into()));
+    }
+    write_bytes_atomically(config, original.as_bytes()).map_err(|_| SwitcherError::Message("操作失败且原配置恢复未完成；事务已保留，请使用安全恢复。".into()))?;
+    if fs::read_to_string(config)? != original {
+        return Err(SwitcherError::Message("原配置恢复回读不一致；事务已保留，请使用安全恢复。".into()));
+    }
+    complete_config_transaction()
 }
 
 pub(crate) fn migrate_legacy_backups() -> Result<(), SwitcherError> {
@@ -1350,6 +1927,18 @@ pub(crate) fn create_backup_with_label(
     reason: &str,
 ) -> Result<PathBuf, SwitcherError> {
     let backup_root = backups_dir()?;
+    let result = create_backup_at(&backup_root, label, reason, &config_path()?, &auth_path()?)?;
+    let _ = prune_managed_backups(reason, label);
+    Ok(result)
+}
+
+pub(crate) fn create_backup_at(
+    backup_root: &Path,
+    label: &str,
+    reason: &str,
+    config: &Path,
+    auth: &Path,
+) -> Result<PathBuf, SwitcherError> {
     fs::create_dir_all(&backup_root)?;
     let dir = backup_root.join(label);
     if dir.exists() {
@@ -1363,7 +1952,7 @@ pub(crate) fn create_backup_with_label(
         Local::now().timestamp_nanos_opt().unwrap_or_default()
     )));
     fs::create_dir(&staging.path)?;
-    let sources = [("config.toml", config_path()?), ("auth.json", auth_path()?)];
+    let sources = [("config.toml", config), ("auth.json", auth)];
     let mut files = Vec::new();
     let mut missing_files = Vec::new();
     let mut file_digests = BTreeMap::new();
@@ -1378,18 +1967,19 @@ pub(crate) fn create_backup_with_label(
             missing_files.push(name.to_string());
         }
     }
-    let snapshot_fingerprint = if missing_files.is_empty() {
+    let auth_text = if auth.is_file() { fs::read_to_string(auth)? } else { "{}".into() };
+    let snapshot_fingerprint = if config.is_file() {
         Some(owned_configuration_fingerprint(
-            &fs::read_to_string(config_path()?)?,
-            &fs::read_to_string(auth_path()?)?,
+            &fs::read_to_string(config)?,
+            &auth_text,
         )?)
     } else {
         None
     };
-    let protected_fingerprint = if missing_files.is_empty() {
+    let protected_fingerprint = if config.is_file() {
         Some(protected_configuration_fingerprint(
-            &fs::read_to_string(config_path()?)?,
-            &fs::read_to_string(auth_path()?)?,
+            &fs::read_to_string(config)?,
+            &auth_text,
         )?)
     } else {
         None
@@ -1411,12 +2001,20 @@ pub(crate) fn create_backup_with_label(
         &staging.path.join("manifest.json"),
         serde_json::to_string_pretty(&manifest)?.as_bytes(),
     )?;
-    if manifest.missing_files.is_empty() {
-        backup_manifest_health(&staging.path, &manifest)?;
-    }
+    write_bytes_atomically(
+        &staging.path.join("backup-scope.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "scope": "codex-connection",
+            "storage": "dedicated-recovery-directory",
+            "included": ["config.toml", "auth.json"],
+            "excluded": ["sessions", "sqlite", "projects", "mcp-runtime-data"],
+            "secret_handling": "DPAPI protected files; manifest contains only digests and redacted scope"
+        }))?.as_slice(),
+    )?;
+    backup_manifest_health(&staging.path, &manifest)?;
     fs::rename(&staging.path, &dir)?;
     staging.commit();
-    let _ = prune_managed_backups(reason, label);
     Ok(dir)
 }
 
@@ -1539,11 +2137,54 @@ impl Drop for BackupStaging {
 
 pub(crate) fn ensure_initial_backup() -> Result<bool, SwitcherError> {
     let initial_dir = backups_dir()?.join(INITIAL_BACKUP_LABEL);
-    if initial_dir.join("manifest.json").exists() {
+    if initial_backup_is_healthy() {
         return Ok(false);
+    }
+    if initial_dir.exists() {
+        let mut record = load_connection_environment_record();
+        if takeover_backup_is_healthy(&record) { return Ok(false); }
+        // Retain the damaged first baseline and reuse the takeover replacement.
+        let label = ensure_takeover_backup_at(&backups_dir()?, record.takeover_backup_label.as_deref(), &root_config_path()?, &auth_path()?)?;
+        record.takeover_backup_label = Some(label);
+        save_connection_environment_record(&record)?;
+        return Ok(true);
     }
     create_backup_with_label(INITIAL_BACKUP_LABEL, "initial_install")?;
     Ok(true)
+}
+
+pub(crate) const SIGNALMAN_TAKEOVER_VERSION: u32 = 1;
+pub(crate) const SIGNALMAN_TAKEOVER_BACKUP_LABEL: &str = "signalman-initial-takeover-v1";
+
+/// Create the immutable pre-Signalman snapshot exactly once. Unlike the normal
+/// rolling backups this label is never overwritten or pruned.
+pub(crate) fn takeover_backup_is_healthy(record: &StoredConnectionEnvironment) -> bool {
+    let Some(label) = record.takeover_backup_label.as_deref() else { return false };
+    if validate_backup_id(label).is_err() { return false; }
+    let Ok(root) = backups_dir() else { return false };
+    let dir = root.join(label);
+    fs::read_to_string(dir.join("manifest.json")).ok()
+        .and_then(|text| serde_json::from_str::<BackupManifest>(&text).ok())
+        .is_some_and(|manifest| backup_manifest_health(&dir, &manifest).is_ok())
+}
+
+pub(crate) fn ensure_takeover_backup_at(root: &Path, recorded: Option<&str>, config: &Path, auth: &Path) -> Result<String, SwitcherError> {
+    let label = recorded.unwrap_or(SIGNALMAN_TAKEOVER_BACKUP_LABEL);
+    validate_backup_id(label)?;
+    let dir = root.join(label);
+    if dir.exists() {
+        let valid = fs::read_to_string(dir.join("manifest.json"))
+            .ok().and_then(|text| serde_json::from_str::<BackupManifest>(&text).ok())
+            .is_some_and(|manifest| backup_manifest_health(&dir, &manifest).is_ok());
+        if valid { return Ok(label.to_string()); }
+        // 留存无效原件，不伪造新摘要，也不覆盖首次状态。
+        // An unwritable invalid directory must not prevent a new recovery point.
+        // The replacement label and health checks remain the authoritative record.
+        let _ = write_bytes_atomically(&dir.join("invalid-backup.json"), br#"{"status":"invalid","reason":"backup_health_failed","replacement_is_current_state":true}"#);
+    }
+    let replacement = if dir.exists() || recorded.is_some() { unique_backup_label("signalman-takeover-replacement") } else { label.to_string() };
+    create_backup_at(root, &replacement, "signalman_initial_takeover", config, auth)?;
+    Ok(replacement)
 }
 
 pub(crate) fn create_backup() -> Result<PathBuf, SwitcherError> {
@@ -1564,6 +2205,7 @@ pub(crate) fn unique_backup_label(prefix: &str) -> String {
 pub(crate) fn seed_catalog_from_existing() -> Result<StoredCatalog, SwitcherError> {
     Ok(StoredCatalog {
         version: default_version(),
+        catalog_revision: 0,
         profiles: Map::new(),
         model_catalogs: Map::new(),
         cost_calibrations: Vec::new(),
@@ -1603,7 +2245,7 @@ pub(crate) fn load_catalog() -> Result<StoredCatalog, SwitcherError> {
     if !path.exists() {
         let mut catalog = seed_catalog_from_existing()?;
         hydrate_catalog_secrets(&mut catalog)?;
-        save_catalog(&catalog)?;
+        save_catalog(&mut catalog)?;
         return Ok(catalog);
     }
     let text = fs::read_to_string(path)?;
@@ -1612,7 +2254,7 @@ pub(crate) fn load_catalog() -> Result<StoredCatalog, SwitcherError> {
     let migrated = hydrate_catalog_secrets(&mut catalog)?;
     migrate_legacy_backups()?;
     if migrated {
-        save_catalog(&catalog)?;
+        save_catalog(&mut catalog)?;
     }
     Ok(catalog)
 }
@@ -1671,9 +2313,27 @@ pub(crate) fn normalize_catalog(catalog: &mut StoredCatalog) {
     }
 }
 
-pub(crate) fn save_catalog(catalog: &StoredCatalog) -> Result<(), SwitcherError> {
+pub(crate) fn save_catalog(catalog: &mut StoredCatalog) -> Result<(), SwitcherError> {
     ensure_dirs()?;
+    // The lock covers both revision comparison and replacement. Network work
+    // happens before this function, so a slow provider never holds it.
+    let _lock = lock_catalog_write()?;
+    let path = profiles_path()?;
+    let disk_revision = if path.exists() {
+        let existing: StoredCatalog = parse_json_document(&fs::read_to_string(&path)?)?;
+        existing.catalog_revision
+    } else {
+        0
+    };
+    if disk_revision != catalog.catalog_revision {
+        return Err(SwitcherError::Message(
+            "服务商资料已被另一项操作更新；本次没有覆盖，请重新加载后再试。".to_string(),
+        ));
+    }
     let mut persisted = catalog.clone();
+    persisted.catalog_revision = disk_revision.checked_add(1).ok_or_else(|| {
+        SwitcherError::Message("服务商资料修订号已到上限，无法安全保存。".to_string())
+    })?;
     for value in persisted.profiles.values_mut() {
         let mut profile: StoredProfile = serde_json::from_value(value.clone())?;
         if !profile.api_key.trim().is_empty() {
@@ -1683,7 +2343,8 @@ pub(crate) fn save_catalog(catalog: &StoredCatalog) -> Result<(), SwitcherError>
         *value = serde_json::to_value(profile)?;
     }
     let text = serde_json::to_string_pretty(&persisted)?;
-    fs::write(profiles_path()?, text)?;
+    write_bytes_atomically(&path, text.as_bytes())?;
+    catalog.catalog_revision = persisted.catalog_revision;
     Ok(())
 }
 
@@ -1692,25 +2353,25 @@ pub(crate) fn save_catalog(catalog: &StoredCatalog) -> Result<(), SwitcherError>
 /// the write transaction in `lib.rs` an orchestration concern only.
 pub(crate) fn build_next_auth(
     original: &str,
-    profile: &StoredProfile,
+    _profile: &StoredProfile,
 ) -> Result<String, SwitcherError> {
-    let mut auth = serde_json::from_str::<Value>(original)?;
-    let object = auth.as_object_mut().ok_or_else(|| {
+    let auth = serde_json::from_str::<Value>(original)?;
+    auth.as_object().ok_or_else(|| {
         SwitcherError::Message("auth.json 必须是 JSON 对象，无法安全写入。".to_string())
     })?;
-    if profile.api_key.trim().is_empty() {
-        return Ok(serde_json::to_string_pretty(&auth)?);
-    }
-    object.insert(
-        "OPENAI_API_KEY".to_string(),
-        Value::String(profile.api_key.trim().to_string()),
-    );
-    Ok(serde_json::to_string_pretty(&auth)?)
+    // Official ChatGPT OAuth belongs to Codex. Provider switches must preserve
+    // this file byte-for-byte; third-party credentials are supplied by the
+    // provider-scoped helper configured in config.toml instead.
+    Ok(original.to_string())
 }
 
 pub(crate) fn replace_root_kv(line: &str, key: &str, value: &str) -> Option<String> {
-    if line.trim_start().starts_with(&format!("{key} =")) {
-        Some(format!("{key} = \"{value}\""))
+    if line
+        .trim_start()
+        .strip_prefix(key)
+        .is_some_and(|suffix| suffix.trim_start().starts_with('='))
+    {
+        Some(format!("{key} = {}", toml::Value::String(value.to_owned())))
     } else {
         None
     }
@@ -1737,13 +2398,20 @@ pub(crate) fn upsert_root_string(lines: &mut Vec<String>, key: &str, value: &str
         .position(|line| line.trim_start().starts_with("model_provider ="))
         .map(|idx| idx + 1)
         .unwrap_or(root_end);
-    lines.insert(insert_at, format!("{key} = \"{value}\""));
+    lines.insert(
+        insert_at,
+        format!("{key} = {}", toml::Value::String(value.to_owned())),
+    );
 }
 
 pub(crate) fn upsert_root_bool(lines: &mut Vec<String>, key: &str, value: bool) {
     let root_end = root_section_end(lines);
     for line in lines.iter_mut().take(root_end) {
-        if line.trim_start().starts_with(&format!("{key} =")) {
+        if line
+            .trim_start()
+            .strip_prefix(key)
+            .is_some_and(|suffix| suffix.trim_start().starts_with('='))
+        {
             *line = format!("{key} = {}", if value { "true" } else { "false" });
             return;
         }
@@ -1762,10 +2430,13 @@ pub(crate) fn upsert_root_bool(lines: &mut Vec<String>, key: &str, value: bool) 
 
 pub(crate) fn remove_root_key(lines: &mut Vec<String>, key: &str) {
     let root_end = root_section_end(lines);
-    let prefix = format!("{key} ");
     let mut index = 0usize;
     lines.retain(|line| {
-        let retain = index >= root_end || !line.trim_start().starts_with(&prefix);
+        let retain = index >= root_end
+            || !line
+                .trim_start()
+                .strip_prefix(key)
+                .is_some_and(|suffix| suffix.trim_start().starts_with('='));
         index += 1;
         retain
     });
@@ -1868,35 +2539,78 @@ pub(crate) fn section_block(document: &str, header: &str) -> Option<Vec<String>>
     Some(lines[start..end].to_vec())
 }
 
-pub(crate) fn provider_command_auth_script() -> &'static str {
-    // CODEX_HOME is Codex's public override. When it is absent both Codex and
-    // Signalman fall back to the same per-user .codex directory. The internal
-    // development override deliberately never appears in a user config.
-    "$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }; Get-Content -LiteralPath (Join-Path $codexHome 'auth.json') -Raw | ConvertFrom-Json | Select-Object -ExpandProperty OPENAI_API_KEY"
+pub(crate) fn append_provider_command_auth(
+    lines: &mut Vec<String>,
+    end: &mut usize,
+    profile_id: &str,
+) -> Result<(), SwitcherError> {
+    append_bound_provider_auth(lines, end, profile_id, &app_data_dir()?)
 }
 
-pub(crate) fn append_provider_command_auth(lines: &mut Vec<String>, end: &mut usize) {
-    // Keep the command deterministic and local. Signalman writes the selected
-    // key to auth.json in the same transaction; Codex then reads it through
-    // the provider-level auth command instead of relying on custom Bearer
-    // handling.
-    let command = provider_command_auth_script();
+pub(crate) fn append_bound_provider_auth(
+    lines: &mut Vec<String>,
+    end: &mut usize,
+    profile_id: &str,
+    data_root: &Path,
+) -> Result<(), SwitcherError> {
+    // Codex launches the already-installed Signalman executable for one short
+    // credential read. The helper exits immediately and never writes the key
+    // into config.toml or Codex's OAuth-owned auth.json.
+    // Configuration generation can run before the first app-data write (most
+    // notably on a clean CI runner), so make the helper's owned root concrete
+    // before canonicalizing it. This keeps the generated command stable while
+    // avoiding a spurious ENOENT from Path::canonicalize.
+    fs::create_dir_all(data_root)?;
+    let command = std::env::current_exe()
+        .map_err(|error| SwitcherError::Message(format!("无法定位 Signalman 凭据助手：{error}")))?;
+    #[cfg(not(test))]
+    let command = if is_development_release_channel() {
+        // A rebuild must not replace the helper referenced by a live copy.
+        // Keep this development-only artifact immutable and content addressed.
+        let bytes = fs::read(&command)?;
+        let hash = bytes_digest(&bytes);
+        let (project, _, _) = development_fixture_roots()?;
+        let dir = project
+            .join(".codex/runtime/credential-helpers")
+            .join(&hash);
+        fs::create_dir_all(&dir)?;
+        let target = dir.join("SignalmanCredentialHelper.exe");
+        if !target.exists() {
+            write_bytes_atomically(&target, &bytes)?;
+        }
+        if bytes_digest(&fs::read(&target)?) != hash {
+            return Err(SwitcherError::Message("凭据助手身份校验失败。".into()));
+        }
+        target
+    } else {
+        command
+    };
     lines.insert(*end, "[model_providers.custom.auth]".to_string());
-    *end += 1;
-    lines.insert(*end, "command = \"powershell.exe\"".to_string());
     *end += 1;
     lines.insert(
         *end,
         format!(
-            "args = [\"-NoProfile\", \"-NonInteractive\", \"-Command\", \"{}\"]",
-            command.replace('"', "\\\"")
+            "command = {}",
+            toml::Value::String(command.display().to_string())
         ),
     );
     *end += 1;
+    lines.insert(
+        *end,
+        format!(
+            "args = [{}, {}, {}]",
+            toml::Value::String("--print-provider-token".to_string()),
+            toml::Value::String(profile_id.to_string()),
+            toml::Value::String(data_root.canonicalize()?.display().to_string())
+        ),
+    );
+    *end += 1;
+    Ok(())
 }
 
 pub(crate) fn build_next_config(
     original: &str,
+    profile_id: &str,
     profile: &StoredProfile,
 ) -> Result<String, SwitcherError> {
     let mut lines: Vec<String> = original.lines().map(ToString::to_string).collect();
@@ -1944,20 +2658,28 @@ pub(crate) fn build_next_config(
         .map(|(idx, _)| idx)
         .unwrap_or(lines.len());
     remove_section_key(&mut lines, start, &mut end, "requires_openai_auth");
-    // A provider-level command is an explicit adapter capability. Ordinary
-    // providers use Codex's current custom-provider auth contract: the
-    // selected profile key is written to auth.json and the provider must opt
-    // into OpenAI-compatible auth so newer Codex runtimes actually consume
-    // that key. `false` is not a portable "use auth.json" switch anymore.
-    if uses_provider_command_auth(profile) {
-        append_provider_command_auth(&mut lines, &mut end);
+    let configured_base_url = if profile
+        .capability_profile
+        .as_ref()
+        .is_some_and(|capability| crate::protocol_gateway::requires_gateway(&capability.protocol))
+    {
+        crate::protocol_gateway::local_base_url()
     } else {
-        upsert_section_bool(&mut lines, start, &mut end, "requires_openai_auth", true);
-    }
-    upsert_section_string(&mut lines, start, &mut end, "base_url", &profile.base_url);
+        profile.base_url.clone()
+    };
+    upsert_section_string(
+        &mut lines,
+        start,
+        &mut end,
+        "base_url",
+        &configured_base_url,
+    );
     for key in ["api_key", "env_key", "experimental_bearer_token"] {
         remove_section_key(&mut lines, start, &mut end, key);
     }
+    // Every third-party profile receives its own short-lived credential
+    // command. This keeps official OAuth and provider billing independent.
+    append_provider_command_auth(&mut lines, &mut end, profile_id)?;
     let next_config = lines.join("\r\n");
     let checks = validation_checks(&next_config);
     if checks
@@ -1979,29 +2701,44 @@ pub(crate) fn build_next_config(
 pub(crate) fn build_connection_environment_config(original: &str) -> Result<String, SwitcherError> {
     let mut lines: Vec<String> = original.lines().map(ToString::to_string).collect();
     toml::from_str::<toml::Value>(original)?;
+    // Signalman owns one stable identity. Rewriting the selected provider is
+    // what makes old OpenAI/OWL threads stop inheriting a stale route after
+    // the first launch. Endpoint and credentials are deliberately left empty
+    // until the user adds a provider through the normal workspace flow.
+    upsert_root_string(&mut lines, "model_provider", "custom");
+    remove_root_key(&mut lines, "openai_base_url");
+    remove_root_key(&mut lines, "chatgpt_base_url");
+    remove_root_key(&mut lines, "model_catalog_json");
     upsert_root_bool(&mut lines, "disable_response_storage", true);
-    // A new user has no provider endpoint, model, or credential yet. Creating
-    // a selected custom provider at this point makes Codex send an incomplete
-    // request and can combine an official endpoint with a third-party key.
-    // Keep an existing custom provider compatible, but create/select one only
-    // as part of the first real provider switch.
     if lines
         .iter()
-        .any(|line| line.trim() == "[model_providers.custom]")
+        .all(|line| line.trim() != "[model_providers.custom]")
     {
-        let start = lines
-            .iter()
-            .position(|line| line.trim() == "[model_providers.custom]")
-            .unwrap_or(0);
-        let mut end = lines
-            .iter()
-            .enumerate()
-            .skip(start + 1)
-            .find(|(_, line)| line.trim_start().starts_with('['))
-            .map(|(index, _)| index)
-            .unwrap_or(lines.len());
-        upsert_section_string(&mut lines, start, &mut end, "wire_api", "responses");
+        if !lines.is_empty() && !lines.last().is_some_and(|line| line.trim().is_empty()) {
+            lines.push(String::new());
+        }
+        lines.push("[model_providers.custom]".to_string());
     }
+    let start = lines
+        .iter()
+        .position(|line| line.trim() == "[model_providers.custom]")
+        .unwrap();
+    let mut end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find(|(_, line)| line.trim_start().starts_with('['))
+        .map(|(index, _)| index)
+        .unwrap_or(lines.len());
+    upsert_section_string(&mut lines, start, &mut end, "name", "Signalman AI");
+    upsert_section_string(&mut lines, start, &mut end, "wire_api", "responses");
+    upsert_section_bool(&mut lines, start, &mut end, "requires_openai_auth", false);
+    remove_section_key(&mut lines, start, &mut end, "base_url");
+    remove_section_key(&mut lines, start, &mut end, "api_key");
+    remove_section_key(&mut lines, start, &mut end, "env_key");
+    remove_section_key(&mut lines, start, &mut end, "experimental_bearer_token");
+    remove_section_key(&mut lines, start, &mut end, "requires_openai_auth");
+    remove_section(&mut lines, "[model_providers.custom.auth]");
     let next = lines.join("\r\n");
     if !protected_sections_match(original, &next)? {
         return Err(SwitcherError::Message(

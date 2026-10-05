@@ -29,47 +29,74 @@ export function providerModelLabel(model: string) {
 }
 
 export function isClearlyIncompatibleModel(model: ModelCatalog['models'][number]) {
-  return model.tags.some((tag) => tag === 'embedding' || tag === 'audio')
+  const id = model.id.toLocaleLowerCase()
+  return model.tags.some((tag) => tag === 'embedding' || tag === 'audio') ||
+    ['embedding', 'embed', 'rerank', 'moderation', 'whisper', 'transcribe', 'text-to-speech', 'speech-to-text'].some((marker) => id.includes(marker))
 }
 
-export function codexCompatibility(model: ModelCatalog['models'][number]): CodexCompatibility {
+export function codexCompatibility(model: ModelCatalog['models'][number], protocol?: string): CodexCompatibility {
   const tokens = lowerTokens(model)
   const hasResponses = model.verifiedForResponses === 'verified' || model.tags.includes('responses-verified')
-  const hasTools = model.tags.includes('tools-verified') || model.tags.includes('codex-tools')
   const incompatible = isClearlyIncompatibleModel(model) || model.tags.includes('protocol-incompatible')
+  const nativeCodex = model.tags.includes('codex')
 
-  if (incompatible || model.verifiedForResponses === 'failed') {
+  if (incompatible) {
     return {
       level: 'unsupported',
-      label: '暂不适配',
-      summary: '当前证据不足以安全用于 Codex',
+      label: '暂不支持',
+      summary: '这类模型不能作为 Codex 推理模型',
       detail: isClearlyIncompatibleModel(model)
         ? '这是向量、音频或其他非 Codex 推理模型，不能作为当前默认模型。'
-        : '该模型的协议、认证或响应格式没有通过 Codex 检查。',
+        : '该模型被服务商标记为不兼容当前 Codex 请求协议。',
       capabilities: [],
-      missing: ['Codex Responses', '工具调用', '真实切换验收'],
+      missing: [],
     }
   }
 
-  if (hasResponses && hasTools) {
+  if (nativeCodex) {
     return {
       level: 'verified',
-      label: 'Codex 已验证',
-      summary: 'Responses、流式与工具调用已有验证证据',
-      detail: '适合置顶展示；仍需在切换后的新 Codex 会话确认实际服务商。',
-      capabilities: ['Responses', '流式输出', '工具调用'],
+      label: 'Codex 原生',
+      summary: 'Codex 内置模型',
+      detail: '这是 Codex 自带的模型类型。',
+      capabilities: ['Codex 内置'],
+      missing: [],
+    }
+  }
+
+  if (protocol === 'chat_completions') {
+    return {
+      level: 'partial',
+      label: '自动转换',
+      summary: '将通过本机转换接入 Codex',
+      detail: 'Codex 的请求会由 Signalman 转成此服务商支持的普通聊天格式。基础对话可用，工具、多模态或特殊能力需结合实际结果判断。',
+      capabilities: ['本机协议转换'],
+      missing: [],
+    }
+  }
+
+  if (hasResponses) {
+    return {
+      level: 'verified',
+      label: '请求已验证',
+      summary: '此服务商已成功完成 Responses 请求',
+      detail: '这证明当前服务商和模型可以完成基础 Codex 请求；并不代表所有工具或扩展能力都经过验证。',
+      capabilities: ['Responses 请求'],
       missing: [],
     }
   }
 
   const vendor = tokens.includes('deepseek') ? 'DeepSeek' : tokens.includes('kimi') || tokens.includes('moonshot') ? 'Kimi' : tokens.includes('glm') ? 'GLM' : tokens.includes('gemini') ? 'Gemini' : tokens.includes('grok') ? 'Grok' : tokens.includes('mimo') ? 'MIMO' : '该模型'
+  const lastFailed = model.verifiedForResponses === 'failed'
   return {
     level: 'partial',
-    label: '部分适配',
-    summary: hasResponses ? 'Responses 可用，工具能力仍待确认' : '已发现模型，但完整 Codex 合同尚未验证',
-    detail: `${vendor}可以保留在目录中，但选择前应说明它与 OpenAI Codex 原生模型的能力差异。`,
-    capabilities: hasResponses ? ['Responses'] : model.tags.includes('chat-compatible') ? ['文本对话', '流式输出'] : ['模型目录可见'],
-    missing: hasTools ? [] : ['工具调用未验证', '插件/连接器能力不继承'],
+    label: lastFailed ? '最近未通过' : '可接入',
+    summary: lastFailed ? '上次请求没通过，可重新选择或重试' : '尚无该模型的实测结果',
+    detail: lastFailed
+      ? '上次失败可能来自模型权限、密钥、服务商或网络，不代表模型永久不可用。请结合可用性测试详情判断。'
+      : `${vendor}模型会按当前服务商配置尝试接入。未测试不代表不可用；遇到问题时再依据实际请求结果判断。`,
+    capabilities: ['可加入 Codex'],
+    missing: [],
   }
 }
 

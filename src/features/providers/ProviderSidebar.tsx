@@ -1,12 +1,11 @@
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { Plus } from 'lucide-react'
+import { LogIn, Plus } from 'lucide-react'
 import type { ProviderProfile } from '../../types'
 import { SortableProviderRow } from './SortableProviderRow'
 import { providerConnectionKind, type ProviderConnectionKind } from './provider-utils'
 
 const connectionGroups: Array<{ id: ProviderConnectionKind; label: string }> = [
-  { id: 'chatgpt-account', label: 'ChatGPT 官方账号' },
   { id: 'official-api', label: '厂商官方 API' },
   { id: 'relay', label: '中转站' },
 ]
@@ -17,6 +16,7 @@ export function ProviderSidebar({
   busy,
   onSelect,
   onAdd,
+  onSelectOfficial,
   onMove,
 }: {
   profiles: ProviderProfile[]
@@ -24,6 +24,7 @@ export function ProviderSidebar({
   busy: boolean
   onSelect: (profile: ProviderProfile) => void
   onAdd: () => void
+  onSelectOfficial: () => void
   onMove: (profileId: string, targetIndex: number) => void
 }) {
   const sensors = useSensors(
@@ -54,7 +55,14 @@ export function ProviderSidebar({
         </div>
 
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <div className="provider-list scroll-region" role="listbox" aria-label="服务商列表" data-tour="provider-list" data-guide-target="providers.list">
+          <div className="provider-list scroll-region" role="listbox" aria-label="服务商列表" tabIndex={0} data-tour="provider-list" data-guide-target="providers.list">
+            <section className="provider-group chatgpt-account" role="group" aria-labelledby="provider-group-chatgpt-account">
+              <header><span id="provider-group-chatgpt-account">ChatGPT 官方账号</span><small>置顶</small></header>
+              <button className={`official-account-row ${selectedId === 'chatgpt-official-account' ? 'selected' : ''}`} type="button" role="option" aria-selected={selectedId === 'chatgpt-official-account'} onClick={onSelectOfficial}>
+                <span className="provider-kind-icon"><LogIn size={15} /></span>
+                <span><strong>OpenAI 官方登录</strong><small>OAuth 身份与模型线路分开管理</small></span>
+              </button>
+            </section>
             {groupedProfiles.map((group) => <section className={`provider-group ${group.id}`} role="group" aria-labelledby={`provider-group-${group.id}`} key={group.id}>
               <header><span id={`provider-group-${group.id}`}>{group.label}</span><small>{group.profiles.length}</small></header>
               <SortableContext items={group.profiles.map((profile) => profile.id)} strategy={verticalListSortingStrategy}>

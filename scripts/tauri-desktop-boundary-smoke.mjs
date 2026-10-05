@@ -23,7 +23,7 @@ function assertBmp(buffer, width, height, label) {
   assert(Math.abs(buffer.readInt32LE(22)) === height, `${label} must be ${height}px high`)
 }
 
-const [packageJsonText, viteConfigText, buildRs, tauriConfigText, cargoToml, manifestText, libRs, servicesRs, providersRs, commandRs, localBackendRs, adapterTs, appTsx, providerSidebarTsx, providerRowTsx, labWorkspaceText, appCss, mockDataTs, preflightScript, devDesktopScript, prepareDevRuntimeScript, developmentFixtureCatalogText, developmentFixtureActivityText, headerBmp, sidebarBmp] = await Promise.all([
+const [packageJsonText, viteConfigText, buildRs, tauriConfigText, cargoToml, manifestText, libRs, servicesRs, providersRs, commandRs, localBackendRs, adapterTs, appTsx, providerSidebarTsx, providerRowTsx, labWorkspaceText, appCss, mockDataTs, qaScenarioConsoleTsx, qaScenariosTs, qaScenarioManifestText, preflightScript, devDesktopScript, prepareDevRuntimeScript, developmentFixtureCatalogText, developmentFixtureActivityText, headerBmp, sidebarBmp] = await Promise.all([
   readText('package.json'),
   readText('vite.config.ts'),
   readText('src-tauri/build.rs'),
@@ -42,6 +42,9 @@ const [packageJsonText, viteConfigText, buildRs, tauriConfigText, cargoToml, man
   readText('src/features/lab/LabWorkspace.tsx'),
   readText('src/App.css'),
   readText('src/mockData.ts'),
+  readText('src/features/qa/QaScenarioConsole.tsx'),
+  readText('src/features/qa/scenarios.ts'),
+  readText('src/features/qa/scenario-manifest.json'),
   readText('scripts/qa/cutover-preflight.ps1'),
   readText('scripts/qa/start-dev-desktop.ps1'),
   readText('scripts/qa/prepare-dev-runtime.ps1'),
@@ -88,6 +91,7 @@ assert(buildRs.includes('rerun-if-env-changed=CODEX_PROVIDER_SWITCHER_BUILD_SHA'
 assert(devDesktopScript.includes('CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = "development"'), 'Development desktop builds must compile the development channel')
 assert(devDesktopScript.includes('CODEX_PROVIDER_SWITCHER_APP_DATA_DIR'), 'Development desktop must isolate app data')
 assert(devDesktopScript.includes('CODEX_PROVIDER_SWITCHER_CODEX_HOME'), 'Development desktop must isolate Codex config')
+assert(devDesktopScript.includes('start-scheduled-process.ps1') && devDesktopScript.includes('Start-SignalmanScheduledProcess'), 'Development desktop must escape the Codex host Job Object')
 assert(prepareDevRuntimeScript.includes('$runtimeRoot = Join-Path $projectRoot') && prepareDevRuntimeScript.includes('dev-desktop'), 'Development desktop runtime root must be inside the repository')
 assert(prepareDevRuntimeScript.includes('fixtureConfig') && prepareDevRuntimeScript.includes('fixtureAuth'), 'Development desktop must create credential-free Codex fixtures')
 assert(prepareDevRuntimeScript.includes('fixtureCatalog') && prepareDevRuntimeScript.includes('fixtureActivity'), 'Development desktop must load the complete product demo fixtures')
@@ -99,10 +103,37 @@ assertNotIncludes(devDesktopScript + prepareDevRuntimeScript, 'Signalman AI.lnk'
 assertNotIncludes(devDesktopScript + prepareDevRuntimeScript, 'C:' + String.fromCharCode(92) + 'Users' + String.fromCharCode(92) + 'ga990' + String.fromCharCode(92) + '.codex', 'Development desktop runner')
 assert(appTsx.includes("setTitle(`Signalman AI · 开发版 · ${__CODEX_BUILD_SHA__}`)"), 'Development desktop must set a distinct native window title')
 assert(appTsx.includes("隔离数据"), 'Development desktop must visibly disclose isolated data')
+assert(appTsx.includes('const qaControlRail = isDevelopmentBuild ? <QaControlRail'), 'Only development builds may expose the external QA control rail')
+assert(appTsx.includes('createQaLiveValidationSnapshot'), 'Controlled live validation must call the protected snapshot flow')
+assert(appTsx.includes('importQaLiveValidationSnapshot'), 'Controlled live validation must call the isolated import flow')
+assert(appTsx.includes("'development-qa-frame'"), 'Development board must render QA outside the product canvas')
+assert(!appTsx.includes('qa-launcher'), 'QA controls must not be inserted into the product title bar')
+assert(qaScenarioConsoleTsx.includes('scenarioById'), 'Development board must read the shared QA scenario catalogue')
+assert(qaScenariosTs.includes("import scenarioManifest from './scenario-manifest.json'"), 'QA scenario definitions must read the shared manifest')
+for (const scenarioId of ['first-run-review', 'daily-baseline', 'daily-density', 'daily-operation-flow', 'controlled-live-validation']) {
+  assert(qaScenarioManifestText.includes(`"id": "${scenarioId}"`), `QA manifest must retain ${scenarioId}`)
+}
+assert(!qaScenarioConsoleTsx.includes('窗口最小值'), 'Product window rules must not become a QA mode')
+assert(!qaScenarioConsoleTsx.includes('失败页'), 'First-run failure details must not become a separate QA mode')
+assert(adapterTs.includes("invoke<AppState>('qa_reset_scenario', { scenarioId })"), 'Native development board must invoke the guarded QA reset command')
+assert(adapterTs.includes("export const isDevelopmentBuild = __CODEX_RELEASE_CHANNEL__ === 'development'"), 'QA launcher must be gated by the development release channel')
+assert(libRs.includes('fn development_fixture_roots()'), 'Native reset must resolve the isolated development runtime before changing any data')
+const normalizedLibRs = libRs.replace(/\s+/g, ' ')
+assert(normalizedLibRs.includes('!app_data.starts_with(&runtime_root) || !codex_home.starts_with(&runtime_root)'), 'Native reset must reject paths outside the project runtime')
+assert(libRs.includes('未知 QA 场景，已拒绝重置'), 'Native reset must reject unknown scenario identifiers')
+assert(libRs.includes('QA 场景控制台只在开发版可用'), 'Native reset must reject non-development builds')
+assert(appCss.includes('.qa-control-rail'), 'Development board must define an external QA control rail')
+assert(appCss.includes('grid-template-columns: 220px minmax(1280px, 1fr)'), 'QA rail must preserve the product canvas minimum width')
 assert(labWorkspaceText.includes('固定测试模型 <FieldHint'), 'Cost ranking must explain the fixed benchmark model at its control')
-assert(labWorkspaceText.includes('实付人民币 ÷ 到账额度'), 'Cost ranking must explain the user effective credit rate')
+assert(
+  labWorkspaceText.includes('实付人民币 ÷ 到账额度') || labWorkspaceText.includes('实际支付 ÷ 实际到账'),
+  'Cost ranking must explain the user effective credit rate',
+)
 assert(labWorkspaceText.includes('cacheWriteUsdPerMillion') && labWorkspaceText.includes('uncachedInput'), 'Cost ranking must calculate the official comparison from separate usage classes')
-assert(labWorkspaceText.includes('实测成本') && labWorkspaceText.includes('实际汇率') && labWorkspaceText.includes('官方对照'), 'Cost ranking must keep actual cost, user rate and official estimate separate')
+assert(
+  labWorkspaceText.includes('官方购买力') && labWorkspaceText.includes('账单换算') && labWorkspaceText.includes('实测成本') && labWorkspaceText.includes('实际汇率'),
+  'Cost ranking must keep actual cost, user rate and official estimate separate',
+)
 assertNotIncludes(appTsx, '最低成本 = 100 分', 'Cost ranking must not show an unlinked score explanation')
 const developmentProfileIds = Object.keys(developmentFixtureCatalog.profiles)
 assert(developmentProfileIds.length >= 7, 'Development demo catalog must contain the provider and authentication scenarios')
@@ -122,20 +153,21 @@ assert(appCss.includes('--ranking-columns: 44px minmax(170px, 1.25fr) minmax(124
 assert(libRs.includes('fn development_window_title() -> Option<String>'), 'Desktop shell must define a development window title')
 assert(libRs.includes('app.get_webview_window("main")'), 'Desktop shell must apply the development title before frontend load')
 assert(libRs.includes('window.set_title(&title)?'), 'Desktop shell must force the distinct development window title')
+assert(libRs.includes('window.set_min_size(Some(tauri::LogicalSize::new(1500.0, 700.0)))?'), 'Development QA shell must refuse a width that clips the product canvas')
 assert(manifestText.includes('<DisplayName>Signalman AI</DisplayName>'), 'MSIX display name must use the approved brand')
 assert(manifestText.includes('Name="ga626.CodexProviderSwitcher"'), 'MSIX identity must retain the Partner Center assignment')
 assert(libRs.includes('const APP_DIR_NAME: &str = "CodeX Provider Switcher"'), 'Existing app data directory must remain readable after rebranding')
-assert(tauriConfig.app.windows[0].minWidth >= 980, 'Tauri minimum width must preserve the desktop layout floor')
+assert(tauriConfig.app.windows[0].minWidth >= 1280, 'Tauri minimum width must preserve the desktop layout floor')
 assert(tauriConfig.app.windows[0].minHeight >= 700, 'Tauri minimum height must preserve the desktop layout floor')
 assert(!('trayIcon' in tauriConfig.app), 'Tauri config must not define a default tray icon')
 
 assert(cargoToml.includes('tauri-plugin-autostart'), 'Cargo must include the desktop autostart integration')
-assertNotIncludes(cargoToml, 'tray-icon', 'src-tauri/Cargo.toml')
+assert(cargoToml.includes('tray-icon'), 'src-tauri/Cargo.toml must enable the system tray used by the close/minimize flow')
 assert(libRs.includes('tauri_plugin_autostart::init'), 'Tauri desktop must initialize the Windows autostart integration')
 assert(libRs.includes('.autolaunch()') && libRs.includes('.is_enabled()'), 'Tauri desktop must read the real Windows autostart state')
 assert(libRs.includes('fn toggle_auto_start(app: tauri::AppHandle, enabled: bool)'), 'Tauri desktop must expose a real autostart toggle')
-assertNotIncludes(libRs, 'TrayIconBuilder', 'src-tauri/src/lib.rs')
-assertNotIncludes(libRs, 'install_tray', 'src-tauri/src/lib.rs')
+assert(libRs.includes('TrayIconBuilder'), 'Desktop shell must install the system tray used by the close/minimize flow')
+assert(libRs.includes('install_system_tray'), 'Desktop shell must wire the system tray during startup')
 assert(capabilityText.includes('process:allow-restart'), 'Tauri capability must grant only process restart')
 assertNotIncludes(capabilityText, 'process:default', 'Tauri capability')
 assert(capabilityText.includes('opener:allow-open-url'), 'Tauri capability must explicitly allow the update Release URL')
@@ -165,7 +197,9 @@ assert(runtimeRs.includes('"response_shape_unconfirmed"'), 'Provider verificatio
 assert(runtimeRs.includes('update_catalog_model_verification'), 'Successful inference verification must update the matching catalog model')
 assert(runtimeRs.includes('.timeout(Duration::from_secs(15))'), 'Compatibility probes must use the bounded 15-second timeout budget')
 assert(libRs.includes('async fn run_blocking_command'), 'Long-running desktop commands must use the dedicated background-command helper')
-assert(libRs.includes('tauri::async_runtime::spawn_blocking(operation)'), 'Blocking provider HTTP work must leave the Tauri UI thread')
+const blockingHelper = libRs.slice(libRs.indexOf('async fn run_blocking_command<T>'), libRs.indexOf('pub(crate) async fn run_blocking_command_with_events'))
+assert(blockingHelper.includes('tauri::async_runtime::spawn_blocking(move ||') && blockingHelper.includes('operation()'), 'Blocking provider HTTP work must leave the Tauri UI thread')
+assert(blockingHelper.includes('let _scope = scope;'), 'The QA runtime lease must remain alive for the entire background operation')
 assert(libRs.includes('mod commands;'), 'Desktop command boundary must be declared from the composition root')
 assert(commandRs.includes('async fn verify_profile('), 'Availability verification command must be asynchronous')
 assert(commandRs.includes('async fn run_response_probe('), 'Laboratory response probe command must be asynchronous')
@@ -176,7 +210,10 @@ assert(commandRs.includes('run_blocking_command'), 'Network command adapters mus
 assert(commandRs.includes('async fn begin_chatgpt_login()'), 'Desktop must expose the ChatGPT official-login command')
 assert(commandRs.includes('.arg("login")'), 'ChatGPT login must delegate authentication to the official Codex login flow')
 assert(commandRs.includes('.args(["login", "status"])'), 'ChatGPT login status must be read from the official Codex command')
-assert(adapterTs.includes("isTauri && __CODEX_RELEASE_CHANNEL__ !== 'development'"), 'Development boards must not open or inspect a real ChatGPT login')
+assert(adapterTs.includes("(await getQaLiveValidationStatus()).mode === 'live-copy'"), '只有已校验真实副本允许开发版进入原生登录。')
+const qaNative = await readFile(join(root, 'src-tauri/src/qa.rs'), 'utf8')
+assert(qaNative.includes('validate_live()?') && qaNative.includes('cli_auth_credentials_store'), '真实验证登录必须绑定隔离目录和文件凭据。')
+assert(libRs.includes('开发版不修改 Windows 开机启动'), '开发版必须禁止修改系统开机启动。')
 assert(localBackendRs.includes('mpsc::sync_channel::<TcpStream>(QUEUED_CONNECTIONS)'), 'Local backend must queue only a bounded number of connections')
 assert(localBackendRs.includes('CONNECTION_WORKERS: usize = 8'), 'Local backend must use a fixed worker count')
 assert(localBackendRs.includes('TrySendError::Full'), 'Local backend must return a controlled busy response when saturated')
@@ -189,6 +226,7 @@ assertNotIncludes(mockDataTs, 'safeMode:', 'Browser preview mock must not displa
 assert(providerSidebarTsx.includes('DndContext'), 'Provider sorting must use the supported DnD context')
 assert(providerSidebarTsx.includes('PointerSensor'), 'Provider sorting must expose a pointer interaction path')
 assert(providerSidebarTsx.includes('KeyboardSensor'), 'Provider sorting must expose a keyboard interaction path')
+assert(providerSidebarTsx.includes('tabIndex={0}'), 'Provider list must be keyboard-focusable for scrolling')
 assert(providerRowTsx.includes('className="provider-drag-handle"'), 'Provider sorting must expose a dedicated drag handle')
 assertNotIncludes(appTsx, 'draggable={busy === null}', 'Provider sorting must not rely on native HTML draggable behavior')
 assert(preflightScript.includes('Cutover preflight (read-only)'), 'Cutover preflight must remain read-only')

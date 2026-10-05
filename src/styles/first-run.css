@@ -16,6 +16,8 @@
 
 .first-run-card {
   width: min(620px, calc(100vw - 56px));
+  min-width: 0;
+  box-sizing: border-box;
   display: grid;
   gap: 20px;
   padding: 32px 36px 34px;
@@ -248,17 +250,17 @@
   font-weight: var(--weight-strong);
 }
 
-.first-run-step.done { color: var(--text); }
+.first-run-step.seen { color: var(--text); }
 .first-run-step.active { color: var(--text); background: var(--accent-soft); border-color: rgba(15, 118, 110, .22); box-shadow: 0 6px 18px rgba(15, 118, 110, .08); }
 .first-run-step.active { animation: first-run-step-in .34s ease both; }
 .first-run-step-marker { display: grid; width: 24px; height: 24px; place-items: center; }
-.first-run-step.done .first-run-step-marker { color: var(--green); }
+.first-run-step.seen .first-run-step-marker { color: var(--muted); }
 .first-run-step.active .first-run-step-marker { color: var(--accent); }
 .first-run-step-copy { display: grid; min-width: 0; gap: 2px; }
 .first-run-step-copy strong { font-size: var(--type-label); line-height: var(--lh-body); font-weight: var(--weight-strong); }
 .first-run-step-copy small { color: var(--muted); font-size: var(--type-caption); line-height: var(--lh-caption); font-weight: var(--weight-regular); }
 .first-run-step-state { justify-self: end; color: var(--faint); font-size: var(--type-caption); line-height: var(--lh-caption); font-weight: var(--weight-strong); white-space: nowrap; }
-.first-run-step.done .first-run-step-state { color: var(--green); }
+.first-run-step.seen .first-run-step-state { color: var(--muted); }
 .first-run-step.active .first-run-step-state { color: var(--accent); }
 .first-run-step-dot { width: 17px; height: 17px; border: 2px solid var(--border-strong); border-radius: 50%; }
 .first-run-live-line { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; margin: 0; padding: 10px 12px; color: var(--muted); background: var(--panel-soft); border-radius: var(--radius-sm); font-size: var(--type-caption); line-height: var(--lh-caption); }
@@ -298,6 +300,8 @@
 
 .first-run-review {
   display: grid;
+  width: 100%;
+  min-width: 0;
   gap: 16px;
 }
 
@@ -314,6 +318,9 @@
 
 .first-run-review-summary {
   display: flex;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
   align-items: baseline;
   justify-content: space-between;
   gap: 14px;
@@ -325,10 +332,13 @@
 }
 
 .first-run-review-summary strong { color: var(--accent); font-size: 14px; }
-.first-run-review-summary span { color: var(--muted); font-size: 11px; }
+.first-run-review-summary span { min-width: 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 
 .first-run-review-list {
   display: grid;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   gap: 7px;
   max-height: min(360px, calc(100vh - 430px));
   overflow-y: auto;
@@ -339,6 +349,9 @@
 .first-run-review-row {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   align-items: start;
   gap: 8px;
   padding: 8px 10px;
@@ -351,6 +364,12 @@
 .first-run-review-row.ok { color: var(--green); }
 .first-run-review-row.warning { color: var(--amber); }
 .first-run-review-row.danger { color: var(--red); }
+.first-run-step.success .first-run-step-marker { color: var(--green); }
+.first-run-step.warning .first-run-step-marker, .first-run-review-icon.warning { color: var(--amber); }
+.first-run-step.failure .first-run-step-marker, .first-run-step.blocked .first-run-step-marker, .first-run-review-icon.danger { color: var(--red); }
+.first-run-review-row details { min-width: 0; }
+.first-run-review-row summary { cursor: pointer; color: currentColor; font-size: 12px; padding-block: 4px; }
+.first-run-review-row details p { max-width: 100%; color: var(--muted); font-size: 12px; line-height: 1.5; margin: 6px 0 0; overflow-wrap: anywhere; }
 .first-run-review-row > span { display: grid; gap: 2px; min-width: 0; }
 .first-run-review-row strong { color: var(--text); font-size: 12px; font-weight: 760; }
 .first-run-review-row small { color: var(--muted); font-size: var(--type-caption); line-height: var(--lh-caption); overflow-wrap: anywhere; }

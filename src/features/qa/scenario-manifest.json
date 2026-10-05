@@ -1,0 +1,133 @@
+[
+  {
+    "id": "first-run-review",
+    "index": "01",
+    "title": "首次启动检查",
+    "description": "从第 1 页重新走一遍首次启动流程；可在流程内上一步、下一步反复查看。",
+    "dataBoundary": "空白隔离资料",
+    "checks": "首屏、后端真实回执与滚动同步、绿橙红汇总、全部降级与全部需处理模拟、任何未通过状态禁止继续、重新检查与中断恢复",
+    "action": "从第 1 页开始",
+    "impactPaths": [
+      "src/features/first-run/**",
+      "src/App.tsx",
+      "src/App.css",
+      "src/types.ts",
+      "src/operations.ts",
+      "scripts/qa/**"
+    ],
+    "automation": [
+      "scenario-contract",
+      "preview-ui",
+      "initialization-native",
+      "initialization-stream",
+      "first-run-progress"
+    ],
+    "status": "active",
+    "lastReviewed": "2026-10-05"
+  },
+  {
+    "id": "daily-baseline",
+    "index": "02",
+    "title": "日常模拟检查",
+    "description": "载入完整但无凭据的基准资料，作为每次改版都能回看的正常工作区。",
+    "dataBoundary": "隔离 fixture",
+    "checks": "正常信息密度、状态文案与产品整体层级；名称/API 同行、接口/模型整行、输入框尾部操作、完整 URL 标题行右对齐与收起时的模型类型",
+    "action": "载入基准日常样本",
+    "impactPaths": [
+      "src/features/providers/**",
+      "src/features/lab/**",
+      "src/features/safety/**",
+      "src/App.tsx",
+      "src/App.css",
+      "src/styles/**",
+      "src/types.ts",
+      "src/operations.ts",
+      "scripts/qa/**"
+    ],
+    "automation": [
+      "scenario-contract",
+      "preview-ui"
+    ],
+    "status": "active",
+    "lastReviewed": "2026-09-19"
+  },
+  {
+    "id": "daily-density",
+    "index": "02",
+    "title": "边界排版检查",
+    "description": "注入长名称、长说明和更多列表项，用来发现窄窗口中的截断、挤压和滚动问题。",
+    "dataBoundary": "隔离 fixture",
+    "checks": "服务商与连接状态、模型空/多/失败、活动与诊断详情、费用与恢复列表、静态说明与最小窗口",
+    "action": "载入边界排版样本",
+    "impactPaths": [
+      "src/features/**",
+      "src/shared/**",
+      "src/App.tsx",
+      "src/App.css",
+      "src/styles/**",
+      "src-tauri/src/lib.rs",
+      "src/adapter.ts",
+      "scripts/qa-smoke.mjs",
+      "src/types.ts",
+      "src/operations.ts",
+      "scripts/qa/**"
+    ],
+    "automation": [
+      "scenario-contract",
+      "preview-ui"
+    ],
+    "status": "active",
+    "lastReviewed": "2026-09-19"
+  },
+  {
+    "id": "daily-operation-flow",
+    "index": "02",
+    "title": "状态反馈预览",
+    "description": "只展示进行中、成功和错误等状态如何在界面中出现；不执行保存、刷新、可用性检查或恢复。",
+    "dataBoundary": "隔离 fixture",
+    "checks": "加载/成功/错误停留、结束预览、下次模型刷新失败及重试",
+    "action": "查看反馈状态",
+    "impactPaths": [
+      "src/App.tsx",
+      "src/App.css",
+      "src/features/**",
+      "src/adapter.ts",
+      "src-tauri/src/lib.rs",
+      "src/types.ts",
+      "src/operations.ts",
+      "scripts/qa/**"
+    ],
+    "automation": [
+      "scenario-contract",
+      "preview-ui"
+    ],
+    "status": "active",
+    "lastReviewed": "2026-09-19"
+  },
+  {
+    "id": "controlled-live-validation",
+    "index": "03",
+    "title": "受控真实验证",
+    "description": "在当前窗口进入真实资料副本；首次进入须确认备份，不自动登录或发送付费请求。",
+    "dataBoundary": "进入时确认真实副本，日常 Codex 不接管",
+    "checks": "同窗口进入返回、在途操作阻止切换、损坏副本回退、登录类型、凭据目录绑定及恢复",
+    "action": "备份并进入真实模式",
+    "impactPaths": [
+      "src/adapter.ts",
+      "src-tauri/src/lib.rs",
+      "src/features/qa/**",
+      "src/types.ts",
+      "src/operations.ts",
+      "scripts/qa/**",
+      "src-tauri/src/qa.rs",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/storage.rs"
+    ],
+    "automation": [
+      "scenario-contract",
+      "native-safety"
+    ],
+    "status": "active",
+    "lastReviewed": "2026-09-19"
+  }
+]

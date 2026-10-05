@@ -1,7 +1,24 @@
+export type InitializationStep = {
+  index: number
+  id: string
+  label: string
+  status: 'running' | 'success' | 'warning' | 'failure' | 'blocked'
+  detail: string
+  action: string
+}
+
+export type InitializationReport = {
+  steps: InitializationStep[]
+  state: AppState | null
+  canContinue: boolean
+}
+
 export type ProviderProfile = {
+  connectionKind?: 'relay' | 'official-api' | 'chatgpt-account'
   id: string
   name: string
   baseUrl: string
+  endpointMode?: 'auto' | 'full'
   model: string
   reasoningEffort: 'minimal' | 'low' | 'medium' | 'high'
   note: string
@@ -19,6 +36,7 @@ export type ProviderProfile = {
     | 'request_incompatible'
     | 'protocol_incompatible'
     | 'chat_completions_only'
+    | 'anthropic_messages_only'
     | 'stream_interrupted'
     | 'response_shape_unconfirmed'
     | 'response_unparseable'
@@ -59,6 +77,7 @@ export type ProviderModel = {
   lastVerificationAt?: string
   lastVerificationStatus?: ProviderProfile['verificationStatus']
   lastVerificationDetail?: string
+  codexEnabled?: boolean
 }
 
 export type ModelCatalog = {
@@ -132,6 +151,7 @@ export type CostCalibration = {
   paidCny: string
   consumableCredit: string
   debitCredit: string
+  debitConfirmed?: boolean
   creditUnitLabel: string
   model: string
   probeVersion: string
@@ -153,7 +173,7 @@ export type ResponseProbeObservation = {
   model: string
   probeVersion: string
   observedAt: string
-  status: 'preview' | 'usage_only' | 'correlation_only' | 'final_cost_inline' | 'no_signal' | 'failed'
+  status: 'preview' | 'usage_only' | 'correlation_only' | 'final_cost_inline' | 'cost_candidate_unverified' | 'model_mismatch' | 'no_signal' | 'failed'
   httpStatus?: number
   requestId?: string
   responseId?: string
@@ -171,13 +191,25 @@ export type ResponseProbeObservation = {
   detail: string
 }
 
+export type ProviderStability = {
+  providerId: string
+  providerName: string
+  sampleCount: number
+  successCount: number
+  failedCount: number
+  timeoutCount: number
+  totalTokens: number
+  lastObservedAt?: string
+  source: string
+}
+
 export type BackupItem = {
   id: string
   time: string
   label: string
   files: number
   fileCategories: string[]
-  kind: 'initial_install' | 'daily' | 'manual' | 'before_switch' | 'before_restore' | 'legacy_backup' | 'invalid_backup'
+  kind: 'initial_install' | 'signalman_initial_takeover' | 'daily' | 'manual' | 'before_switch' | 'before_restore' | 'legacy_backup' | 'invalid_backup'
   retentionManaged: boolean
   restoreReady?: boolean
   restoreDetail?: string
@@ -233,6 +265,10 @@ export type UpdateInfo = {
 export type ChatGptLoginStatus = {
   state: 'not_connected' | 'waiting' | 'connected'
   detail: string
+  executablePath?: string
+  executableSource?: string
+  codexVersion?: string
+  checkedAt?: string
 }
 
 export type AppState = {
@@ -253,6 +289,7 @@ export type AppState = {
   activity: ActivityItem[]
   costCalibrations: CostCalibration[]
   responseProbes: ResponseProbeObservation[]
+  providerStability?: ProviderStability[]
   backups: BackupItem[]
   configurationProtection: ConfigurationProtection
   connectionEnvironment: ConnectionEnvironment
@@ -285,9 +322,11 @@ export type ConfigurationDrift = {
 }
 
 export type EditableProfile = {
+  connectionKind?: 'relay' | 'official-api' | 'chatgpt-account'
   id: string
   name: string
   baseUrl: string
+  endpointMode?: 'auto' | 'full'
   model: string
   note: string
   apiKey: string
