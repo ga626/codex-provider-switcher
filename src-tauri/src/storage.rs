@@ -2551,6 +2551,11 @@ pub(crate) fn append_bound_provider_auth(
     // Codex launches the already-installed Signalman executable for one short
     // credential read. The helper exits immediately and never writes the key
     // into config.toml or Codex's OAuth-owned auth.json.
+    // Configuration generation can run before the first app-data write (most
+    // notably on a clean CI runner), so make the helper's owned root concrete
+    // before canonicalizing it. This keeps the generated command stable while
+    // avoiding a spurious ENOENT from Path::canonicalize.
+    fs::create_dir_all(data_root)?;
     let command = std::env::current_exe()
         .map_err(|error| SwitcherError::Message(format!("无法定位 Signalman 凭据助手：{error}")))?;
     #[cfg(not(test))]
