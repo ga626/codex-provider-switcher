@@ -118,15 +118,22 @@ assert(!qaScenarioConsoleTsx.includes('失败页'), 'First-run failure details m
 assert(adapterTs.includes("invoke<AppState>('qa_reset_scenario', { scenarioId })"), 'Native development board must invoke the guarded QA reset command')
 assert(adapterTs.includes("export const isDevelopmentBuild = __CODEX_RELEASE_CHANNEL__ === 'development'"), 'QA launcher must be gated by the development release channel')
 assert(libRs.includes('fn development_fixture_roots()'), 'Native reset must resolve the isolated development runtime before changing any data')
-assert(libRs.includes('!app_data.starts_with(&runtime_root) || !codex_home.starts_with(&runtime_root)'), 'Native reset must reject paths outside the project runtime')
+const normalizedLibRs = libRs.replace(/\s+/g, ' ')
+assert(normalizedLibRs.includes('!app_data.starts_with(&runtime_root) || !codex_home.starts_with(&runtime_root)'), 'Native reset must reject paths outside the project runtime')
 assert(libRs.includes('未知 QA 场景，已拒绝重置'), 'Native reset must reject unknown scenario identifiers')
 assert(libRs.includes('QA 场景控制台只在开发版可用'), 'Native reset must reject non-development builds')
 assert(appCss.includes('.qa-control-rail'), 'Development board must define an external QA control rail')
 assert(appCss.includes('grid-template-columns: 220px minmax(1280px, 1fr)'), 'QA rail must preserve the product canvas minimum width')
 assert(labWorkspaceText.includes('固定测试模型 <FieldHint'), 'Cost ranking must explain the fixed benchmark model at its control')
-assert(labWorkspaceText.includes('实付人民币 ÷ 到账额度'), 'Cost ranking must explain the user effective credit rate')
+assert(
+  labWorkspaceText.includes('实付人民币 ÷ 到账额度') || labWorkspaceText.includes('实际支付 ÷ 实际到账'),
+  'Cost ranking must explain the user effective credit rate',
+)
 assert(labWorkspaceText.includes('cacheWriteUsdPerMillion') && labWorkspaceText.includes('uncachedInput'), 'Cost ranking must calculate the official comparison from separate usage classes')
-assert(labWorkspaceText.includes('实测成本') && labWorkspaceText.includes('实际汇率') && labWorkspaceText.includes('官方对照'), 'Cost ranking must keep actual cost, user rate and official estimate separate')
+assert(
+  labWorkspaceText.includes('官方购买力') && labWorkspaceText.includes('账单换算') && labWorkspaceText.includes('实测成本') && labWorkspaceText.includes('实际汇率'),
+  'Cost ranking must keep actual cost, user rate and official estimate separate',
+)
 assertNotIncludes(appTsx, '最低成本 = 100 分', 'Cost ranking must not show an unlinked score explanation')
 const developmentProfileIds = Object.keys(developmentFixtureCatalog.profiles)
 assert(developmentProfileIds.length >= 7, 'Development demo catalog must contain the provider and authentication scenarios')
@@ -155,12 +162,12 @@ assert(tauriConfig.app.windows[0].minHeight >= 700, 'Tauri minimum height must p
 assert(!('trayIcon' in tauriConfig.app), 'Tauri config must not define a default tray icon')
 
 assert(cargoToml.includes('tauri-plugin-autostart'), 'Cargo must include the desktop autostart integration')
-assertNotIncludes(cargoToml, 'tray-icon', 'src-tauri/Cargo.toml')
+assert(cargoToml.includes('tray-icon'), 'src-tauri/Cargo.toml must enable the system tray used by the close/minimize flow')
 assert(libRs.includes('tauri_plugin_autostart::init'), 'Tauri desktop must initialize the Windows autostart integration')
 assert(libRs.includes('.autolaunch()') && libRs.includes('.is_enabled()'), 'Tauri desktop must read the real Windows autostart state')
 assert(libRs.includes('fn toggle_auto_start(app: tauri::AppHandle, enabled: bool)'), 'Tauri desktop must expose a real autostart toggle')
-assertNotIncludes(libRs, 'TrayIconBuilder', 'src-tauri/src/lib.rs')
-assertNotIncludes(libRs, 'install_tray', 'src-tauri/src/lib.rs')
+assert(libRs.includes('TrayIconBuilder'), 'Desktop shell must install the system tray used by the close/minimize flow')
+assert(libRs.includes('install_system_tray'), 'Desktop shell must wire the system tray during startup')
 assert(capabilityText.includes('process:allow-restart'), 'Tauri capability must grant only process restart')
 assertNotIncludes(capabilityText, 'process:default', 'Tauri capability')
 assert(capabilityText.includes('opener:allow-open-url'), 'Tauri capability must explicitly allow the update Release URL')
