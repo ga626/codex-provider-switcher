@@ -270,6 +270,11 @@ const runtimeEnv = {
   CODEX_PROVIDER_SWITCHER_CODEX_HOME: '',
   CODEX_HOME: codexDir,
   CODEX_PROVIDER_SWITCHER_APP_DATA_DIR: join(localAppData, 'CodeX Provider Switcher'),
+  // CI intentionally has no Codex Desktop installation. The Rust debug build
+  // accepts this fixture only in debug mode; production always probes Codex.
+  CODEX_PROVIDER_SWITCHER_BUNDLED_MODEL_CATALOG: JSON.stringify({
+    models: [{ slug: 'gpt-5-codex' }],
+  }),
   CODEX_PROVIDER_SWITCHER_RELEASES_API: `http://127.0.0.1:${providerPort}/releases`,
 }
 
@@ -580,11 +585,16 @@ try {
   const preparedEnvironment = await api('/api/config/prepare-environment', { layerId: 'user-config' })
   assert(preparedEnvironment.connectionEnvironment?.status === 'ready', 'connection environment was not marked ready after explicit setup')
   assert(preparedEnvironment.connectionEnvironment?.selectedLayerId === 'user-config', 'connection environment did not retain the selected layer')
-  assert(await readFile(configPath, 'utf8') === originalConfig, 'environment setup changed an already compatible config.toml')
+  const preparedConfig = await readFile(configPath, 'utf8')
+  assert(preparedConfig !== originalConfig, 'environment setup did not apply the fixed custom identity')
+  assert(preparedConfig.includes('model_provider = "custom"'), 'environment setup did not select the fixed custom identity')
+  assert(preparedConfig.includes('name = "Signalman AI"'), 'environment setup did not write the managed provider name')
+  assert(!preparedConfig.includes('base_url = "https://baseline.example/v1"'), 'environment setup retained the old provider endpoint')
+  assert(protectedConfigFragments.every((fragment) => preparedConfig.includes(fragment)), 'environment setup changed a protected Codex section')
+  assert(await readFile(authPath, 'utf8') === originalAuth, 'environment setup changed auth.json')
 
-  // A genuinely new install may have neither file yet. Preparation must not
-  // select an empty provider before the user has supplied its endpoint, model,
-  // and credential. The first real switch materializes that complete provider.
+  // A new install still receives the fixed identity; endpoint and credentials
+  // remain absent until the first confirmed provider switch.
   await rm(configPath, { force: true })
   await rm(authPath, { force: true })
   const blankPrepared = await api('/api/config/prepare-environment', { layerId: 'user-config' })
@@ -592,8 +602,9 @@ try {
   const blankAuth = await readFile(authPath, 'utf8')
   assert(blankPrepared.connectionEnvironment?.status === 'ready', 'blank config/auth preparation did not complete')
   assert(blankConfig.includes('disable_response_storage = true'), 'blank config preparation did not create the required storage setting')
-  assert(!blankConfig.includes('model_provider = "custom"'), 'blank config preparation selected an empty custom provider')
-  assert(!blankConfig.includes('[model_providers.custom]'), 'blank config preparation created an empty custom provider')
+  assert(blankConfig.includes('model_provider = "custom"'), 'blank config preparation did not select the fixed identity')
+  assert(blankConfig.includes('[model_providers.custom]'), 'blank config preparation did not create the managed provider section')
+  assert(!blankConfig.includes('base_url') && !blankConfig.includes('api_key'), 'blank preparation invented an endpoint or credential')
   assert(JSON.parse(blankAuth) && typeof JSON.parse(blankAuth) === 'object', 'blank auth preparation did not create a JSON object')
   const firstSwitchPreflight = await prepareSwitch(profile.id)
   const firstSwitch = await confirmSwitch(profile.id, firstSwitchPreflight.operationId)
@@ -866,7 +877,7 @@ try {
   assert(profileLayerState.connectionEnvironment?.selectedLayerId === 'user-config', 'a newly discovered profile must not silently replace the selected configuration layer')
   await rm(join(codexDir, 'friend.config.toml'))
 
-  const endpointMismatch = { ...profile, id: 'endpoint-mismatch', name: 'Endpoint mismatch', apiKey: 'sk-endpoint-mismatch' }
+  const endpointMismatch = { ...profile, id: 'endpoint-mismatch', name: 'Endpoint mismatch', apiKey: 'sk-endpoint-mismatch', endpointMode: 'full' }
   await api('/api/profiles/save', { profile: endpointMismatch })
   const endpointVerification = await api('/api/profiles/verify', { profileId: endpointMismatch.id })
   const endpointProfile = endpointVerification.profiles.find((item) => item.id === endpointMismatch.id)

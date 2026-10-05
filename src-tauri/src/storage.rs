@@ -1352,7 +1352,12 @@ pub(crate) fn backups_dir() -> Result<PathBuf, SwitcherError> {
     // separate from the user's Codex home. Existing app-data backups remain
     // the source of truth until explicitly migrated; never move or delete
     // them implicitly.
-    if !is_development_release_channel() {
+    // An explicit app-data root is used by isolated QA/functional runs and is
+    // authoritative there; never let a stale target/build-directory backup
+    // shadow that fixture.
+    let has_explicit_app_data_root = env::var_os(APP_DATA_DIR_ENV)
+        .is_some_and(|value| !value.is_empty());
+    if !is_development_release_channel() && !has_explicit_app_data_root {
         if let Ok(executable) = std::env::current_exe() {
             if let Some(install_dir) = executable.parent() {
                 let preferred = install_dir.join(INSTALL_BACKUP_DIR);

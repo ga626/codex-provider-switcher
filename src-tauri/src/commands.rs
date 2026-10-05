@@ -95,6 +95,19 @@ fn command_for(path: &PathBuf) -> Command {
 }
 
 pub(crate) fn bundled_model_catalog() -> Result<Value, SwitcherError> {
+    #[cfg(debug_assertions)]
+    if let Some(raw) = env::var_os(super::BUNDLED_MODEL_CATALOG_ENV) {
+        let catalog: Value = serde_json::from_str(&raw.to_string_lossy())
+            .map_err(|_| SwitcherError::Message("隔离测试模型目录不是有效 JSON。".into()))?;
+        if catalog
+            .get("models")
+            .and_then(Value::as_array)
+            .is_some_and(|models| !models.is_empty())
+        {
+            return Ok(catalog);
+        }
+        return Err(SwitcherError::Message("隔离测试模型目录为空。".into()));
+    }
     let executable = locate_codex()?;
     let isolated_home = super::app_data_dir()?.join("model-catalog-discovery-home");
     fs::create_dir_all(&isolated_home)?;

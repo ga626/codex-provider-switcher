@@ -82,6 +82,11 @@ const CODEX_HOME_ENV: &str = "CODEX_PROVIDER_SWITCHER_CODEX_HOME";
 const OFFICIAL_CODEX_HOME_ENV: &str = "CODEX_HOME";
 const APP_DATA_DIR_ENV: &str = "CODEX_PROVIDER_SWITCHER_APP_DATA_DIR";
 const RELEASES_API_ENV: &str = "CODEX_PROVIDER_SWITCHER_RELEASES_API";
+// Debug-only fixture hook used by the isolated backend smoke. Production reads
+// the catalog from the installed Codex executable instead.
+#[cfg(debug_assertions)]
+pub(crate) const BUNDLED_MODEL_CATALOG_ENV: &str =
+    "CODEX_PROVIDER_SWITCHER_BUNDLED_MODEL_CATALOG";
 const RELEASES_API_URL: &str =
     "https://api.github.com/repos/ga626/codex-provider-switcher/releases?per_page=20";
 const PROTECTED_FILE_SUFFIX: &str = ".dpapi";
