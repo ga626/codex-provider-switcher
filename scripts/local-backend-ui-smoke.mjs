@@ -147,6 +147,7 @@ try {
       paidCny: '10',
       consumableCredit: '1000',
       debitCredit: '0.0008',
+      debitConfirmed: true,
       creditUnitLabel: '同一平台额度',
       model: 'gpt-5.6-terra',
       probeVersion: 'cost-calibration-v2',
@@ -202,14 +203,21 @@ try {
     if (!creditUnits.includes(expectedUnit)) throw new Error(`cost calibration is missing credit unit: ${expectedUnit}`)
   }
   await page.getByRole('button', { name: '运行固定测试' }).click()
-  await page.getByText('已读取测试额度').waitFor()
-  if (await page.getByLabel('本次真实扣减').inputValue() !== '0.000524') {
-    throw new Error('cost test must prefill the provider cost candidate')
+  await page.getByText('需要从平台日志补充真实扣额').waitFor()
+  if (await page.getByLabel('本次真实扣减').inputValue()) {
+    throw new Error('cost candidate must not be used as the platform debit')
   }
   await page.getByLabel('实际支付人民币').fill('10')
   await page.getByLabel('实际到账额度').fill('1000')
+  await page.getByLabel('本次真实扣减').fill('0.000524')
+  const debitConfirmation = page.locator('input[aria-label="已核对平台真实扣减"]')
+  if (await debitConfirmation.count() !== 1) {
+    await page.screenshot({ path: join(outputDir, 'cost-calibration-missing-confirmation.png'), fullPage: true })
+    throw new Error(`cost calibration confirmation checkbox missing; url=${page.url()} body=${(await page.locator('body').innerText()).slice(-1200)}`)
+  }
+  await debitConfirmation.check()
   await page.getByRole('button', { name: '计算并保存' }).click()
-  await page.getByText('¥0.05').waitFor()
+  await page.getByText('$100.00 / ¥1').waitFor()
   await page.screenshot({ path: join(outputDir, 'cost-calibration.png'), fullPage: true })
   await page.getByRole('button', { name: /安全与恢复/ }).click()
   await page.getByRole('heading', { name: '首次启动基线备份已就绪' }).waitFor()
@@ -316,7 +324,7 @@ try {
     url: baseUrl,
     outputDir,
     screenshots: ['switch-check.png', 'cost-calibration.png', 'configuration-protection.png', 'application-settings.png', 'risk-confirmation.png'],
-    assertion: 'frontend rendered through the local Web backend with switching scoped to the selected provider page, a fixed cost test that prefilled a returned provider cost candidate, protected recovery points, application settings, and Web-mode autostart protection',
+    assertion: 'frontend rendered through the local Web backend with switching scoped to the selected provider page, a fixed cost test that keeps a returned cost candidate separate from the manually confirmed platform debit, protected recovery points, application settings, and Web-mode autostart protection',
   }, null, 2))
 } finally {
   await browser.close()

@@ -4,6 +4,17 @@
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "start-scheduled-process.ps1")
+
+# Serialise source-tree desktop builds. A second launch must wait for the
+# first build/launch to finish instead of racing the locked executable.
+$launchMutex = New-Object System.Threading.Mutex($false, "Local\SignalmanAI.DevDesktop.Launch")
+$mutexAcquired = $false
+$mutexAcquired = $launchMutex.WaitOne([TimeSpan]::FromMinutes(10))
+if (-not $mutexAcquired) {
+    $launchMutex.Dispose()
+    throw "Timed out waiting for another development desktop launch to finish."
+}
 
 $runtime = & (Join-Path $PSScriptRoot "prepare-dev-runtime.ps1") -Reset:$Reset
 $projectRoot = $runtime.ProjectRoot
@@ -25,24 +36,15 @@ Write-Host "Build: npx tauri build --no-bundle"
 
 if ($ExplainOnly) {
     Write-Host "ExplainOnly: not creating runtime files, building, or launching the app."
+    $launchMutex.ReleaseMutex()
+    $launchMutex.Dispose()
     exit 0
 }
 
 Push-Location $projectRoot
 try {
+    & (Join-Path $PSScriptRoot 'close-dev-desktop.ps1') -ProjectRoot $projectRoot
     $desktopExecutable = Join-Path $projectRoot "src-tauri\target\release\codex-provider-switcher.exe"
-    if (Test-Path -LiteralPath $desktopExecutable -PathType Leaf) {
-        $runningDevelopmentProcesses = @(Get-CimInstance Win32_Process -Filter "Name='codex-provider-switcher.exe'" | Where-Object {
-            $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -eq [System.IO.Path]::GetFullPath($desktopExecutable))
-        })
-        foreach ($runningDevelopmentProcess in $runningDevelopmentProcesses) {
-            Stop-Process -Id $runningDevelopmentProcess.ProcessId -Force -ErrorAction Stop
-            Wait-Process -Id $runningDevelopmentProcess.ProcessId -Timeout 5 -ErrorAction SilentlyContinue
-        }
-        if ($runningDevelopmentProcesses.Count -gt 0) {
-            Write-Host "[PASS] Closed $($runningDevelopmentProcesses.Count) previous source-tree development desktop process(es)."
-        }
-    }
 
     $buildSha = (git rev-parse --short=8 HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($buildSha)) {
@@ -79,11 +81,35 @@ try {
     if (-not (Test-Path -LiteralPath $desktopExecutable -PathType Leaf)) {
         throw "Current-source desktop executable is missing: $desktopExecutable"
     }
-    $desktopProcess = Start-Process -FilePath $desktopExecutable -WorkingDirectory $projectRoot -PassThru
-    Start-Sleep -Seconds 1
-    $desktopProcess.Refresh()
-    if ($desktopProcess.HasExited) {
-        throw "Current-source desktop candidate exited during startup with code $($desktopProcess.ExitCode)."
+    $launch = Start-SignalmanScheduledProcess -FilePath $desktopExecutable -WorkingDirectory $projectRoot -Environment @{
+        CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = "development"
+        CODEX_PROVIDER_SWITCHER_BUILD_SHA = $buildSha
+        CODEX_PROVIDER_SWITCHER_APP_DATA_DIR = $appDataDir
+        CODEX_PROVIDER_SWITCHER_CODEX_HOME = $codexHome
+    }
+    $desktopProcessId = $null
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        Start-Sleep -Milliseconds 250
+        $desktopProcessId = @(Get-CimInstance Win32_Process -Filter "Name='codex-provider-switcher.exe'" | Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -eq [System.IO.Path]::GetFullPath($desktopExecutable)) } | Select-Object -First 1 -ExpandProperty ProcessId)
+    } while ($null -eq $desktopProcessId -and (Get-Date) -lt $deadline)
+    if ($null -eq $desktopProcessId) { throw "Scheduled development desktop did not start." }
+    $desktopProcess = Get-Process -Id $desktopProcessId -ErrorAction Stop
+    $ready = $false
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        Start-Sleep -Milliseconds 500
+        $desktopProcess.Refresh()
+        if ($desktopProcess.HasExited) {
+            throw "Current-source desktop candidate exited during startup with code $($desktopProcess.ExitCode)."
+        }
+        if ($desktopProcess.MainWindowHandle -ne [IntPtr]::Zero) {
+            $ready = $true
+            break
+        }
+    } while ((Get-Date) -lt $deadline)
+    if (-not $ready) {
+        throw "Current-source desktop candidate stayed alive but did not create a window within 30 seconds."
     }
     Add-Type @'
 using System;
@@ -97,6 +123,14 @@ public static class SignalmanDailyWindowTitle {
     if ($desktopProcess.MainWindowHandle -ne [IntPtr]::Zero) {
         [SignalmanDailyWindowTitle]::SetWindowText($desktopProcess.MainWindowHandle, "Signalman AI - DEV - DAILY - $buildSha") | Out-Null
     }
+    $desktopStateFile = Join-Path $runtimeRoot "desktop-state.json"
+    [pscustomobject]@{
+        pid = $desktopProcessId
+        executable = [System.IO.Path]::GetFullPath($desktopExecutable)
+        buildSha = $buildSha
+        runtimeRoot = [System.IO.Path]::GetFullPath($runtimeRoot)
+        startedAt = (Get-Date).ToString("o")
+    } | ConvertTo-Json | Set-Content -LiteralPath $desktopStateFile -Encoding UTF8
     Write-Host "[PASS] Isolated development desktop started (PID $($desktopProcess.Id), revision $buildSha)."
 }
 finally {
@@ -110,4 +144,8 @@ finally {
         }
     }
     Pop-Location
+    if ($mutexAcquired) {
+        $launchMutex.ReleaseMutex()
+    }
+    $launchMutex.Dispose()
 }

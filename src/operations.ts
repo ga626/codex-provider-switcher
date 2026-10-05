@@ -7,6 +7,7 @@ export type OperationId =
   | 'delete-cost-calibration'
   | 'install-update'
   | 'prepare-connection-environment'
+  | 'qa-reset-scenario'
   | 'prepare-switch'
   | 'preview-models'
   | 'refresh'

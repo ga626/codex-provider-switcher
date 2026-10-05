@@ -7,7 +7,7 @@ export type GuideViewId = 'providers' | 'models' | 'switch-check' | 'protection'
 export type GuideChapterId = 'initialization' | 'providers' | 'protection' | 'timeline' | 'lab' | 'overview'
 export type GuideProgress = Record<GuideChapterId, { lastStep: number; completedAt?: string; dismissedAt?: string }>
 
-export const GUIDE_PROGRESS_KEY = 'signalman-ai-guide-progress-v1'
+export const GUIDE_PROGRESS_KEY = __CODEX_RELEASE_CHANNEL__ === 'development' ? 'signalman-ai-qa-guide-progress-v1' : 'signalman-ai-guide-progress-v1'
 
 export const guideChapterForView = (view: GuideViewId): GuideChapterId => {
   if (view === 'protection') return 'protection'
@@ -45,7 +45,7 @@ type GuideChapter = { title: string; summary: string; steps: GuideStep[] }
 export const GUIDE_CHAPTERS: Record<GuideChapterId, GuideChapter> = {
   initialization: {
     title: '初始化配置', summary: '准备连接环境并跑通第一个服务商。', steps: [
-      { id: 'environment', title: '先准备连接环境', detail: '新电脑的 Codex 配置可能不同。先创建恢复点，再只统一 Signalman 管理的连接字段；项目、MCP、插件和历史记录不会被改动。', target: 'providers.environment', view: 'providers' },
+      { id: 'environment', title: '先初始化 Signalman', detail: '不需要判断旧 Codex 处于什么状态。程序会先备份旧连接，再固定使用 custom 身份；项目、MCP、插件和历史记录不会被删除。', target: 'providers.environment', view: 'providers' },
       { id: 'add', title: '选择连接来源', detail: '点击加号后，先选择 ChatGPT 官方账号、厂商官方 API 或中转站。三种来源使用各自的登录或密钥配置，不会混在一起。', target: 'providers.add', view: 'providers' },
       { id: 'name', title: '填写服务商名称', detail: '给这条连接起一个容易认出的名字，例如“公司中转站”。', target: 'providers.name', view: 'providers' },
       { id: 'endpoint', title: '填写接口地址', detail: '粘贴服务商提供的 API 基地址。Codex 连接失败时，可尝试在末尾补上 /v1。', target: 'providers.endpoint', view: 'providers' },
@@ -60,7 +60,7 @@ export const GUIDE_CHAPTERS: Record<GuideChapterId, GuideChapter> = {
     title: '服务商', summary: '管理已有连接、模型、测试和切换。', steps: [
       { id: 'list', title: '服务商列表', detail: '点击条目开始编辑；可用拖动手柄或键盘调整显示顺序。', target: 'providers.list', view: 'providers' },
       { id: 'add', title: '新增连接', detail: '加号先让你选择三种来源：ChatGPT 官方账号使用 OpenAI 登录；厂商官方 API 使用厂商自己的密钥；中转站使用中转地址和密钥。新增不会覆盖已有连接。', target: 'providers.add', view: 'providers' },
-      { id: 'form', title: '登录或填写连接', detail: 'ChatGPT 官方账号会从本软件发起登录，并在 OpenAI 官方页面完成授权；官方 API 和中转站在这里填写名称、接口和密钥。账号密码不会交给 Signalman。', target: 'providers.form', view: 'providers' },
+      { id: 'form', title: '登录或填写连接', detail: '官方账号由本软件发起 Codex 登录，在 OpenAI 页面授权，可取消等待。确认登录后填写账号可用的模型，再点“使用官方模型”选择官方推理；仅登录不会自动切换请求通道。官方 API 和中转站填写各自的地址与密钥。第三方凭据独立提供，不覆盖官方登录。只有普通聊天接口的服务商仍需要协议适配。', target: 'providers.form', view: 'providers' },
       { id: 'model', title: '模型选择与刷新', detail: '未保存时，刷新使用当前填写的信息且不会保存；已保存时，刷新对应连接的模型目录。目录按适配程度分组，黄色需要确认风险，灰色会说明暂不可用的原因。', target: 'providers.model', view: 'providers' },
       { id: 'save', title: '保存与管理', detail: '保存后才会更新检查结果。这里还可以复制配置、设为默认或删除不再需要的服务商。', target: 'providers.actions', view: 'providers' },
       { id: 'availability', title: '先看四项状态', detail: '右侧先用“环境、设置、模型、测试”四项短结论告诉你是否准备好。“完整可用”表示流式响应正常结束；“基本可用”表示短请求成功但流式能力未完全证明；黄色需要确认，红色表示当前不能完成。', target: 'providers.availability', view: 'providers' },
@@ -71,11 +71,11 @@ export const GUIDE_CHAPTERS: Record<GuideChapterId, GuideChapter> = {
   protection: {
     title: '安全与恢复', summary: '查看保护范围、备份和恢复入口。', steps: [
       { id: 'baseline', title: '首次启动基线', detail: '这是首次写入前的恢复点，会永久保留，用于确认原始状态。', target: 'protection.baseline', view: 'protection' },
-      { id: 'environment', title: '重新准备连接环境', detail: '当连接设置需要重新扫描时使用。它会创建恢复点，只处理 Signalman 管理的连接字段。', target: 'protection.reprepare', view: 'protection' },
+      { id: 'environment', title: '重新初始化 Signalman', detail: '固定接管用户级 Codex 配置，先备份再清理连接身份冲突。若配置已损坏无法读取，应使用安全恢复，不要把此操作当作修复。', target: 'protection.reprepare', view: 'protection' },
       { id: 'scope', title: '保护范围', detail: '这里明确区分本工具管理的服务商、模型和接口地址，以及始终保持不变的 MCP、插件和项目设置。', target: 'protection.scope', view: 'protection' },
       { id: 'backup', title: '立即备份当前状态', detail: '手动备份适合保存一个已验证可用的状态。达到数量上限时会先提示你将替换最早的一条。', target: 'protection.manual-backup', view: 'protection' },
       { id: 'groups', title: '恢复点分类', detail: '首次基线、自动保护和手动保存分别说明来源和保留方式。', target: 'protection.groups', view: 'protection' },
-      { id: 'restore', title: '安全恢复', detail: '恢复前需要输入“恢复”确认。它只回退 Signalman 写入的字段，不覆盖你的 MCP、插件和项目设置。', target: 'protection.restore', view: 'protection' },
+      { id: 'restore', title: '安全恢复', detail: '普通恢复只回退 Signalman 管理的字段。若 config.toml 损坏或核心设置被改乱，可明确输入“恢复全部配置”用备份完整替换；MCP、插件和项目设置也会回到备份时的状态，auth.json 保持不变。', target: 'protection.restore', view: 'protection' },
     ],
   },
   timeline: {
@@ -92,7 +92,7 @@ export const GUIDE_CHAPTERS: Record<GuideChapterId, GuideChapter> = {
       { id: 'official', title: '实际汇率与官方对照', detail: '实际汇率来自实付人民币和到账额度；官方对照按同一次测试的 token 用量与官方 API 标价估算。两者不是同一种汇率，也不能互相替代。', target: 'lab.ranking', view: 'lab' },
       { id: 'samples', title: '管理原始样本', detail: '展开某个服务商可查看原始样本并删除错误记录。多次样本会取中位数，建议测 3 次但不强制。', target: 'lab.ranking', view: 'lab' },
       { id: 'provider', title: '选择要测试的服务商', detail: '先选择服务商，再确认固定模型。测试不会切换 Codex 配置。', target: 'lab.provider', view: 'lab' },
-      { id: 'probe', title: '运行固定测试', detail: '系统会发送一条极短请求；如果响应里有可用费用信息，会自动填入测试额度。', target: 'lab.probe', view: 'lab' },
+      { id: 'probe', title: '运行固定测试', detail: '先发送一条极短请求，确认测试完成；服务商返回的费用只作为提示，不会自动当成平台真实扣额。', target: 'lab.probe', view: 'lab' },
       { id: 'cost', title: '填写费用字段', detail: '先按平台余额选择美元、人民币或平台点数，再填写实际支付人民币、实际到账额度和本次真实扣减。三项必须来自同一笔充值和同一余额体系。', target: 'lab.cost-fields', view: 'lab' },
       { id: 'save', title: '计算并保存', detail: '实测人民币成本 = 实际支付 × 本次扣减 ÷ 实际到账额度；实际汇率 = 实际支付 ÷ 实际到账额度。缺少真实扣减时不会伪装成实测。', target: 'lab.save', view: 'lab' },
     ],

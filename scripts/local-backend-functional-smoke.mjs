@@ -619,6 +619,7 @@ try {
       paidCny: '10',
       consumableCredit: '1000',
       debitCredit: '0.000524',
+      debitConfirmed: true,
       creditUnitLabel: 'platform credit',
       model: profile.model,
       probeVersion: 'cost-calibration-v1',
@@ -686,11 +687,14 @@ try {
   assert(switchedConfig.includes('model = "reasoning-current"'), 'switch did not update model')
   assert(switchedConfig.includes(`base_url = "${providerUrl}"`), 'switch did not update provider URL')
   assert(switchedConfig.includes('wire_api = "responses"'), 'switch did not preserve Responses API')
+  assert(switchedConfig.includes('[model_providers.custom.auth]'), 'switch did not configure the provider-scoped credential helper')
+  assert(switchedConfig.includes('--print-provider-token') && switchedConfig.includes(profile.id), 'credential helper was not bound to the selected profile')
+  assert(!switchedConfig.includes('requires_openai_auth'), 'third-party provider incorrectly reused official OpenAI authentication')
   for (const fragment of protectedConfigFragments) {
     assert(switchedConfig.includes(fragment), `switch removed or changed protected configuration: ${fragment}`)
   }
   assert(switchedConfig.includes('user_owned_extension = "keep-me"'), 'switch removed an unknown custom-provider field')
-  assert(switchedAuth.OPENAI_API_KEY === profile.apiKey, 'switch did not bind the profile key to the candidate Codex auth target')
+  assert(await readFile(authPath, 'utf8') === originalAuth, 'switch changed Codex-owned official authentication')
   assert(switchedAuth.preserved === 'yes', 'switch removed unrelated auth data')
   const switchBackup = switched.backups.find((item) => item.kind === 'before_switch' && !backupIdsBeforeSwitch.has(item.id))
   assert(
@@ -753,7 +757,7 @@ try {
   const manualRestoredAuth = JSON.parse(await readFile(authPath, 'utf8'))
   assert(manualRestoredConfig.includes('[mcp_servers.after_switch]'), 'manual restore removed an MCP server added after the backup')
   assert(manualRestoredConfig.includes('model = "reasoning-current"'), 'manual restore did not restore the saved provider model')
-  assert(manualRestoredAuth.OPENAI_API_KEY === profile.apiKey, 'manual restore did not restore the saved provider credential contract')
+  assert(manualRestoredAuth.OPENAI_API_KEY === JSON.parse(originalAuth).OPENAI_API_KEY, 'manual restore changed the official login state')
   assert(manualRestoredAuth.added_after_switch === 'keep-me', 'manual restore removed unrelated auth data')
   assert(manualRestored.activity[0]?.title === '已恢复配置备份', 'manual restore did not update activity')
 
@@ -849,8 +853,8 @@ try {
   const loginManagedConfig = originalConfig.replace('base_url = "https://baseline.example/v1"', 'requires_openai_auth = true\r\nbase_url = "https://baseline.example/v1"')
   await writeFile(configPath, loginManagedConfig, 'utf8')
   const externalAuthPreflight = await prepareSwitch(externalAuthentication.id)
-  assert(externalAuthPreflight.riskDetail?.includes('Codex 登录管理'), 'Codex login authentication was not surfaced as a risk')
   assert(externalAuthPreflight.riskDetail?.includes('未保存应用访问密钥'), 'missing application key was not surfaced as a risk')
+  assert(!externalAuthPreflight.riskDetail?.includes('Codex 登录管理'), 'third-party routing was incorrectly coupled to Codex official login')
   assert(await readFile(configPath, 'utf8') === loginManagedConfig, 'external authentication preflight changed config.toml')
   assert(await readFile(authPath, 'utf8') === authAfterRiskSwitch, 'external authentication preflight changed auth.json')
   await writeFile(configPath, originalConfig, 'utf8')
@@ -917,7 +921,7 @@ try {
       'verification diagnostics classify endpoint, response shape, billing, and service errors without changing Codex config/auth',
       'default selection persisted',
       'provider list order persisted without changing the active Codex configuration',
-      'first launch created one protected baseline without a duplicate daily backup; switching bound the selected profile key to auth.json while preserving unrelated custom-provider and auth data',
+      'first launch created one protected baseline without a duplicate daily backup; switching configured a provider-scoped credential helper while preserving Codex official authentication byte-for-byte',
       'same-address profiles retain the selected current-provider identity after a safe switch',
       'switch preflight rejects drift, while restore points require confirmation, reject provider-field conflicts, and preserve later MCP/auth additions',
       'manual recovery points require confirmation before replacement and follow the persisted retention limit',

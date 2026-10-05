@@ -3,6 +3,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "start-scheduled-process.ps1")
 
 $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $runtimeRoot = Join-Path $projectRoot ".codex\runtime\dev-desktop-empty"
@@ -17,6 +18,7 @@ if (-not (Test-Path -LiteralPath $desktopSource -PathType Leaf)) {
 }
 
 New-Item -ItemType Directory -Force -Path $appDataDir, $codexHome, $binDir | Out-Null
+& (Join-Path $PSScriptRoot 'close-dev-desktop.ps1') -ProjectRoot $projectRoot
 if ($Reset) {
     Get-ChildItem -LiteralPath $appDataDir -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
     Get-ChildItem -LiteralPath $codexHome -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
@@ -24,16 +26,48 @@ if ($Reset) {
 Copy-Item -LiteralPath $desktopSource -Destination $desktopExecutable -Force
 
 $buildSha = (git -C $projectRoot rev-parse --short=8 HEAD).Trim()
-$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-$startInfo.FileName = $desktopExecutable
-$startInfo.WorkingDirectory = $projectRoot
-$startInfo.UseShellExecute = $false
-$startInfo.EnvironmentVariables["CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL"] = "development"
-$startInfo.EnvironmentVariables["CODEX_PROVIDER_SWITCHER_BUILD_SHA"] = $buildSha
-$startInfo.EnvironmentVariables["CODEX_PROVIDER_SWITCHER_APP_DATA_DIR"] = $appDataDir
-$startInfo.EnvironmentVariables["CODEX_PROVIDER_SWITCHER_CODEX_HOME"] = $codexHome
-$startInfo.EnvironmentVariables["CODEX_PROVIDER_SWITCHER_DEV_VARIANT"] = "first-run-empty"
-$desktopProcess = [System.Diagnostics.Process]::Start($startInfo)
+$environmentNames = @(
+    "CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL",
+    "CODEX_PROVIDER_SWITCHER_BUILD_SHA",
+    "CODEX_PROVIDER_SWITCHER_APP_DATA_DIR",
+    "CODEX_PROVIDER_SWITCHER_CODEX_HOME",
+    "CODEX_PROVIDER_SWITCHER_DEV_VARIANT"
+)
+$previousEnvironment = @{}
+foreach ($environmentName in $environmentNames) {
+    $existing = Get-Item -LiteralPath "Env:$environmentName" -ErrorAction SilentlyContinue
+    $previousEnvironment[$environmentName] = if ($null -eq $existing) { $null } else { $existing.Value }
+}
+$env:CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = "development"
+$env:CODEX_PROVIDER_SWITCHER_BUILD_SHA = $buildSha
+$env:CODEX_PROVIDER_SWITCHER_APP_DATA_DIR = $appDataDir
+$env:CODEX_PROVIDER_SWITCHER_CODEX_HOME = $codexHome
+$env:CODEX_PROVIDER_SWITCHER_DEV_VARIANT = "first-run-empty"
+try {
+    $launch = Start-SignalmanScheduledProcess -FilePath $desktopExecutable -WorkingDirectory $projectRoot -Environment @{
+        CODEX_PROVIDER_SWITCHER_RELEASE_CHANNEL = "development"
+        CODEX_PROVIDER_SWITCHER_BUILD_SHA = $buildSha
+        CODEX_PROVIDER_SWITCHER_APP_DATA_DIR = $appDataDir
+        CODEX_PROVIDER_SWITCHER_CODEX_HOME = $codexHome
+        CODEX_PROVIDER_SWITCHER_DEV_VARIANT = "first-run-empty"
+    }
+    $desktopProcessId = $null
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        Start-Sleep -Milliseconds 250
+        $desktopProcessId = @(Get-CimInstance Win32_Process -Filter "Name='codex-provider-switcher-empty.exe'" | Select-Object -First 1 -ExpandProperty ProcessId)
+    } while ($null -eq $desktopProcessId -and (Get-Date) -lt $deadline)
+    if ($null -eq $desktopProcessId) { throw "Scheduled empty development desktop did not start." }
+} finally {
+    foreach ($environmentName in $previousEnvironment.Keys) {
+        if ($null -eq $previousEnvironment[$environmentName]) {
+            Remove-Item -LiteralPath "Env:$environmentName" -ErrorAction SilentlyContinue
+        } else {
+            Set-Item -LiteralPath "Env:$environmentName" -Value $previousEnvironment[$environmentName]
+        }
+    }
+}
+$desktopProcess = Get-Process -Id $desktopProcessId -ErrorAction Stop
 Start-Sleep -Seconds 2
 $desktopProcess.Refresh()
 if ($desktopProcess.HasExited) {
@@ -58,7 +92,7 @@ $existingDemoProcesses = @(Get-CimInstance Win32_Process -Filter "Name='codex-pr
 })
 
 [pscustomobject]@{
-    pid = $desktopProcess.Id
+    pid = $desktopProcessId
     title = $desktopProcess.MainWindowTitle
     executable = $desktopExecutable
     runtime = $runtimeRoot

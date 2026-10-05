@@ -62,7 +62,9 @@ export function verificationPresentation(snapshot: VerificationSnapshot | undefi
     case 'protocol_incompatible':
       return { tone: 'warning', shortLabel: '暂不兼容', summary: '请求方式暂不兼容', detail: '服务商不接受当前 Codex 请求方式。', nextStep: '报告兼容性问题，不要把它当作密钥错误。', technicalDetail: technical, needsAcknowledgement: true }
     case 'chat_completions_only':
-      return { tone: 'warning', shortLabel: '仅普通聊天', summary: '只识别到普通聊天接口', detail: '这个模型可以回答，但尚不具备 Codex 所需的 Responses 合同。', nextStep: '不要作为完整 Codex 服务商切换；可等待服务商补齐 Responses。', technicalDetail: technical, needsAcknowledgement: true }
+      return { tone: 'warning', shortLabel: '将自动转换', summary: '已识别为普通聊天接口', detail: 'Signalman 会在本机把 Codex 请求转换成服务商支持的格式。基础对话可以尝试使用，但工具、多模态和长任务仍需实际验证。', nextStep: '可继续切换；首次使用时留意 Codex 返回结果。', technicalDetail: technical, needsAcknowledgement: true }
+    case 'anthropic_messages_only':
+      return { tone: 'warning', shortLabel: '将自动转换', summary: '已识别为 Anthropic 接口', detail: 'Signalman 会在本机把 Codex 请求转换成 Anthropic Messages 格式。基础对话可以尝试使用，复杂工具和多模态能力仍受转换范围限制。', nextStep: '可继续切换；首次使用时留意 Codex 返回结果。', technicalDetail: technical, needsAcknowledgement: true }
     case 'stream_interrupted':
       return { tone: 'warning', shortLabel: '传输中断', summary: '模型开始回复后连接中断', detail: '平台已经开始返回，但没有完成正常流式生命周期。', nextStep: '检查代理和服务商流式转发后再测；本次不会自动重复计费请求。', technicalDetail: technical, needsAcknowledgement: true }
     case 'response_shape_unconfirmed':

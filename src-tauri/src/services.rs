@@ -6,8 +6,26 @@
 //! home while command adapters remain in `commands.rs`.
 
 use super::*;
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    time::{Duration, SystemTime},
+};
 
 pub(crate) fn current_profile_id(catalog: &StoredCatalog, config_text: &str) -> String {
+    if toml::from_str::<toml::Value>(config_text)
+        .ok()
+        .and_then(|v| {
+            v.get("model_provider")
+                .and_then(toml::Value::as_str)
+                .map(str::to_owned)
+        })
+        .as_deref()
+        .unwrap_or("openai")
+        == "openai"
+    {
+        return "chatgpt-official-account".into();
+    }
     let custom = toml::from_str::<toml::Value>(config_text)
         .ok()
         .and_then(|config| {
@@ -25,6 +43,24 @@ pub(crate) fn current_profile_id(catalog: &StoredCatalog, config_text: &str) -> 
         .as_ref()
         .and_then(|provider| provider.get("base_url"))
         .and_then(toml::Value::as_str);
+    if current_base_url == Some(crate::protocol_gateway::local_base_url().as_str()) {
+        if let Some(name) = current_name {
+            if let Some((id, _)) = catalog.profiles.iter().find_map(|(id, value)| {
+                let profile = serde_json::from_value::<StoredProfile>(value.clone()).ok()?;
+                (profile.name == name
+                    && profile
+                        .capability_profile
+                        .as_ref()
+                        .is_some_and(|capability| {
+                            crate::protocol_gateway::requires_gateway(&capability.protocol)
+                        }))
+                .then_some((id, profile))
+            }) {
+                return id.clone();
+            }
+        }
+        return "unknown".to_string();
+    }
     let matches = catalog
         .profiles
         .iter()
@@ -57,9 +93,11 @@ pub(crate) fn catalog_profiles(catalog: &StoredCatalog, current_id: &str) -> Vec
                 .cloned()
                 .and_then(|value| serde_json::from_value::<StoredProfile>(value).ok())
                 .map(|profile| ProviderProfile {
+                    connection_kind: profile.connection_kind.clone(),
                     id: id.clone(),
                     name: profile.name,
                     base_url: profile.base_url,
+                    endpoint_mode: profile.endpoint_mode,
                     model: profile.model,
                     reasoning_effort: profile.model_reasoning_effort,
                     note: profile.note,
@@ -87,6 +125,144 @@ pub(crate) fn catalog_model_catalogs(catalog: &StoredCatalog) -> Vec<ModelCatalo
         .iter()
         .filter_map(|(_, value)| serde_json::from_value::<ModelCatalog>(value.clone()).ok())
         .collect()
+}
+
+/// Reads only Codex session event metadata. Prompt/response text is never kept
+/// or returned; the result is a small, best-effort stability summary.
+fn provider_stability(
+    profiles: &[ProviderProfile],
+    current_id: &str,
+    config_path: &Path,
+) -> Vec<ProviderStability> {
+    let mut rows: BTreeMap<String, ProviderStability> = profiles
+        .iter()
+        .map(|profile| {
+            (
+                profile.id.clone(),
+                ProviderStability {
+                    provider_id: profile.id.clone(),
+                    provider_name: profile.name.clone(),
+                    source: "codex_session_events".to_string(),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect();
+    let Some(home) = config_path.parent() else {
+        return rows.into_values().collect();
+    };
+    let sessions = home.join("sessions");
+    let mut pending = vec![sessions];
+    let cutoff = SystemTime::now().checked_sub(Duration::from_secs(30 * 24 * 60 * 60));
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                continue;
+            }
+            if cutoff.is_some_and(|limit| {
+                entry
+                    .metadata()
+                    .and_then(|meta| meta.modified())
+                    .map(|mtime| mtime < limit)
+                    .unwrap_or(true)
+            }) {
+                continue;
+            }
+            let Ok(file) = File::open(&path) else {
+                continue;
+            };
+            let reader = BufReader::new(file);
+            let mut provider_key: Option<String> = None;
+            let mut completed = 0u32;
+            let mut failed = 0u32;
+            let mut timeout = 0u32;
+            let mut token_total = 0u64;
+            for line in reader.lines().take(50_000).flatten() {
+                let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
+                match value.get("type").and_then(Value::as_str) {
+                    Some("session_meta") => {
+                        provider_key = value
+                            .pointer("/payload/model_provider")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string);
+                    }
+                    Some("event_msg")
+                        if value.pointer("/payload/type").and_then(Value::as_str)
+                            == Some("task_complete") =>
+                    {
+                        completed += 1
+                    }
+                    Some("event_msg")
+                        if value.pointer("/payload/type").and_then(Value::as_str)
+                            == Some("turn_aborted") =>
+                    {
+                        failed += 1;
+                        if value.to_string().to_ascii_lowercase().contains("timeout") {
+                            timeout += 1;
+                        }
+                    }
+                    Some("event_msg")
+                        if value.pointer("/payload/type").and_then(Value::as_str)
+                            == Some("token_count") =>
+                    {
+                        if let Some(total) = value
+                            .pointer("/payload/info/last_token_usage/total_tokens")
+                            .and_then(Value::as_u64)
+                        {
+                            token_total = token_total.max(total);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let Some(raw_key) = provider_key else {
+                continue;
+            };
+            let provider_id = if raw_key == "openai" {
+                "chatgpt-official-account".to_string()
+            } else if raw_key == "custom" {
+                current_id.to_string()
+            } else {
+                profiles
+                    .iter()
+                    .find(|profile| profile.id == raw_key || profile.name == raw_key)
+                    .map(|profile| profile.id.clone())
+                    .unwrap_or_default()
+            };
+            let Some(row) = rows.get_mut(&provider_id) else {
+                continue;
+            };
+            row.success_count = row.success_count.saturating_add(completed);
+            row.failed_count = row.failed_count.saturating_add(failed);
+            row.timeout_count = row.timeout_count.saturating_add(timeout);
+            row.sample_count = row
+                .sample_count
+                .saturating_add(completed.saturating_add(failed));
+            row.total_tokens = row.total_tokens.saturating_add(token_total);
+            row.last_observed_at = entry
+                .metadata()
+                .ok()
+                .and_then(|meta| meta.modified().ok())
+                .and_then(|mtime| {
+                    chrono::DateTime::<chrono::Utc>::from_timestamp(
+                        mtime.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_secs() as i64,
+                        0,
+                    )
+                })
+                .map(|date| date.with_timezone(&Local).format("%Y-%m-%d").to_string());
+        }
+    }
+    rows.into_values().collect()
 }
 
 pub(crate) fn current_config_model(config_text: &str) -> Option<String> {
@@ -487,30 +663,30 @@ pub(crate) fn connection_environment_state() -> ConnectionEnvironment {
                 .selected_layer_id
                 .as_ref()
                 .is_some_and(|selected| layers.iter().any(|(id, _, _)| id == selected));
-            let status = if record.setup_completed && selected_valid {
+            let takeover_ready = record.takeover_version >= SIGNALMAN_TAKEOVER_VERSION
+                && record.selected_layer_id.as_deref() == Some("user-config")
+                && takeover_backup_is_healthy(&record)
+                && environment_identity_is_managed();
+            let status = if record.setup_completed && selected_valid && takeover_ready {
                 "ready"
-            } else if layers.len() > 1 {
-                "needs_selection"
             } else {
                 "needs_setup"
             };
             let detail = match status {
-                "ready" => "已准备连接环境。切换时仅写入当前选择配置层的服务商字段。",
-                "needs_selection" => {
-                    "发现多个 Codex 配置层。请选择本次要管理的配置层，程序不会猜测。"
-                }
+                "ready" => "已完成 Signalman 接管，当前连接身份已核对；第三方使用固定 custom 身份，官方账号使用独立官方通道。",
                 _ => {
-                    "首次使用前请准备连接环境。程序会创建恢复点，并保留项目、MCP、插件与历史设置。"
+                    "首次使用会先备份旧连接配置，再重建 Signalman 固定 custom 身份；不会删除聊天历史、项目或插件。"
                 }
             }
             .to_string();
             ConnectionEnvironment {
                 status: status.to_string(),
                 selected_layer_id: record.selected_layer_id.clone(),
-                // Existing installations completed setup before this field
-                // existed. Treat them as onboarded to avoid re-showing the
-                // first-run flow after a normal upgrade.
-                onboarding_completed: record.onboarding_completed || record.setup_completed,
+                // Setup and onboarding are separate phases. If the process is
+                // interrupted after the files are rewritten but before the
+                // user enters the workspace, the first-run screen must remain
+                // resumable after restart.
+                onboarding_completed: record.onboarding_completed,
                 detail,
                 layers: layers
                     .into_iter()
@@ -534,10 +710,22 @@ pub(crate) fn connection_environment_state() -> ConnectionEnvironment {
         Err(error) => ConnectionEnvironment {
             status: "error".to_string(),
             selected_layer_id: record.selected_layer_id,
-            onboarding_completed: record.onboarding_completed || record.setup_completed,
+            onboarding_completed: record.onboarding_completed,
             detail: format!("无法读取 Codex 配置层：{error}"),
             layers: Vec::new(),
         },
+    }
+}
+
+fn environment_identity_is_managed() -> bool {
+    let Ok(config) = root_config_path().and_then(|path| fs::read_to_string(path).map_err(SwitcherError::from)) else { return false };
+    let Ok(value) = toml::from_str::<toml::Value>(&config) else { return false };
+    match value.get("model_provider").and_then(toml::Value::as_str) {
+        Some("custom") => value.get("model_providers").and_then(|providers| providers.get("custom"))
+            .is_some_and(|custom| custom.get("wire_api").and_then(toml::Value::as_str) == Some("responses")
+                && custom.get("requires_openai_auth").and_then(toml::Value::as_bool) != Some(true)),
+        Some("openai") => value.get("openai_base_url").is_none() && value.get("chatgpt_base_url").is_none() && value.get("model_catalog_json").is_none(),
+        _ => false,
     }
 }
 
@@ -546,6 +734,7 @@ pub(crate) fn app_state() -> Result<AppState, SwitcherError> {
     let config = read_config().unwrap_or_default();
     let current_id = current_profile_id(&catalog, &config);
     let profiles = catalog_profiles(&catalog, &current_id);
+    let stability = provider_stability(&profiles, &current_id, &config_path()?);
     Ok(AppState {
         runtime_mode: "tauri_native".to_string(),
         current_profile_id: current_id,
@@ -563,6 +752,7 @@ pub(crate) fn app_state() -> Result<AppState, SwitcherError> {
         activity: load_activity()?,
         cost_calibrations: catalog.cost_calibrations.clone(),
         response_probes: catalog.response_probes.clone(),
+        provider_stability: stability,
         backups: list_backups()?,
         configuration_protection: configuration_protection(&config),
         connection_environment: connection_environment_state(),
@@ -608,6 +798,7 @@ pub(crate) fn load_catalog_read_only() -> StoredCatalog {
     let fallback = || {
         seed_catalog_from_existing().unwrap_or_else(|_| StoredCatalog {
             version: default_version(),
+            catalog_revision: 0,
             profiles: Map::new(),
             model_catalogs: Map::new(),
             cost_calibrations: Vec::new(),
@@ -648,6 +839,7 @@ pub(crate) fn startup_safe_state(notice: StartupNotice) -> Result<AppState, Swit
         activity: load_activity().unwrap_or_else(|_| vec![activity_seed()]),
         cost_calibrations: catalog.cost_calibrations.clone(),
         response_probes: catalog.response_probes.clone(),
+        provider_stability: Vec::new(),
         backups: list_backups().unwrap_or_default(),
         configuration_protection: configuration_protection(&config),
         connection_environment: connection_environment_state(),

@@ -10,6 +10,7 @@ use crate::{
     ProviderModel, ProviderVerificationOutcome, StoredProfile,
 };
 use chrono::Local;
+use reqwest::blocking::Client;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader};
@@ -34,6 +35,7 @@ pub(crate) struct ModelCatalogMetadata {
 /// documented ModelFlare adapter.  Unknown providers never inherit a command
 /// or a guessed credential field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) struct ProviderAdapter {
     pub(crate) id: &'static str,
     pub(crate) version: &'static str,
@@ -41,6 +43,7 @@ pub(crate) struct ProviderAdapter {
     pub(crate) wire_api: &'static str,
 }
 
+#[allow(dead_code)]
 const STANDARD_BEARER_ADAPTER: ProviderAdapter = ProviderAdapter {
     id: "standard_bearer",
     version: "1",
@@ -56,6 +59,7 @@ const PROVIDER_CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
 const PROVIDER_RETRY_DELAY: Duration = Duration::from_millis(750);
 const CAPABILITY_PROBE_VERSION: &str = "capability-negotiation-v1";
 
+#[allow(dead_code)]
 const MODELFLARE_COMMAND_ADAPTER: ProviderAdapter = ProviderAdapter {
     id: "modelflare_command",
     version: "1",
@@ -63,6 +67,7 @@ const MODELFLARE_COMMAND_ADAPTER: ProviderAdapter = ProviderAdapter {
     wire_api: "responses",
 };
 
+#[allow(dead_code)]
 pub(crate) fn provider_adapter(
     name: &str,
     base_url: &str,
@@ -97,6 +102,7 @@ pub(crate) fn preferred_auth_mode(name: &str, base_url: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn uses_provider_command_auth(profile: &StoredProfile) -> bool {
     // `auth.command` is a provider capability, not a consequence of having a
     // saved key.  Keep the explicit profile choice for migrations and use the
@@ -391,7 +397,7 @@ pub(crate) fn reset_profile_verification(profile: &mut StoredProfile, detail: &s
 pub(crate) fn model_tags(model_id: &str) -> Vec<String> {
     let id = model_id.to_ascii_lowercase();
     let mut tags = Vec::new();
-    if id.contains("embedding") {
+    if id.contains("embedding") || id.contains("embed") {
         tags.push("embedding".to_string());
     }
     if id.contains("audio") || id.contains("transcribe") || id.contains("tts") {
@@ -436,6 +442,7 @@ pub(crate) fn parse_provider_models(body: &Value) -> Vec<ProviderModel> {
             aliases: Vec::new(),
             source: "provider_models_api".to_string(),
             verified_for_responses: "unknown".to_string(),
+            codex_enabled: None,
             last_verification_at: None,
             last_verification_status: None,
             last_verification_detail: None,
@@ -539,7 +546,8 @@ mod tests {
     use super::{
         build_model_catalog, has_compatible_response_output, has_provider_error,
         preferred_auth_mode, provider_adapter, provider_error_code, provider_failure_outcome,
-        provider_probe_endpoint, verification_outcome, verify_provider_auth_probe,
+        provider_base_url_candidates, provider_probe_endpoint, verification_outcome,
+        verify_provider_auth_probe,
         PROVIDER_PROBE_TIMEOUT,
     };
     use crate::StoredProfile;
@@ -554,8 +562,10 @@ mod tests {
 
     fn capability_test_profile(base_url: String) -> StoredProfile {
         StoredProfile {
+            connection_kind: None,
             name: "Local capability fixture".to_string(),
             base_url,
+            endpoint_mode: "auto".to_string(),
             api_key: "test-key".to_string(),
             api_key_protected: String::new(),
             model: "test-model".to_string(),
@@ -635,6 +645,24 @@ mod tests {
         assert_eq!(
             provider_probe_endpoint("https://provider.example/v1/", "responses").unwrap(),
             "https://provider.example/v1/responses"
+        );
+    }
+
+    #[test]
+    fn offers_both_common_openai_compatible_base_url_forms() {
+        assert_eq!(
+            provider_base_url_candidates("https://provider.example"),
+            vec![
+                "https://provider.example".to_string(),
+                "https://provider.example/v1".to_string()
+            ]
+        );
+        assert_eq!(
+            provider_base_url_candidates("https://provider.example/v1"),
+            vec![
+                "https://provider.example/v1".to_string(),
+                "https://provider.example".to_string()
+            ]
         );
     }
 
@@ -747,8 +775,10 @@ mod tests {
     #[test]
     fn builds_catalog_metadata_without_changing_public_shape() {
         let profile = StoredProfile {
+            connection_kind: None,
             name: "Fixture".to_string(),
             base_url: "https://provider.example/v1".to_string(),
+            endpoint_mode: "auto".to_string(),
             api_key: "development-placeholder".to_string(),
             api_key_protected: String::new(),
             model: "gpt-test".to_string(),
@@ -778,6 +808,7 @@ mod tests {
                 source: "fixture".to_string(),
                 tags: vec!["responses-candidate".to_string()],
                 verified_for_responses: "unknown".to_string(),
+                codex_enabled: None,
                 last_verification_at: None,
                 last_verification_status: None,
                 last_verification_detail: None,
@@ -863,6 +894,65 @@ mod tests {
             vec!["/v1/responses", "/v1/chat/completions"]
         );
     }
+
+    #[test]
+    fn capability_probe_detects_anthropic_messages_after_other_routes_are_missing() {
+        let anthropic_stream = concat!(
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_fixture\",\"model\":\"claude-test\",\"usage\":{\"input_tokens\":1}}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+        );
+        let (base_url, observed) = serve_capability_responses(vec![
+            (
+                "404 Not Found",
+                "application/json",
+                "{\"error\":{\"message\":\"unknown endpoint\"}}",
+            ),
+            (
+                "404 Not Found",
+                "application/json",
+                "{\"error\":{\"message\":\"unknown endpoint\"}}",
+            ),
+            ("200 OK", "text/event-stream", anthropic_stream),
+        ]);
+        let outcome = verify_provider_auth_probe(&capability_test_profile(base_url));
+        assert!(!outcome.verified);
+        assert_eq!(outcome.status, "anthropic_messages_only");
+        assert_eq!(outcome.capability_profile.protocol, "anthropic_messages");
+        assert_eq!(outcome.capability_profile.streaming, "verified");
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(2)).unwrap(),
+            vec!["/v1/responses", "/v1/chat/completions", "/v1/messages"]
+        );
+    }
+
+    #[test]
+    fn capability_probe_tries_anthropic_auth_when_openai_routes_reject_bearer_auth() {
+        let anthropic_stream = concat!(
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_fixture\",\"model\":\"claude-test\",\"usage\":{\"input_tokens\":1}}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+        );
+        let (base_url, observed) = serve_capability_responses(vec![
+            (
+                "401 Unauthorized",
+                "application/json",
+                "{\"error\":{\"message\":\"Bearer authentication is not supported\"}}",
+            ),
+            (
+                "401 Unauthorized",
+                "application/json",
+                "{\"error\":{\"message\":\"Use x-api-key authentication\"}}",
+            ),
+            ("200 OK", "text/event-stream", anthropic_stream),
+        ]);
+        let outcome = verify_provider_auth_probe(&capability_test_profile(base_url));
+
+        assert_eq!(outcome.status, "anthropic_messages_only");
+        assert_eq!(outcome.capability_profile.protocol, "anthropic_messages");
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(2)).unwrap(),
+            vec!["/v1/responses", "/v1/chat/completions", "/v1/messages"]
+        );
+    }
 }
 
 pub(crate) fn fetch_provider_models(
@@ -890,7 +980,11 @@ pub(crate) fn fetch_provider_models(
         ));
     }
 
-    let url = format!("{base_url}/models");
+    let candidates = if profile.endpoint_mode == "full" {
+        vec![base_url.to_string()]
+    } else {
+        provider_base_url_candidates(base_url)
+    };
     let client = configure_http_client(
         reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(18))
@@ -899,27 +993,39 @@ pub(crate) fn fetch_provider_models(
     .build()
     .map_err(|err| SwitcherError::Message(format!("创建 HTTP client 失败：{err}")))?;
     let mut response = None;
+    let mut selected_base_url = base_url.to_string();
     let mut last_error = None;
-    for attempt in 0..2 {
-        match client
-            .get(&url)
-            .header(reqwest::header::ACCEPT, "application/json")
-            .header(reqwest::header::USER_AGENT, "Signalman-AI/0.10")
-            .bearer_auth(profile.api_key.trim())
-            .send()
-        {
-            Ok(value) => {
-                response = Some(value);
-                break;
-            }
-            Err(err) => {
-                let retryable = err.is_timeout() || err.is_connect();
-                last_error = Some(err);
-                if retryable && attempt < 1 {
-                    std::thread::sleep(Duration::from_millis(350));
-                    continue;
+    'candidate: for candidate in candidates {
+        let url = format!("{candidate}/models");
+        super::qa::guard_network(&url)?;
+        for attempt in 0..2 {
+            match client
+                .get(&url)
+                .header(reqwest::header::ACCEPT, "application/json")
+                .header(reqwest::header::USER_AGENT, "Signalman-AI/0.10")
+                .bearer_auth(profile.api_key.trim())
+                .send()
+            {
+                Ok(value) => {
+                    // A missing route is the one safe signal that the
+                    // provider may expect the alternate `/v1` form. Keep
+                    // auth, quota and server errors visible to the user.
+                    if matches!(value.status().as_u16(), 404 | 405) {
+                        continue 'candidate;
+                    }
+                    selected_base_url = candidate.clone();
+                    response = Some(value);
+                    break 'candidate;
                 }
-                break;
+                Err(err) => {
+                    let retryable = err.is_timeout() || err.is_connect();
+                    last_error = Some(err);
+                    if retryable && attempt < 1 {
+                        std::thread::sleep(Duration::from_millis(350));
+                        continue;
+                    }
+                    break;
+                }
             }
         }
     }
@@ -944,6 +1050,10 @@ pub(crate) fn fetch_provider_models(
             ));
         }
     };
+
+    let mut effective_profile = profile.clone();
+    effective_profile.base_url = selected_base_url;
+    let profile = &effective_profile;
 
     let status = response.status();
     let headers = response.headers().clone();
@@ -1067,6 +1177,32 @@ pub(crate) fn fetch_provider_models(
     ))
 }
 
+/// Providers disagree on whether their OpenAI-compatible root includes `/v1`.
+/// Try the entered form first, then its one unambiguous alternate. The caller
+/// can persist the successful form after a real model-directory response.
+pub(crate) fn provider_base_url_candidates(base_url: &str) -> Vec<String> {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    let mut candidates = vec![trimmed.to_string()];
+    if let Ok(mut url) = reqwest::Url::parse(trimmed) {
+        let path = url.path().trim_end_matches('/').to_string();
+        if path.ends_with("/v1") {
+            url.set_path(path.trim_end_matches("/v1"));
+        } else if path.is_empty() {
+            url.set_path("/v1");
+        } else {
+            url.set_path(&format!("{path}/v1"));
+        }
+        let alternate = url.to_string().trim_end_matches('/').to_string();
+        if alternate != trimmed {
+            candidates.push(alternate);
+        }
+    }
+    candidates
+}
+
 fn transport_failure_outcome(err: &reqwest::Error, base_url: &str) -> ProviderVerificationOutcome {
     if err.is_timeout() {
         return verification_outcome(
@@ -1101,6 +1237,16 @@ fn send_capability_request(
     endpoint: &str,
     body: &Value,
 ) -> Result<(reqwest::blocking::Response, u8, Instant, u64), ProviderVerificationOutcome> {
+    super::qa::guard_network(endpoint).map_err(|err| {
+        verification_outcome(
+            false,
+            "network_error",
+            "transport",
+            &err.to_string(),
+            None,
+            None,
+        )
+    })?;
     for attempt in 0..=1_u8 {
         let client = configure_http_client(
             reqwest::blocking::Client::builder()
@@ -1467,7 +1613,234 @@ fn probe_chat_completions(profile: &StoredProfile) -> ProviderVerificationOutcom
     )
 }
 
+fn probe_anthropic_messages(profile: &StoredProfile) -> ProviderVerificationOutcome {
+    let endpoint = match provider_probe_endpoint(&profile.base_url, "messages") {
+        Ok(endpoint) => endpoint,
+        Err(detail) => {
+            return verification_outcome(false, "invalid_profile", "profile", &detail, None, None)
+        }
+    };
+    let body = json!({
+        "model": profile.model.trim(),
+        "max_tokens": 8,
+        "messages": [{"role":"user","content":"Reply OK."}],
+        "stream": true,
+    });
+    let client = match Client::builder()
+        .connect_timeout(PROVIDER_CONNECT_TIMEOUT)
+        .timeout(PROVIDER_PROBE_TIMEOUT)
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return verification_outcome(
+                false,
+                "client_error",
+                "transport",
+                &error.to_string(),
+                None,
+                None,
+            )
+        }
+    };
+    let started = Instant::now();
+    if let Err(error) = super::qa::guard_network(&endpoint) {
+        return verification_outcome(
+            false,
+            "network_error",
+            "transport",
+            &error.to_string(),
+            None,
+            None,
+        );
+    }
+    let response = match client
+        .post(&endpoint)
+        .header("x-api-key", profile.api_key.trim())
+        .header("anthropic-version", "2023-06-01")
+        .header(reqwest::header::ACCEPT, "text/event-stream")
+        .json(&body)
+        .send()
+    {
+        Ok(response) => response,
+        Err(error) => return transport_failure_outcome(&error, &profile.base_url),
+    };
+    let header_ms = started.elapsed().as_millis() as u64;
+    let status = response.status();
+    let headers = response.headers().clone();
+    if !status.is_success() {
+        let text = response.text().unwrap_or_default();
+        return capability_outcome(
+            enrich_provider_failure_detail(
+                provider_failure_outcome(Some(status.as_u16()), &text),
+                &headers,
+                &text,
+            ),
+            "unknown",
+            "unknown",
+            "failed",
+            0,
+            header_ms,
+            None,
+            started.elapsed().as_millis() as u64,
+        );
+    }
+    let content_type = headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if content_type.contains("text/event-stream") {
+        let mut reader = BufReader::new(response);
+        let mut line = String::new();
+        let mut first_event_ms = None;
+        let mut saw_message_start = false;
+        let mut saw_message_stop = false;
+        let mut bytes_read = 0usize;
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(size) => {
+                    bytes_read = bytes_read.saturating_add(size);
+                    if bytes_read > 128 * 1024 {
+                        break;
+                    }
+                    if let Some(value) = line.strip_prefix("event:") {
+                        let event_name = value.trim();
+                        if first_event_ms.is_none() {
+                            first_event_ms = Some(started.elapsed().as_millis() as u64);
+                        }
+                        saw_message_start |= event_name == "message_start";
+                        saw_message_stop |= event_name == "message_stop";
+                    }
+                }
+                Err(error) => {
+                    return capability_outcome(
+                        verification_outcome(
+                            false,
+                            "stream_interrupted",
+                            "stream",
+                            &format!("Anthropic 流式响应读取中断：{error}"),
+                            Some(status.as_u16()),
+                            None,
+                        ),
+                        "anthropic_messages",
+                        "interrupted",
+                        "unknown",
+                        0,
+                        header_ms,
+                        first_event_ms,
+                        started.elapsed().as_millis() as u64,
+                    )
+                }
+            }
+            if saw_message_stop {
+                break;
+            }
+        }
+        if saw_message_start && saw_message_stop {
+            return capability_outcome(
+                verification_outcome(
+                    false,
+                    "anthropic_messages_only",
+                    "protocol",
+                    "已识别为 Anthropic Messages 接口；需由本机协议桥转换为 Codex Responses。",
+                    Some(status.as_u16()),
+                    None,
+                ),
+                "anthropic_messages",
+                "verified",
+                "verified",
+                0,
+                header_ms,
+                first_event_ms,
+                started.elapsed().as_millis() as u64,
+            );
+        }
+        return capability_outcome(
+            verification_outcome(
+                false,
+                "stream_interrupted",
+                "stream",
+                "Anthropic 接口返回了流，但没有完整的 message_start/message_stop。",
+                Some(status.as_u16()),
+                None,
+            ),
+            "anthropic_messages",
+            "interrupted",
+            "unknown",
+            0,
+            header_ms,
+            first_event_ms,
+            started.elapsed().as_millis() as u64,
+        );
+    }
+    let text = response.text().unwrap_or_default();
+    let valid = serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("content")
+                .and_then(Value::as_array)
+                .map(|blocks| !blocks.is_empty())
+        })
+        .unwrap_or(false);
+    if valid {
+        return capability_outcome(
+            verification_outcome(
+                false,
+                "anthropic_messages_only",
+                "protocol",
+                "已识别为 Anthropic Messages 接口，但本次未确认流式输出。",
+                Some(status.as_u16()),
+                None,
+            ),
+            "anthropic_messages",
+            "not_streamed",
+            "verified",
+            0,
+            header_ms,
+            None,
+            started.elapsed().as_millis() as u64,
+        );
+    }
+    capability_outcome(
+        provider_failure_outcome(Some(status.as_u16()), &text),
+        "unknown",
+        "unknown",
+        "failed",
+        0,
+        header_ms,
+        None,
+        started.elapsed().as_millis() as u64,
+    )
+}
+
+fn endpoint_not_found(outcome: &ProviderVerificationOutcome) -> bool {
+    if !matches!(outcome.http_status, Some(404 | 405)) {
+        return false;
+    }
+    let detail = outcome.detail.to_ascii_lowercase();
+    ![
+        "model_not_found",
+        "model not found",
+        "model unavailable",
+        "模型不存在",
+        "不存在此模型",
+    ]
+    .iter()
+    .any(|signal| detail.contains(signal))
+}
+
 pub(crate) fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVerificationOutcome {
+    verify_provider_auth_probe_inner(profile, true)
+}
+
+fn verify_provider_auth_probe_inner(
+    profile: &StoredProfile,
+    allow_url_fallback: bool,
+) -> ProviderVerificationOutcome {
     if profile.api_key.trim().is_empty() {
         return verification_outcome(
             false,
@@ -1570,10 +1943,34 @@ pub(crate) fn verify_provider_auth_probe(profile: &StoredProfile) -> ProviderVer
     ]
     .iter()
     .any(|signal| lower.contains(signal));
-    if matches!(status.as_u16(), 404 | 405) && !mentions_model {
+    let route_or_auth_mismatch = matches!(status.as_u16(), 401 | 403 | 404 | 405);
+    if route_or_auth_mismatch && !mentions_model {
         let chat = probe_chat_completions(profile);
         if chat.status == "chat_completions_only" {
             return chat;
+        }
+        let chat_route_or_auth_mismatch =
+            endpoint_not_found(&chat) || matches!(chat.http_status, Some(401 | 403));
+        if chat_route_or_auth_mismatch {
+            let anthropic = probe_anthropic_messages(profile);
+            if anthropic.status == "anthropic_messages_only" {
+                return anthropic;
+            }
+        }
+    }
+    // Only try the alternate `/v1` form after the normal protocol negotiation
+    // has ruled out the endpoint under the entered base URL. This preserves
+    // the existing Responses -> Chat Completions -> Anthropic order.
+    if allow_url_fallback && endpoint_not_found(&original) && profile.endpoint_mode != "full" {
+        let candidates = provider_base_url_candidates(&profile.base_url);
+        if let Some(alternate) = candidates.into_iter().nth(1) {
+            let mut alternate_profile = profile.clone();
+            alternate_profile.base_url = alternate;
+            alternate_profile.endpoint_mode = "full".to_string();
+            let alternate_outcome = verify_provider_auth_probe_inner(&alternate_profile, false);
+            if !endpoint_not_found(&alternate_outcome) {
+                return alternate_outcome;
+            }
         }
     }
     original

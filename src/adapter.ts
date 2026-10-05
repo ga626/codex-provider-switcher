@@ -3,6 +3,8 @@ import { initialState } from './mockData'
 import type { DownloadEvent } from '@tauri-apps/plugin-updater'
 import type { AppState, ChatGptLoginStatus, CostCalibration, EditableProfile, ModelCatalog, ProviderProfile, ResponseProbeObservation, SwitchPreflight, UpdateInfo } from './types'
 import type { OperationEventV1 } from './operations'
+import type { InitializationReport, InitializationStep } from './types'
+import { PREPARATION_TASKS } from './features/first-run/progress'
 
 export type OperationEventHandler = (event: OperationEventV1) => void
 
@@ -18,6 +20,48 @@ const storeLaunchUrl = `ms-windows-store://pdp/?productid=${storeProductId}`
 
 export const isStoreManagedBuild = __CODEX_RELEASE_CHANNEL__ === 'store'
 export const isGitHubReleaseBuild = __CODEX_RELEASE_CHANNEL__ === 'stable'
+export const isDevelopmentBuild = __CODEX_RELEASE_CHANNEL__ === 'development'
+
+export async function minimizeToTray() {
+  if (isTauri) await invoke('minimize_to_tray')
+}
+
+export async function quitApplication() {
+  if (isTauri) await invoke('quit_application')
+}
+
+export type QaNetworkCondition = 'normal' | 'slow' | 'failure'
+export async function cancelChatGptLogin() {
+  if (isTauri && (!isDevelopmentBuild || (await getQaLiveValidationStatus()).mode === 'live-copy')) await invoke('cancel_chatgpt_login')
+}
+export async function activateOfficialProvider(model: string): Promise<AppState> {
+  if (!isTauri || (isDevelopmentBuild && (await getQaLiveValidationStatus()).mode !== 'live-copy')) throw new Error('官方推理切换只能在原生真实模式中执行；模拟样本不修改配置。')
+  return invoke<AppState>('activate_official_provider', { model })
+}
+let qaNetworkCondition: QaNetworkCondition = 'normal'
+let qaConditionGeneration = 0
+export function clearQaNetworkCondition() { qaNetworkCondition = 'normal'; qaConditionGeneration += 1 }
+export async function setQaNetworkCondition(condition: QaNetworkCondition) {
+  if (!isDevelopmentBuild) throw new Error('仅开发版允许设置检查条件。')
+  if (isTauri && (await getQaLiveValidationStatus()).mode === 'live-copy') throw new Error('真实副本不注入模拟结果。')
+  qaNetworkCondition = condition
+}
+async function consumeQaNetworkCondition() {
+  const condition = qaNetworkCondition
+  qaNetworkCondition = 'normal'
+  window.dispatchEvent(new Event('qa-condition-consumed'))
+  const generation = qaConditionGeneration
+  if (condition === 'slow') await new Promise((resolve) => window.setTimeout(resolve, 3000))
+  if (generation !== qaConditionGeneration) throw new Error('场景已经重置，旧请求不再更新页面。')
+  if (condition === 'failure') throw new Error('QA 模拟：本次模型刷新连接失败。原有目录保留，可再次刷新。')
+}
+async function confirmQaLiveAction(action: string) {
+  if (isDevelopmentBuild && isTauri && (await getQaLiveValidationStatus()).mode === 'live-copy') {
+    // Session consent was obtained before opening this native copy. Keep the
+    // product's own paid/destructive confirmations, not a second QA dialog.
+    if (!action.trim()) throw new Error('缺少操作说明。')
+  }
+}
 
 let mockState: AppState = structuredClone(initialState)
 let webBackendAvailable: boolean | null = null
@@ -27,6 +71,17 @@ export type UpdateInstallProgress = {
   phase: 'downloading' | 'installing'
   downloadedBytes: number
   totalBytes?: number
+}
+
+export type QaLiveValidationStatus = {
+  mode?: 'fixture' | 'live-copy'
+  inUse?: boolean
+  includedFiles?: string[]
+  missingFiles?: string[]
+  snapshotId?: string
+  snapshotReady: boolean
+  importReady: boolean
+  detail: string
 }
 
 function isTrustedProjectReleaseUrl(value: string) {
@@ -78,7 +133,10 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T
 }
 
+let qaFixtureActive = false
+
 async function tryWebBackend<T>(path: string, init?: RequestInit): Promise<T | null> {
+  if (qaFixtureActive && __CODEX_RELEASE_CHANNEL__ === 'development') return null
   if (webBackendAvailable === false) {
     if (!allowBrowserMock) {
       throw new Error(backendUnavailableMessage())
@@ -125,24 +183,31 @@ async function mockDelay() {
 }
 
 export async function beginChatGptLogin(): Promise<ChatGptLoginStatus> {
-  if (isTauri && __CODEX_RELEASE_CHANNEL__ !== 'development') {
+  await confirmQaLiveAction('打开 OpenAI 官方登录')
+  if (isTauri && (!isDevelopmentBuild || (await getQaLiveValidationStatus()).mode === 'live-copy')) {
     return invoke<ChatGptLoginStatus>('begin_chatgpt_login')
   }
   await mockDelay()
   return {
     state: 'waiting',
     detail: '开发板只演示等待授权，不会打开浏览器或读取真实账号。',
+    executableSource: '开发板隔离环境',
+    codexVersion: 'codex-cli (fixture)',
+    checkedAt: nowLabel(),
   }
 }
 
 export async function getChatGptLoginStatus(): Promise<ChatGptLoginStatus> {
-  if (isTauri && __CODEX_RELEASE_CHANNEL__ !== 'development') {
+  if (isTauri && (!isDevelopmentBuild || (await getQaLiveValidationStatus()).mode === 'live-copy')) {
     return invoke<ChatGptLoginStatus>('get_chatgpt_login_status')
   }
   await mockDelay()
   return {
-    state: 'connected',
-    detail: '开发板模拟连接成功，没有读取或保存真实账号。',
+    state: 'waiting',
+    detail: '模拟资料没有真实账号。请在 QA 主窗口备份并导入后，打开真实验证窗口登录。',
+    executableSource: '开发板隔离环境',
+    codexVersion: 'codex-cli (fixture)',
+    checkedAt: nowLabel(),
   }
 }
 
@@ -158,7 +223,83 @@ export async function loadState(): Promise<AppState> {
   return structuredClone(mockState)
 }
 
+/** Development-only scenario reset. The native command refuses non-isolated paths. */
+export async function resetQaScenario(scenarioId: string): Promise<AppState> {
+  if (__CODEX_RELEASE_CHANNEL__ !== 'development') throw new Error('QA 场景只在开发版提供。')
+  if (!['daily-baseline', 'daily-density', 'daily-operation-flow', 'daily-simulation', 'first-run-review'].includes(scenarioId)) throw new Error('未知 QA 场景，已拒绝重置。')
+  if (isTauri) return invoke<AppState>('qa_reset_scenario', { scenarioId })
+  qaFixtureActive = true
+  clearQaNetworkCondition()
+  await mockDelay()
+  if (['daily-baseline', 'daily-density', 'daily-operation-flow', 'daily-simulation'].includes(scenarioId)) {
+    mockState = structuredClone(initialState)
+    if (scenarioId === 'daily-density') {
+      const { applyBoundaryFixture } = await import('./features/qa/boundary-fixture')
+      applyBoundaryFixture(mockState)
+    }
+    if (scenarioId === 'daily-operation-flow') {
+      mockState.activity.unshift({
+        id: 'qa-operation-flow-ready',
+        time: '现在',
+        title: '状态反馈预览已准备',
+        detail: '这个样本只展示进行中、成功与错误反馈，不会模拟或执行保存、刷新、检查和恢复。',
+        tone: 'info',
+      })
+    }
+    return structuredClone(mockState)
+  }
+  mockState = structuredClone(initialState)
+  mockState.profiles = []
+  mockState.currentProfileId = ''
+  mockState.modelCatalogs = []
+  mockState.activity = []
+  mockState.costCalibrations = []
+  mockState.responseProbes = []
+  mockState.backups = []
+  mockState.configurationProtection.baselineReady = false
+  mockState.connectionEnvironment = {
+    ...mockState.connectionEnvironment,
+    status: 'needs_setup',
+    onboardingCompleted: false,
+    selectedLayerId: undefined,
+  }
+  return structuredClone(mockState)
+}
+
+export async function getQaLiveValidationStatus(): Promise<QaLiveValidationStatus> {
+  if (isTauri) return invoke<QaLiveValidationStatus>('qa_live_validation_status')
+  return { snapshotReady: false, importReady: false, detail: '网页预览不会读取本机真实资料。' }
+}
+
+export async function createQaLiveValidationSnapshot(): Promise<QaLiveValidationStatus> {
+  if (!isTauri) throw new Error('真实验证只在隔离桌面开发板中提供。')
+  return invoke<QaLiveValidationStatus>('qa_create_live_validation_snapshot')
+}
+
+export async function importQaLiveValidationSnapshot(): Promise<QaLiveValidationStatus> {
+  if (!isTauri) throw new Error('真实验证只在隔离桌面开发板中提供。')
+  return invoke<QaLiveValidationStatus>('qa_import_live_validation_snapshot')
+}
+
+export async function clearQaLiveValidationCopy(): Promise<QaLiveValidationStatus> {
+  if (!isTauri) throw new Error('真实验证只在隔离桌面开发板中提供。')
+  return invoke<QaLiveValidationStatus>('qa_clear_live_validation_copy')
+}
+
+export async function openQaLiveValidationWindow(): Promise<QaLiveValidationStatus> {
+  if (!isTauri) throw new Error('真实验证只在隔离桌面开发板中提供。')
+  clearQaNetworkCondition()
+  return invoke<QaLiveValidationStatus>('qa_open_live_validation_window')
+}
+
+export async function leaveQaLiveValidation(): Promise<QaLiveValidationStatus> {
+  if (!isTauri) throw new Error('真实验证只在隔离桌面开发板中提供。')
+  clearQaNetworkCondition()
+  return invoke<QaLiveValidationStatus>('qa_leave_live_validation')
+}
+
 export async function toggleAutoStart(enabled: boolean): Promise<AppState> {
+  if (isDevelopmentBuild) throw new Error('开发版不修改 Windows 开机启动。')
   if (isTauri) {
     return invoke<AppState>('toggle_auto_start', { enabled })
   }
@@ -205,8 +346,8 @@ export async function restoreBackup(backupId: string, confirmation: string): Pro
     return webState
   }
   await mockDelay()
-  if (confirmation.trim() !== '恢复') {
-    throw new Error('请在恢复确认窗口中输入“恢复”后再继续。')
+  if (!['恢复', '恢复全部配置'].includes(confirmation.trim())) {
+    throw new Error('请按恢复确认窗口的提示输入确认文字。')
   }
   const backup = mockState.backups.find((item) => item.id === backupId)
   if (!backup) {
@@ -467,6 +608,8 @@ function mockModelCatalogFromProfile(profile: ProviderProfile): ModelCatalog {
 }
 
 export async function refreshModels(profileId: string, onEvent?: OperationEventHandler): Promise<AppState> {
+  await confirmQaLiveAction('刷新所选服务商的模型目录')
+  await consumeQaNetworkCondition()
   if (isTauri) {
     return invoke<AppState>('refresh_models', { profileId, onEvent: operationChannel(onEvent) })
   }
@@ -490,7 +633,27 @@ export async function refreshModels(profileId: string, onEvent?: OperationEventH
   return structuredClone(mockState)
 }
 
+export async function saveCodexModelSelection(profileId: string, modelId: string, enabled: boolean): Promise<AppState> {
+  await confirmQaLiveAction('保存加入 Codex 的模型选择')
+  if (isTauri) return invoke<AppState>('save_codex_model_selection', { profileId, modelId, enabled })
+  const webState = await tryWebBackend<AppState>('/api/models/codex-selection', apiPost({ profileId, modelId, enabled }))
+  if (webState) return webState
+  await mockDelay()
+  mockState.modelCatalogs = mockState.modelCatalogs.map((catalog) => catalog.providerId !== profileId ? catalog : {
+    ...catalog,
+    models: catalog.models.map((model) => model.id !== modelId ? model : { ...model, codexEnabled: enabled }),
+  })
+  mockState.activity.unshift({
+    id: crypto.randomUUID(), time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    title: enabled ? '模型已加入 Codex' : '模型已从 Codex 列表移除',
+    detail: '本地预览只保存演示状态，不会写入 Codex 配置。', tone: 'success',
+  })
+  return structuredClone(mockState)
+}
+
 export async function previewModels(profile: EditableProfile, onEvent?: OperationEventHandler): Promise<ModelCatalog> {
+  await confirmQaLiveAction('从当前填写的接口读取模型目录')
+  await consumeQaNetworkCondition()
   if (isTauri) {
     return invoke<ModelCatalog>('preview_models', { profile, onEvent: operationChannel(onEvent) })
   }
@@ -568,6 +731,7 @@ export async function restoreLatestBackup(): Promise<AppState> {
 }
 
 export async function prepareSwitch(profileId: string, onEvent?: OperationEventHandler): Promise<SwitchPreflight> {
+  await confirmQaLiveAction('检查所选服务商并准备副本内切换，可能发送测试请求')
   if (isTauri) {
     return invoke<SwitchPreflight>('prepare_switch', { profileId, onEvent: operationChannel(onEvent) })
   }
@@ -590,6 +754,7 @@ export async function switchProfile(profileId: string, operationId: string, risk
 }
 
 export async function verifyProfile(profileId: string, onEvent?: OperationEventHandler): Promise<AppState> {
+  await confirmQaLiveAction('运行所选服务商可用性测试')
   if (isTauri) {
     return invoke<AppState>('verify_profile', { profileId, onEvent: operationChannel(onEvent) })
   }
@@ -621,6 +786,7 @@ export async function verifyProfile(profileId: string, onEvent?: OperationEventH
 }
 
 export async function runResponseProbe(profileId: string, benchmarkModel: string, onEvent?: OperationEventHandler): Promise<AppState> {
+  await confirmQaLiveAction('运行一次固定测试，可能扣减平台额度')
   if (isTauri) {
     return invoke<AppState>('run_response_probe', { profileId, benchmarkModel, onEvent: operationChannel(onEvent) })
   }
@@ -639,7 +805,7 @@ export async function runResponseProbe(profileId: string, benchmarkModel: string
     model: benchmarkModel || profile.model || '未设置模型',
     probeVersion: 'cost-calibration-v2',
     observedAt,
-    status: 'final_cost_inline',
+    status: 'cost_candidate_unverified',
     httpStatus: 200,
     requestId: `preview-${Date.now().toString(36)}`,
     usage: { inputTokens: 12, outputTokens: 4, totalTokens: 16, cachedTokens: 0, reasoningTokens: 0 },
@@ -686,6 +852,7 @@ export async function saveCostCalibration(input: Omit<CostCalibration, 'id' | 'c
   const paid = parseFixed(input.paidCny, '实付金额')
   const credit = parseFixed(input.consumableCredit, '可消费额度')
   const debit = parseFixed(input.debitCredit, '后台最终扣费')
+  if (!input.debitConfirmed) throw new Error('请先确认填写的是平台使用日志中的真实扣额，且与到账额度单位相同。')
   if (input.officialCny?.trim()) parseFixed(input.officialCny, '官方同次成本')
   const calculated = (paid * debit) / credit
   if (calculated <= 0n) throw new Error('计算结果过小，无法在当前精度下保存。')
@@ -798,7 +965,9 @@ export async function syncCurrentConfiguration(): Promise<AppState> {
 
 export async function prepareConnectionEnvironment(layerId: string, onboarding = false): Promise<AppState> {
   if (isTauri) {
-    return invoke<AppState>('prepare_connection_environment', { layerId, onboarding })
+    const report = await invoke<InitializationReport>('prepare_connection_environment', { layerId, onboarding, progress: new Channel<InitializationStep>() })
+    if (!report.canContinue || !report.state) throw new Error(report.steps.find(step => step.status === 'failure')?.detail ?? '连接环境尚未准备完成。')
+    return report.state
   }
   const webState = await tryWebBackend<AppState>('/api/config/prepare-environment', apiPost({ layerId, onboarding }))
   if (webState) return webState
@@ -810,7 +979,7 @@ export async function prepareConnectionEnvironment(layerId: string, onboarding =
     status: 'ready',
     onboardingCompleted: onboarding ? false : mockState.connectionEnvironment.onboardingCompleted,
     selectedLayerId: layerId,
-    detail: '连接环境已准备：已创建恢复点，并只统一 custom 服务商与 Responses 所需设置。',
+    detail: '连接环境已接管：旧连接已备份，当前固定使用 Signalman custom 身份。',
     layers: mockState.connectionEnvironment.layers.map((item) => ({ ...item, selected: item.id === layerId })),
   }
   mockState.activity.unshift({
@@ -821,6 +990,40 @@ export async function prepareConnectionEnvironment(layerId: string, onboarding =
     tone: 'success',
   })
   return structuredClone(mockState)
+}
+
+export async function initializeConnectionEnvironment(onStep: (step: InitializationStep) => void): Promise<InitializationReport> {
+  if (isTauri) return invoke<InitializationReport>('prepare_connection_environment', { layerId: 'user-config', onboarding: true, progress: new Channel<InitializationStep>(onStep) })
+  if (allowBrowserMock) {
+    // Explicit UI fixture only; the view labels these as examples, not receipts.
+    const steps: InitializationStep[] = PREPARATION_TASKS.map(([id, label], index) => ({ index, id, label, status: 'success', detail: '隔离界面样本；未执行本机初始化。', action: '' }))
+    for (const step of steps) onStep(step)
+    return { steps, state: await prepareConnectionEnvironment('user-config', true), canContinue: true }
+  }
+  const response = await fetch('/api/config/initialize-stream', apiPost({ onboarding: true }))
+  if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('application/x-ndjson')) throw new Error('本地初始化服务未返回有效进度。请重新打开 Signalman。')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let report: InitializationReport | undefined
+  function consume(line: string) {
+    if (!line.trim()) return
+    const message = JSON.parse(line) as { step?: InitializationStep; report?: InitializationReport }
+    if (message.step) onStep(message.step)
+    if (message.report) report = message.report
+  }
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+      let newline: number
+      while ((newline = buffer.indexOf('\n')) >= 0) { consume(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1) }
+      if (done) break
+    }
+    consume(buffer)
+  } finally { reader.releaseLock() }
+  if (!report) throw new Error('初始化连接中断，没有收到最终回执；请重新检查。')
+  return report
 }
 
 export async function completeOnboarding(): Promise<AppState> {

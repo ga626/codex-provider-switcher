@@ -24,6 +24,7 @@ import {
   loadState,
   openUpdate,
   prepareConnectionEnvironment,
+  initializeConnectionEnvironment,
   prepareSwitch,
   previewModels,
   refreshModels,
@@ -32,11 +33,22 @@ import {
   runResponseProbe,
   restoreBackup,
   saveProfile,
+  saveCodexModelSelection,
   syncCurrentConfiguration,
   switchProfile,
   setBackupPolicy,
   toggleAutoStart,
   verifyProfile,
+  isDevelopmentBuild,
+  resetQaScenario,
+  clearQaLiveValidationCopy,
+  createQaLiveValidationSnapshot,
+  getQaLiveValidationStatus,
+  importQaLiveValidationSnapshot,
+  openQaLiveValidationWindow,
+  leaveQaLiveValidation,
+  minimizeToTray,
+  quitApplication,
 } from './adapter'
 import type { OperationEventHandler } from './adapter'
 import type { AppState, BackupItem, EditableProfile, ModelCatalog, ProviderProfile, SwitchPreflight, UpdateInfo } from './types'
@@ -52,6 +64,7 @@ import {
   SwitchConfirmDialog,
   SyncCurrentConfigurationDialog,
 } from './shared/dialogs'
+import { ModalDialog } from './shared/components'
 import { ProviderWorkspace } from './features/providers/ProviderWorkspace'
 import { ConnectionDock as ConnectionDockFeature } from './features/providers/ConnectionDock'
 import { providerModelLabel } from './features/providers/model-utils'
@@ -59,6 +72,7 @@ import { ProviderSidebar } from './features/providers/ProviderSidebar'
 import { ConnectionSourceDialog, type NewConnectionKind } from './features/providers/ConnectionSourceDialog'
 import {
   draftMatchesProfile,
+  providerConnectionKind,
   profileConfigurationChecks,
   providerAvailabilityChecks,
   requiresManualModelConfirmation,
@@ -68,6 +82,12 @@ import { SafetyWorkspace as SafetyWorkspaceFeature } from './features/safety/Saf
 import { ConfigurationProtectionWorkspace as ConfigurationProtectionWorkspaceFeature } from './features/safety/ConfigurationProtectionWorkspace'
 import { LabWorkspace as LabWorkspaceFeature } from './features/lab/LabWorkspace'
 import { FirstRunShell, FIRST_RUN_STEP_COUNT, FIRST_RUN_STEP_INTERVAL_MS, type FirstRunPhase } from './features/first-run/FirstRunShell'
+import { advancePreparation, missingPreparationResults } from './features/first-run/progress'
+import { firstRunResultPreview, type FirstRunResultPreview } from './features/first-run/result-preview'
+import type { InitializationReport, InitializationStep } from './types'
+import { QaControlRail } from './features/qa/QaScenarioConsole'
+import type { DailyQaScenarioId, QaScenarioId } from './features/qa/scenarios'
+import type { QaLiveValidationStatus } from './adapter'
 import { WorkspaceHeader } from './features/workspace/WorkspaceHeader'
 import type { ViewId } from './shared/view-types'
 import {
@@ -87,6 +107,7 @@ const emptyProfile: EditableProfile = {
   id: '',
   name: '',
   baseUrl: '',
+  endpointMode: 'auto',
   model: '',
   note: '',
   apiKey: '',
@@ -95,8 +116,10 @@ const emptyProfile: EditableProfile = {
 function toEditable(profile: ProviderProfile): EditableProfile {
   return {
     id: profile.id,
+    connectionKind: providerConnectionKind(profile),
     name: profile.name,
     baseUrl: profile.baseUrl,
+    endpointMode: profile.endpointMode ?? 'auto',
     model: profile.model,
     note: profile.note,
     apiKey: '',
@@ -130,6 +153,24 @@ function updateFailureMessage(error: unknown, fallback: string) {
   return fallback
 }
 
+function WindowClosePrompt({ onMinimize, onQuit }: { onMinimize: () => void; onQuit: () => void }) {
+  const development = __CODEX_RELEASE_CHANNEL__ === 'development'
+  return (
+    <ModalDialog className="window-close-dialog" labelledBy="window-close-title" onClose={onMinimize}>
+      <div className="confirm-dialog-icon"><AlertTriangle size={20} /></div>
+      <div>
+        <span className="eyebrow">{development ? '开发版后台运行' : '后台运行'}</span>
+        <h2 id="window-close-title">要怎么关闭 Signalman？</h2>
+        <p>点右上角叉号不会自动结束程序。你可以把窗口收进通知区域继续运行，也可以直接退出并停止本应用启动的服务。</p>
+      </div>
+      <div className="command-row window-close-actions">
+        <button className="ghost-button" type="button" onClick={onMinimize} data-dialog-initial-focus>留在后台</button>
+        <button className="danger-button" type="button" onClick={onQuit}>直接退出</button>
+      </div>
+    </ModalDialog>
+  )
+}
+
 function App() {
   const [state, setState] = useState<AppState | null>(null)
   const [selectedId, setSelectedId] = useState('example-provider-a')
@@ -149,6 +190,10 @@ function App() {
   const [manualModelConfirm, setManualModelConfirm] = useState<string | null>(null)
   const [syncConfirm, setSyncConfirm] = useState(false)
   const [restartNotice, setRestartNotice] = useState(false)
+  const [qaLiveStatus, setQaLiveStatus] = useState<QaLiveValidationStatus | null>(null)
+  const [qaDailyScenario, setQaDailyScenario] = useState<DailyQaScenarioId | null>(null)
+  const [qaFeedbackPreview, setQaFeedbackPreview] = useState<string | null>(null)
+  const [qaGeneration, setQaGeneration] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [guideHubOpen, setGuideHubOpen] = useState(false)
   const [guideChapter, setGuideChapter] = useState<GuideChapterId | null>(null)
@@ -156,13 +201,19 @@ function App() {
   const [setupDialogOpen, setSetupDialogOpen] = useState(false)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [connectionSourceOpen, setConnectionSourceOpen] = useState(false)
+  const [closePromptOpen, setClosePromptOpen] = useState(false)
+  const [windowVisible, setWindowVisible] = useState(true)
   const [newConnectionKind, setNewConnectionKind] = useState<NewConnectionKind | null>(null)
   const [firstRun, setFirstRun] = useState<boolean | null>(null)
   const [firstRunPhase, setFirstRunPhase] = useState<FirstRunPhase>('consent')
   const [firstRunTransitioning, setFirstRunTransitioning] = useState(false)
   const [firstRunError, setFirstRunError] = useState<string | null>(null)
   const [preparationStep, setPreparationStep] = useState(0)
+  const [preparationResults, setPreparationResults] = useState<Array<InitializationStep | undefined>>([])
+  const [initializationReport, setInitializationReport] = useState<InitializationReport | null>(null)
+  const [qaFirstRunResultPreview, setQaFirstRunResultPreview] = useState<FirstRunResultPreview | null>(null)
   const preparationTimer = useRef<number | null>(null)
+  const qaFeedbackTimer = useRef<number | null>(null)
   const workspaceScrollRef = useRef<HTMLDivElement>(null)
   const [paneWidths, setPaneWidths] = useState({ left: 276, right: 380 })
   const [resizingPane, setResizingPane] = useState<'left' | 'right' | null>(null)
@@ -196,10 +247,28 @@ function App() {
 
   useEffect(() => {
     if (!activeOperation) return undefined
-    setOperationNow(Date.now())
-    const timer = window.setInterval(() => setOperationNow(Date.now()), 1000)
-    return () => window.clearInterval(timer)
-  }, [activeOperation])
+    let timer: number | undefined
+    const stop = () => {
+      if (timer !== undefined) window.clearInterval(timer)
+      timer = undefined
+    }
+    const start = () => {
+      stop()
+      if (document.visibilityState === 'hidden' || !windowVisible) return
+      setOperationNow(Date.now())
+      timer = window.setInterval(() => setOperationNow(Date.now()), 1000)
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') stop()
+      else start()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    start()
+    return () => {
+      stop()
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [activeOperation, windowVisible])
 
   useEffect(() => {
     workspaceScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' })
@@ -214,6 +283,23 @@ function App() {
     void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
       void getCurrentWindow().setTitle(`Signalman AI · 开发版 · ${__CODEX_BUILD_SHA__}`)
     }).catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return undefined
+    let disposeClose: (() => void) | undefined
+    let disposeVisibility: (() => void) | undefined
+    void import('@tauri-apps/api/event').then(({ listen }) => Promise.all([
+      listen('signalman-close-requested', () => setClosePromptOpen(true)),
+      listen<boolean>('signalman-window-visibility', (event) => setWindowVisible(event.payload)),
+    ])).then(([close, visibility]) => {
+      disposeClose = close
+      disposeVisibility = visibility
+    }).catch(() => undefined)
+    return () => {
+      disposeClose?.()
+      disposeVisibility?.()
+    }
   }, [])
 
   useEffect(() => {
@@ -302,9 +388,10 @@ function App() {
 
   useEffect(() => {
     if (!notice) return undefined
+    if (qaFeedbackPreview) return
     const timeout = window.setTimeout(() => setNotice(null), 5000)
     return () => window.clearTimeout(timeout)
-  }, [notice])
+  }, [notice, qaFeedbackPreview])
 
   useEffect(() => {
     try {
@@ -398,6 +485,12 @@ function App() {
     try {
       const catalog = await previewModels(draft, handleOperationEvent)
       setDraftModelCatalog(catalog)
+      // The provider may expose its OpenAI-compatible routes with or without
+      // `/v1`. Keep the successful base URL in the draft so saving it uses the
+      // same route that returned the catalog.
+      if ((draft.endpointMode ?? 'auto') !== 'full' && catalog.baseUrl && catalog.baseUrl.trim() && catalog.baseUrl.trim() !== draft.baseUrl.trim()) {
+        setDraft((current) => ({ ...current, baseUrl: catalog.baseUrl }))
+      }
       setNotice({
         message: catalog.status === 'ok' ? '模型目录已刷新' : '模型目录未能刷新',
         tone: catalog.status === 'ok' ? 'success' : 'warning',
@@ -440,35 +533,62 @@ function App() {
   }
 
   async function prepareFirstRun(layerId: string) {
+    if (busy) return
+    setQaFirstRunResultPreview(null)
+    void layerId
     setFirstRunPhase('preparing')
     setFirstRunError(null)
     setPreparationStep(0)
+    setPreparationResults([])
+    setInitializationReport(null)
     beginOperation('prepare-connection-environment')
-    let phase = 0
-    preparationTimer.current = window.setInterval(() => {
-      phase = Math.min(FIRST_RUN_STEP_COUNT, phase + 1)
-      setPreparationStep(phase)
-    }, FIRST_RUN_STEP_INTERVAL_MS)
+    const steps: Array<InitializationStep | undefined> = []
+    let cursor = 0
+    let shownAt = Date.now()
+    let backendFinished = false
+    const presentation = new Promise<void>((resolve) => {
+      preparationTimer.current = window.setInterval(() => {
+        const next = advancePreparation(cursor, shownAt, Date.now(), steps)
+        if (next !== cursor) { cursor = next; shownAt = Date.now(); setPreparationStep(cursor) }
+        if (backendFinished && cursor >= FIRST_RUN_STEP_COUNT) resolve()
+      }, Math.min(80, FIRST_RUN_STEP_INTERVAL_MS))
+    })
+    const onStep = (step: InitializationStep) => {
+      if (step.index < 0 || step.index >= FIRST_RUN_STEP_COUNT) return
+      steps[step.index] = step
+      setPreparationResults([...steps])
+    }
     try {
-      // The backend operation is real; the visible feed gives it enough time
-      // to be understood instead of flashing straight to the result screen.
-      const [next] = await Promise.all([
-        prepareConnectionEnvironment(layerId, true),
-        new Promise((resolve) => window.setTimeout(resolve, FIRST_RUN_STEP_COUNT * FIRST_RUN_STEP_INTERVAL_MS + 420)),
-      ])
-      setState(next)
-      const selected = next.profiles.find((profile) => profile.id === selectedId) ?? next.profiles[0]
+      const report = await initializeConnectionEnvironment(onStep)
+      // The final report is authoritative even if a transport dropped a progress event.
+      report.steps.forEach(onStep)
+      report.steps = missingPreparationResults(steps)
+      // A fallback is still an unresolved initialization result. Do not let
+      // the user enter until every preparation task has a confirmed success.
+      report.canContinue = report.canContinue && report.steps.every(step => step.status === 'success')
+      report.steps.forEach(onStep)
+      backendFinished = true
+      await presentation
+      setInitializationReport(report)
+      const next = report.state
+      if (next) setState(next)
+      const selected = next?.profiles.find((profile) => profile.id === selectedId) ?? next?.profiles[0]
       if (selected) {
         setSelectedId(selected.id)
         setDraft(toEditable(selected))
       }
       setFirstRunPhase('review')
       setPreparationStep(FIRST_RUN_STEP_COUNT)
-      setNotice({ message: '连接环境已准备好', tone: 'success' })
+      if (report.canContinue) setNotice({ message: '连接环境已准备好', tone: 'success' })
       setError(null)
     } catch (err) {
-      setFirstRunPhase('failed')
-      setFirstRunError(errorMessage(err, '准备连接环境失败。原有文件没有被替换。'))
+      const incomplete = missingPreparationResults(steps)
+      incomplete.forEach(onStep)
+      backendFinished = true
+      await presentation
+      setInitializationReport({ steps: incomplete, state: null, canContinue: false })
+      setFirstRunPhase('review')
+      setFirstRunError(errorMessage(err, '初始化没有完成。请点“重新检查”；在确认全部通过前不能进入软件。'))
     } finally {
       if (preparationTimer.current !== null) window.clearInterval(preparationTimer.current)
       preparationTimer.current = null
@@ -477,6 +597,10 @@ function App() {
   }
 
   async function enterSignalman() {
+    if (qaFirstRunResultPreview) {
+      await applyQaScenario('daily-baseline')
+      return
+    }
     beginOperation('complete-onboarding')
     try {
       const next = await completeOnboarding()
@@ -498,6 +622,238 @@ function App() {
       }
     }, 520)
   }
+
+  function stopQaFeedbackPreview() {
+    if (qaFeedbackTimer.current !== null) window.clearTimeout(qaFeedbackTimer.current)
+    qaFeedbackTimer.current = null
+    setQaFeedbackPreview(null)
+  }
+
+  function playQaFeedbackPreview(kind: 'loading' | 'success' | 'error' | 'normal' = 'loading') {
+    stopQaFeedbackPreview()
+    setActiveOperation(null)
+    setError(null)
+    setNotice(null)
+    if (kind === 'normal') return
+    setQaFeedbackPreview(kind === 'loading' ? '正在查看加载状态；不会执行操作' : kind === 'success' ? '正在查看成功提示；没有真实执行' : '正在查看错误提示；没有真实失败')
+    if (kind === 'loading') {
+      const startedAt = Date.now()
+      setActiveOperation({ id: 'refresh-models', startedAt, event: { ...startOperationEvent('refresh-models', 'workspace', startedAt), detail: 'QA 外观预览：刷新中，不会发起请求。' } })
+    } else if (kind === 'success') setNotice({ message: 'QA 外观预览：操作成功提示，没有执行产品操作。', tone: 'success' })
+    else setError('QA 外观预览：操作失败提示，没有发生真实错误。')
+  }
+
+  async function applyQaScenario(scenarioId: Exclude<QaScenarioId, 'controlled-live-validation'>) {
+    if (!isDevelopmentBuild) return
+    if (qaLiveStatus?.mode === 'live-copy' && !window.confirm('切回模拟检查会结束隔离 Codex 和未完成的登录，真实副本保留。继续？')) return
+    stopQaFeedbackPreview()
+    beginOperation('qa-reset-scenario')
+    qaStatusGeneration.current += 1
+    let loaded = false
+    try {
+      if (qaLiveStatus?.mode === 'live-copy') setQaLiveStatus(await leaveQaLiveValidation())
+      const next = await resetQaScenario(scenarioId)
+      setQaFirstRunResultPreview(null)
+      window.localStorage.removeItem(GUIDE_PROGRESS_KEY)
+      setGuideProgress(readGuideProgress())
+      setGuideChapter(null)
+      setGuideHubOpen(false)
+      setSettingsOpen(false)
+      setRestoreConfirm(null)
+      setSwitchConfirm(null)
+      setManualModelConfirm(null)
+      setSyncConfirm(false)
+      setFeedbackOpen(false)
+      setConnectionSourceOpen(false)
+      setSetupDialogOpen(false)
+      setDraftModelCatalog(null)
+      setNewConnectionKind(null)
+      setError(null)
+      setPaneWidths({ left: 276, right: 380 })
+      initialGuideHandled.current = true
+      setState(next)
+      setQaGeneration(generation => generation + 1)
+      setSelectedId(next.profiles[0]?.id ?? '')
+      setDraft(next.profiles[0] ? toEditable(next.profiles[0]) : emptyProfile)
+      if (scenarioId === 'first-run-review') {
+        setQaDailyScenario(null)
+        setFirstRun(true)
+        setFirstRunPhase('consent')
+        setPreparationStep(0)
+        setPreparationResults([])
+        setInitializationReport(null)
+        setFirstRunError(null)
+      } else {
+        setQaDailyScenario(scenarioId)
+        setFirstRun(false)
+        setFirstRunError(null)
+        const profile = next.profiles.find((item) => item.id === 'example-provider-a') ?? next.profiles[0]
+        if (profile) {
+          setSelectedId(profile.id)
+          setDraft(toEditable(profile))
+          setDraftModelCatalog(null)
+          setNewConnectionKind(null)
+        }
+        setActiveView('providers')
+      }
+      loaded = true
+      setNotice({ message: scenarioId === 'first-run-review' ? '已回到首次启动第 1 页' : scenarioId === 'daily-density' ? '已载入边界排版样本' : scenarioId === 'daily-operation-flow' ? '已载入状态反馈预览样本' : '已载入基准日常样本', tone: 'success' })
+    } catch (err) {
+      setError(errorMessage(err, '无法重置 QA 场景。'))
+    } finally {
+      finishOperation('qa-reset-scenario')
+    }
+    if (loaded && scenarioId === 'daily-operation-flow') playQaFeedbackPreview()
+  }
+
+  function moveQaFirstRun(direction: 'back' | 'next') {
+    if (firstRun !== true || busy !== null) return
+    if (direction === 'next' && firstRunPhase === 'review' && initializationReport && (!initializationReport.canContinue || initializationReport.steps.some(step => step.status !== 'success'))) return
+    if (direction === 'next' && firstRunPhase === 'consent') {
+      void prepareFirstRun('user-config')
+      return
+    }
+    const phases: FirstRunPhase[] = ['consent', 'preparing', 'review', 'ready']
+    const current = phases.indexOf(firstRunPhase)
+    const next = Math.max(0, Math.min(phases.length - 1, current + (direction === 'next' ? 1 : -1)))
+    setFirstRunPhase(phases[next])
+    setPreparationStep(phases[next] === 'preparing' ? 0 : phases[next] === 'review' || phases[next] === 'ready' ? FIRST_RUN_STEP_COUNT : 0)
+    setFirstRunError(null)
+  }
+
+  const qaStatusGeneration = useRef(0)
+  function previewQaFirstRun(kind: FirstRunResultPreview) {
+    if (!isDevelopmentBuild || busy || qaLiveStatus?.mode === 'live-copy') return
+    stopQaFeedbackPreview()
+    setQaFirstRunResultPreview(kind)
+    setInitializationReport(firstRunResultPreview(kind))
+    setFirstRunError(null)
+    setError(null)
+    setNotice(null)
+    setFirstRun(true)
+    setFirstRunPhase('review')
+    setQaDailyScenario(null)
+  }
+  async function refreshQaLiveStatus() {
+    if (!isDevelopmentBuild) return
+    const generation = qaStatusGeneration.current
+    try { const status = await getQaLiveValidationStatus(); if (generation === qaStatusGeneration.current) setQaLiveStatus(status) } catch (err) { if (generation === qaStatusGeneration.current) setError(errorMessage(err, '无法读取真实验证状态。')) }
+  }
+
+  function showQaRuntime(next: AppState, live: boolean) {
+    stopQaFeedbackPreview()
+    setState(next)
+    setQaGeneration(generation => generation + 1)
+    const profile = next.profiles.find(item => item.id === next.currentProfileId) ?? next.profiles[0]
+    setSelectedId(profile?.id ?? '')
+    setDraft(profile ? toEditable(profile) : emptyProfile)
+    setDraftModelCatalog(null)
+    setNewConnectionKind(null)
+    setFirstRun(false)
+    setFirstRunError(null)
+    setQaDailyScenario(live ? null : 'daily-baseline')
+    setActiveView('providers')
+    setGuideChapter(null)
+    setGuideHubOpen(false)
+    setSettingsOpen(false)
+    setRestoreConfirm(null)
+    setSwitchConfirm(null)
+    setManualModelConfirm(null)
+    setSyncConfirm(false)
+    setFeedbackOpen(false)
+    setConnectionSourceOpen(false)
+    setSetupDialogOpen(false)
+  }
+
+  async function runQaLiveAction(action: 'snapshot' | 'import' | 'open' | 'clear' | 'enter' | 'leave') {
+    if (!isDevelopmentBuild) return
+    if (action === 'enter' && !window.confirm('创建真实验证副本：复制本机配置、文件认证和服务商资料。副本中的登录和请求会真实执行，可能产生费用。不会回写本机 Codex。继续？')) return
+    if (action === 'leave' && !window.confirm('返回模拟检查会结束隔离 Codex 和未完成的登录，真实副本保留。当前窗口不关闭。继续？')) return
+    stopQaFeedbackPreview()
+    beginOperation('qa-reset-scenario')
+    qaStatusGeneration.current += 1
+    try {
+      if (action === 'enter') {
+        await createQaLiveValidationSnapshot()
+        await importQaLiveValidationSnapshot()
+        setQaLiveStatus(await openQaLiveValidationWindow())
+        setState(null)
+        showQaRuntime(await loadState(), true)
+        setNotice({ message: '真实功能验证副本已就绪；后续操作仅作用于副本。', tone: 'success' })
+        setError(null)
+        return
+      }
+      const next = action === 'leave' ? await leaveQaLiveValidation() : action === 'snapshot' ? await createQaLiveValidationSnapshot() : action === 'import' ? await importQaLiveValidationSnapshot() : action === 'open' ? await openQaLiveValidationWindow() : await clearQaLiveValidationCopy()
+      setQaLiveStatus(next)
+      if (action === 'open' || action === 'leave') {
+        // Never leave the previous runtime's editable data visible if reloading fails.
+        setState(null)
+        showQaRuntime(await loadState(), action === 'open')
+      }
+      setNotice({ message: next.detail, tone: 'success' })
+      setError(null)
+    } catch (err) { setError(errorMessage(err, '真实验证操作未完成。')) } finally { finishOperation('qa-reset-scenario') }
+  }
+
+  useEffect(() => {
+    void refreshQaLiveStatus()
+    if (!isDevelopmentBuild) return undefined
+    let timer: number | undefined
+    const stop = () => {
+      if (timer !== undefined) window.clearInterval(timer)
+      timer = undefined
+    }
+    const start = () => {
+      stop()
+      if (document.visibilityState === 'hidden' || !windowVisible) return
+      timer = window.setInterval(() => {
+        if (document.visibilityState !== 'hidden' && windowVisible) void refreshQaLiveStatus()
+      }, 5000)
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') stop()
+      else start()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    start()
+    return () => {
+      stop()
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [windowVisible])
+
+  useEffect(() => {
+    if (!isDevelopmentBuild || !('__TAURI_INTERNALS__' in window)) return
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().setTitle(`Signalman AI · ${qaLiveStatus?.mode === 'live-copy' ? '真实验证副本' : '开发版 · 模拟资料'} · ${__CODEX_BUILD_SHA__}`)).catch(() => undefined)
+  }, [qaLiveStatus?.mode, qaLiveStatus?.inUse])
+
+  useEffect(() => () => {
+    if (qaFeedbackTimer.current !== null) window.clearTimeout(qaFeedbackTimer.current)
+  }, [])
+
+  const qaControlRail = isDevelopmentBuild ? <QaControlRail
+    busy={busy !== null}
+    firstRunActive={firstRun === true}
+    liveStatus={qaLiveStatus}
+    dailyScenario={qaDailyScenario}
+    operationPreview={qaFeedbackPreview}
+    onPreview={playQaFeedbackPreview}
+    onOpenOfficial={selectOfficialAccount}
+    onOpenProviders={() => setActiveView('providers')}
+    onOpenLab={() => setActiveView('lab')}
+    currentView={activeView}
+    onStartFirstRun={() => void applyQaScenario('first-run-review')}
+    onMoveFirstRun={moveQaFirstRun}
+    firstRunBlocked={firstRunPhase === 'review' && Boolean(initializationReport && (!initializationReport.canContinue || initializationReport.steps.some(step => step.status !== 'success')))}
+    resultPreview={qaFirstRunResultPreview}
+    onPreviewFirstRun={previewQaFirstRun}
+    onLoadDaily={(scenario) => void applyQaScenario(scenario)}
+    onCreateLiveSnapshot={() => void runQaLiveAction('enter')}
+    onImportLiveSnapshot={() => void runQaLiveAction('import')}
+    onOpenLiveValidation={() => void runQaLiveAction('open')}
+    onLeaveLiveValidation={() => void runQaLiveAction('leave')}
+    onClearLiveCopy={() => void runQaLiveAction('clear')}
+  /> : null
 
   function openGuideHub() {
     guideTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -564,7 +920,7 @@ function App() {
       setManualModelConfirm(draft.model.trim())
       return
     }
-    await saveEditableProfile(draft, 'save')
+    await saveEditableProfile({ ...draft, connectionKind: newConnectionKind ?? (selectedProfile ? providerConnectionKind(selectedProfile) : 'relay') }, 'save')
   }
 
   function selectProfile(profile: ProviderProfile) {
@@ -582,6 +938,14 @@ function App() {
     setDraftModelCatalog(null)
     setNewConnectionKind(kind)
     setConnectionSourceOpen(false)
+    setActiveView('providers')
+  }
+
+  function selectOfficialAccount() {
+    setSelectedId('chatgpt-official-account')
+    setDraft(emptyProfile)
+    setDraftModelCatalog(null)
+    setNewConnectionKind('chatgpt-account')
     setActiveView('providers')
   }
 
@@ -735,19 +1099,38 @@ function App() {
     )
   }
 
+  const handleMinimizeToTray = () => {
+    setClosePromptOpen(false)
+    void minimizeToTray()
+  }
+  const handleQuitApplication = () => {
+    setClosePromptOpen(false)
+    void quitApplication()
+  }
+
   if (firstRun === true) {
-    return <FirstRunShell
+    return <div className={isDevelopmentBuild ? 'development-qa-frame' : 'development-product-frame'}>
+      {qaControlRail}
+      <div className="development-product-surface">
+      <FirstRunShell
       environment={state.connectionEnvironment}
       phase={firstRunPhase}
       activeStep={preparationStep}
+      taskResults={preparationResults}
+      report={initializationReport}
       checks={state.checks}
       error={firstRunError}
       busy={busy !== null}
-      onPrepare={(layerId) => void prepareFirstRun(layerId)}
-      onContinue={() => setFirstRunPhase('ready')}
+      previewOnly={state.runtimeMode === 'browser_preview_mock' && !qaFirstRunResultPreview}
+      resultPreview={qaFirstRunResultPreview}
+      onPrepare={() => qaFirstRunResultPreview ? previewQaFirstRun(qaFirstRunResultPreview) : void prepareFirstRun('user-config')}
+      onContinue={() => { if (!initializationReport || (initializationReport.canContinue && initializationReport.steps.every(step => step.status === 'success'))) setFirstRunPhase('ready') }}
       onBack={(target) => setFirstRunPhase(target === 'setup' ? 'consent' : 'review')}
       onEnter={enterSignalman}
     />
+      {closePromptOpen && <WindowClosePrompt onMinimize={handleMinimizeToTray} onQuit={handleQuitApplication} />}
+      </div>
+    </div>
   }
 
   const primaryNavItems: Array<{ id: ViewId; label: string; note: string; icon: React.ReactNode }> = [
@@ -771,7 +1154,10 @@ function App() {
     : `${buildChannelLabel} · v${__APP_VERSION__}`
 
   return (
-    <main className={`app-shell${firstRunTransitioning ? ' first-run-transitioning' : ''}`} data-view={activeView}>
+    <div className={isDevelopmentBuild ? 'development-qa-frame' : 'development-product-frame'}>
+      {qaControlRail}
+      <div className="development-product-surface">
+    <main key={qaGeneration} className={`app-shell${firstRunTransitioning ? ' first-run-transitioning' : ''}`} data-view={activeView}>
       <header className="app-titlebar">
         <div className="brand-lockup">
           <span className="brand-mark"><GitCompareArrows size={20} /></span>
@@ -792,7 +1178,7 @@ function App() {
           {state.runtimeMode === 'browser_preview_mock' && <span className="preview-status" title="开发预览不会读取本机配置，也不会连接、验证或切换真实服务商。">预览 · 只读</span>}
           <div className="provider-command-bar" aria-label="当前正在使用的服务商" data-guide-target="overview.current">
             <span className="provider-current-label">正在使用</span>
-            <strong>{currentFileProfile?.name ?? '未识别'}</strong>
+            <strong title={currentFileProfile?.name}>{currentFileProfile?.name ?? '未识别'}</strong>
             <span className="provider-current-model">{currentFileProfile?.model ? providerModelLabel(currentFileProfile.model) : '未设置模型'}</span>
           </div>
           <button className="icon-button" type="button" onClick={openGuideHub} title="使用说明" aria-label="打开使用说明" data-guide-target="overview.help">
@@ -828,6 +1214,8 @@ function App() {
           <button type="button" onClick={() => setNotice(null)} aria-label="关闭完成提示"><X size={15} /></button>
         </div>
       )}
+
+      {closePromptOpen && <WindowClosePrompt onMinimize={handleMinimizeToTray} onQuit={handleQuitApplication} />}
 
       {restoreConfirm && (
         <RestoreConfirmDialog
@@ -867,6 +1255,7 @@ function App() {
           selectedId={selectedId}
           busy={busy !== null}
           onSelect={selectProfile}
+          onSelectOfficial={selectOfficialAccount}
           onAdd={() => setConnectionSourceOpen(true)}
           onMove={moveProvider}
         />}
@@ -886,6 +1275,7 @@ function App() {
               <ProviderWorkspace
                 draft={draft}
                 selectedProfile={selectedProfile}
+                activeProviderName={state.profiles.find((profile) => profile.active && providerConnectionKind(profile) !== 'chatgpt-account')?.name}
                 busy={busy}
                 updateDraft={updateDraft}
                 saveCurrentProfile={saveCurrentProfile}
@@ -900,6 +1290,10 @@ function App() {
                     void runAction('refresh-models', () => refreshModels(selectedProfile.id, handleOperationEvent))
                   }
                 }}
+                onVerify={() => selectedProfile && void runAction('verify-profile', () => verifyProfile(selectedProfile.id, handleOperationEvent))}
+                onToggleCodexSelection={(model, enabled) => selectedProfile
+                  ? runAction('save-model', () => saveCodexModelSelection(selectedProfile.id, model.id, enabled))
+                  : Promise.resolve()}
                 environment={state.connectionEnvironment}
                 onOpenSetup={() => setSetupDialogOpen(true)}
                 onOpenFeedback={() => setFeedbackOpen(true)}
@@ -930,7 +1324,7 @@ function App() {
               />
             )}
             {activeView === 'timeline' && <TimelineWorkspace state={state} />}
-            {activeView === 'lab' && <LabWorkspaceFeature state={state} selectedProfile={selectedProfile} busy={busy} runAction={runAction} onRunCostTest={(profileId, benchmarkModel) => void runAction('run-cost-probe', () => runResponseProbe(profileId, benchmarkModel, handleOperationEvent))} onOpenGuide={() => openGuideChapter('lab')} />}
+            {activeView === 'lab' && <LabWorkspaceFeature state={state} selectedProfile={selectedProfile} busy={busy} runAction={runAction} onRunCostTest={(profileId, benchmarkModel) => runAction('run-cost-probe', () => runResponseProbe(profileId, benchmarkModel, handleOperationEvent))} onOpenGuide={() => openGuideChapter('lab')} />}
           </div>
         </section>
         {activeView === 'providers' && <>
@@ -995,7 +1389,7 @@ function App() {
         <ApplicationSettingsDialog
           autoStart={state.autoStart}
           backupPolicy={state.backupPolicy}
-          desktopAvailable={state.runtimeMode === 'tauri_native'}
+          desktopAvailable={state.runtimeMode === 'tauri_native' && !isDevelopmentBuild}
           busy={busy}
           buildChannelLabel={buildChannelLabel}
           updateInfo={updateInfo}
@@ -1027,6 +1421,8 @@ function App() {
         onContinueProviders={() => openGuideChapter('providers')}
       />}
     </main>
+      </div>
+    </div>
   )
 }
 

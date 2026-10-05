@@ -276,6 +276,7 @@ pub(crate) fn preserve_catalog_model_verifications(
             .find(|previous_model| previous_model.id.eq_ignore_ascii_case(&model.id))
         {
             model.verified_for_responses = previous_model.verified_for_responses.clone();
+            model.codex_enabled = previous_model.codex_enabled;
             model.last_verification_at = previous_model.last_verification_at.clone();
             model.last_verification_status = previous_model.last_verification_status.clone();
             model.last_verification_detail = previous_model.last_verification_detail.clone();
@@ -284,9 +285,6 @@ pub(crate) fn preserve_catalog_model_verifications(
 }
 
 pub(crate) fn preserve_previous_model_catalog(previous: Option<&Value>, next: &mut ModelCatalog) {
-    if next.status == "ok" {
-        return;
-    }
     let Some(previous) = previous else {
         return;
     };
@@ -296,8 +294,31 @@ pub(crate) fn preserve_previous_model_catalog(previous: Option<&Value>, next: &m
     if previous.base_url != next.base_url || previous.models.is_empty() {
         return;
     }
+    let failed_refresh = next.status != "ok";
+    if !failed_refresh {
+        for model in &mut next.models {
+            if let Some(previous_model) = previous
+                .models
+                .iter()
+                .find(|item| item.id.eq_ignore_ascii_case(&model.id))
+            {
+                model.codex_enabled = previous_model.codex_enabled;
+            }
+        }
+        return;
+    }
+    let current_selection = next
+        .models
+        .iter()
+        .map(|model| (model.id.to_ascii_lowercase(), model.codex_enabled))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let previous_count = previous.models.len();
     next.models = previous.models.clone();
+    for model in &mut next.models {
+        if let Some(Some(selection)) = current_selection.get(&model.id.to_ascii_lowercase()) {
+            model.codex_enabled = Some(*selection);
+        }
+    }
     next.status = "stale".to_string();
     next.last_successful_at = previous.last_successful_at.or(previous.fetched_at.clone());
     let last_success = next.last_successful_at.as_deref().unwrap_or("未知时间");
