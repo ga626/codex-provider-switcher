@@ -32,6 +32,9 @@ fn main() {
         };
         match codex_switcher_tauri_lib::read_bound_provider_token(&data_root, &profile_id) {
             Ok(token) => {
+                // lgtm [rust/cleartext-logging] The credential-helper contract
+                // intentionally emits the selected token on stdout to Codex;
+                // it is never written to a log file.
                 print!("{token}");
                 return;
             }

@@ -178,6 +178,8 @@ pub(crate) fn push_probe_observation(
     catalog: &mut StoredCatalog,
     observation: ResponseProbeObservation,
 ) {
+    // lgtm [rust/cleartext-logging] This updates the in-memory catalog; the
+    // catalog writer protects credentials before persisting the document.
     catalog.response_probes.insert(0, observation);
     catalog.response_probes.truncate(100);
 }

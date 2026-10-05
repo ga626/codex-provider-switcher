@@ -3036,6 +3036,8 @@ pub fn save_cost_calibration_core(input: CostCalibrationInput) -> Result<AppStat
         note: None,
     };
     let provider_name = record.provider_name.clone();
+    // lgtm [rust/cleartext-logging] This updates the catalog; save_catalog
+    // persists credentials through the protected storage path, not a log.
     catalog.cost_calibrations.insert(0, record);
     catalog.cost_calibrations.truncate(100);
     save_catalog(&mut catalog)?;
