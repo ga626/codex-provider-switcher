@@ -84,7 +84,8 @@ try {
         throw "Unexpected health response from release package."
     }
 
-    $state = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/state" -TimeoutSec 5
+    # Initial state assembly can include fixture loading; allow the same bounded startup window as the launcher.
+    $state = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/state" -TimeoutSec 20
     if ($state.runtimeMode -ne "local_web_backend") {
         throw "Unexpected state runtimeMode from release package."
     }
