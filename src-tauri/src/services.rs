@@ -682,11 +682,10 @@ pub(crate) fn connection_environment_state() -> ConnectionEnvironment {
             ConnectionEnvironment {
                 status: status.to_string(),
                 selected_layer_id: record.selected_layer_id.clone(),
-                // Setup and onboarding are separate phases. If the process is
-                // interrupted after the files are rewritten but before the
-                // user enters the workspace, the first-run screen must remain
-                // resumable after restart.
-                onboarding_completed: record.onboarding_completed,
+                // Existing installations completed setup before onboarding was
+                // persisted. Treat a healthy completed setup as onboarded so a
+                // normal upgrade never sends an existing user through setup.
+                onboarding_completed: record.onboarding_completed || record.setup_completed,
                 detail,
                 layers: layers
                     .into_iter()
@@ -710,7 +709,7 @@ pub(crate) fn connection_environment_state() -> ConnectionEnvironment {
         Err(error) => ConnectionEnvironment {
             status: "error".to_string(),
             selected_layer_id: record.selected_layer_id,
-            onboarding_completed: record.onboarding_completed,
+            onboarding_completed: record.onboarding_completed || record.setup_completed,
             detail: format!("无法读取 Codex 配置层：{error}"),
             layers: Vec::new(),
         },

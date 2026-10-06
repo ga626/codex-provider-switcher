@@ -563,9 +563,9 @@ function App() {
       // The final report is authoritative even if a transport dropped a progress event.
       report.steps.forEach(onStep)
       report.steps = missingPreparationResults(steps)
-      // A fallback is still an unresolved initialization result. Do not let
-      // the user enter until every preparation task has a confirmed success.
-      report.canContinue = report.canContinue && report.steps.every(step => step.status === 'success')
+      // A model catalogue warning is a recoverable degradation. Configuration
+      // safety and commit failures remain blocking conditions.
+      report.canContinue = report.canContinue && report.steps.every(step => step.status === 'success' || (step.id === 'models' && step.status === 'warning'))
       report.steps.forEach(onStep)
       backendFinished = true
       await presentation
@@ -708,7 +708,7 @@ function App() {
 
   function moveQaFirstRun(direction: 'back' | 'next') {
     if (firstRun !== true || busy !== null) return
-    if (direction === 'next' && firstRunPhase === 'review' && initializationReport && (!initializationReport.canContinue || initializationReport.steps.some(step => step.status !== 'success'))) return
+    if (direction === 'next' && firstRunPhase === 'review' && initializationReport && (!initializationReport.canContinue || initializationReport.steps.some(step => step.status !== 'success' && !(step.id === 'models' && step.status === 'warning')))) return
     if (direction === 'next' && firstRunPhase === 'consent') {
       void prepareFirstRun('user-config')
       return
@@ -1124,7 +1124,7 @@ function App() {
       previewOnly={state.runtimeMode === 'browser_preview_mock' && !qaFirstRunResultPreview}
       resultPreview={qaFirstRunResultPreview}
       onPrepare={() => qaFirstRunResultPreview ? previewQaFirstRun(qaFirstRunResultPreview) : void prepareFirstRun('user-config')}
-      onContinue={() => { if (!initializationReport || (initializationReport.canContinue && initializationReport.steps.every(step => step.status === 'success'))) setFirstRunPhase('ready') }}
+      onContinue={() => { if (!initializationReport || (initializationReport.canContinue && initializationReport.steps.every(step => step.status === 'success' || (step.id === 'models' && step.status === 'warning')))) setFirstRunPhase('ready') }}
       onBack={(target) => setFirstRunPhase(target === 'setup' ? 'consent' : 'review')}
       onEnter={enterSignalman}
     />
