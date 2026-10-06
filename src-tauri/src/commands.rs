@@ -112,29 +112,33 @@ pub(crate) fn bundled_model_catalog() -> Result<Value, SwitcherError> {
     let isolated_home = super::app_data_dir()?.join("model-catalog-discovery-home");
     fs::create_dir_all(&isolated_home)?;
     read_model_catalog_with_retry(
-        || bounded_output(
-            command_for(&executable.path)
-                .args(["debug", "models", "--bundled"])
-                .env("CODEX_HOME", &isolated_home),
-            std::time::Duration::from_secs(10),
-        ),
-        || std::thread::sleep(std::time::Duration::from_millis(150)),
+        || {
+            bounded_output(
+                command_for(&executable.path)
+                    .args(["debug", "models", "--bundled"])
+                    .env("CODEX_HOME", &isolated_home),
+                std::time::Duration::from_secs(10),
+            )
+        },
+        || std::thread::sleep(std::time::Duration::from_millis(500)),
     )
 }
 
-// Retry once for transient failures. Callers decide whether missing catalogue
-// data is a blocking operation or an optional first-run degradation.
+// Retry transient startup failures with a short bounded backoff. Callers decide
+// whether missing catalogue data is blocking or an optional degradation.
 fn read_model_catalog_with_retry(
     mut read: impl FnMut() -> std::io::Result<std::process::Output>,
     mut pause: impl FnMut(),
 ) -> Result<Value, SwitcherError> {
-    let mut last_error = "无法读取本机 Codex 自带的模型目录。请确认 Codex CLI 可正常运行后重试。".to_string();
-    for attempt in 0..2 {
+    let mut last_error =
+        "无法读取本机 Codex 自带的模型目录。请确认 Codex CLI 可正常运行后重试。".to_string();
+    for attempt in 0..3 {
         let output = match read() {
             Ok(output) => output,
             Err(_) => {
-                last_error = "无法启动 Codex 模型目录读取命令。请确认 Codex CLI 可正常运行后重试。".into();
-                if attempt == 0 {
+                last_error =
+                    "无法启动 Codex 模型目录读取命令。请确认 Codex CLI 可正常运行后重试。".into();
+                if attempt < 2 {
                     pause();
                     continue;
                 }
@@ -142,7 +146,8 @@ fn read_model_catalog_with_retry(
             }
         };
         if !output.status.success() {
-            last_error = "无法读取本机 Codex 自带的模型目录。请确认 Codex CLI 可正常运行后重试。".into();
+            last_error =
+                "无法读取本机 Codex 自带的模型目录。请确认 Codex CLI 可正常运行后重试。".into();
         } else {
             match serde_json::from_slice::<Value>(&output.stdout) {
                 Ok(catalog)
@@ -161,7 +166,7 @@ fn read_model_catalog_with_retry(
                 }
             }
         }
-        if attempt == 0 {
+        if attempt < 2 {
             pause();
         }
     }
@@ -393,10 +398,10 @@ mod tests {
     use std::path::PathBuf;
 
     fn catalog_output(success: bool, bytes: &[u8]) -> std::process::Output {
-        #[cfg(windows)]
-        use std::os::windows::process::ExitStatusExt;
         #[cfg(unix)]
         use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
         std::process::Output {
             status: std::process::ExitStatus::from_raw(if success { 0 } else { 256 }),
             stdout: bytes.to_vec(),
@@ -409,18 +414,21 @@ mod tests {
         for failure in 0..4 {
             let mut calls = 0;
             let mut pauses = 0;
-            let result = super::read_model_catalog_with_retry(|| {
-                calls += 1;
-                if calls > 1 {
-                    return Ok(catalog_output(true, br#"{"models":[{"slug":"test"}]}"#));
-                }
-                match failure {
-                    0 => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "fixture")),
-                    1 => Ok(catalog_output(false, b"")),
-                    2 => Ok(catalog_output(true, br#"{"models":[]}"#)),
-                    _ => Ok(catalog_output(true, b"invalid json")),
-                }
-            }, || pauses += 1);
+            let result = super::read_model_catalog_with_retry(
+                || {
+                    calls += 1;
+                    if calls > 1 {
+                        return Ok(catalog_output(true, br#"{"models":[{"slug":"test"}]}"#));
+                    }
+                    match failure {
+                        0 => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "fixture")),
+                        1 => Ok(catalog_output(false, b"")),
+                        2 => Ok(catalog_output(true, br#"{"models":[]}"#)),
+                        _ => Ok(catalog_output(true, b"invalid json")),
+                    }
+                },
+                || pauses += 1,
+            );
             assert!(result.is_ok());
             assert_eq!(calls, 2);
             assert_eq!(pauses, 1);
@@ -430,12 +438,15 @@ mod tests {
     #[test]
     fn model_catalog_persistent_failure_is_not_reported_as_success() {
         let mut calls = 0;
-        let result = super::read_model_catalog_with_retry(|| {
-            calls += 1;
-            Ok(catalog_output(true, br#"{"models":[]}"#))
-        }, || {});
+        let result = super::read_model_catalog_with_retry(
+            || {
+                calls += 1;
+                Ok(catalog_output(true, br#"{"models":[]}"#))
+            },
+            || {},
+        );
         assert!(result.is_err());
-        assert_eq!(calls, 2);
+        assert_eq!(calls, 3);
     }
 
     #[test]
@@ -445,6 +456,22 @@ mod tests {
             || panic!("successful reads must not pause"),
         );
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn model_catalog_retries_twice_before_reporting_persistent_failure() {
+        let mut calls = 0;
+        let mut pauses = 0;
+        let result = super::read_model_catalog_with_retry(
+            || {
+                calls += 1;
+                Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "fixture"))
+            },
+            || pauses += 1,
+        );
+        assert!(result.is_err());
+        assert_eq!(calls, 3);
+        assert_eq!(pauses, 2);
     }
 
     fn executable() -> CodexExecutable {

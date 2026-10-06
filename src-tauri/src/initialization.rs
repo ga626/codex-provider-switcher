@@ -202,7 +202,7 @@ fn initialize(
                         lines.join("\r\n")
                     }) {
                         Ok(next) => {
-                            progress.end(5, "warning", "模型目录暂时无法生成；已移除旧目录指针，保留服务商地址、默认模型和认证方式，但初始化还没有完成。", "请点“重新检查”重试；仍失败时，请确认 Codex 已正常安装、能正常打开且当前用户有读写权限。目录准备成功前不能进入软件。");
+                            progress.end(5, "warning", "模型目录暂时无法生成；已移除旧目录指针，保留服务商地址、默认模型和认证方式。", "模型选择器暂时不可用，进入工作台后可稍后重新检查；配置本身已安全保留。");
                             Some(next)
                         }
                         Err(error) => {
@@ -317,9 +317,11 @@ fn initialize(
         last.detail = "无法加载安全恢复界面；请关闭其他配置工具后重试，仍失败请联系支持并提供错误码 initialization-state-unavailable。".into();
         (progress.send)(last.clone());
     }
-    let can_continue = committed
-        && state.is_some()
-        && progress.steps.iter().all(|step| step.status == "success");
+    let only_degraded_catalog = progress
+        .steps
+        .iter()
+        .all(|step| step.status == "success" || (step.index == 5 && step.status == "warning"));
+    let can_continue = committed && state.is_some() && only_degraded_catalog;
     let warnings = progress
         .steps
         .iter()
@@ -491,7 +493,7 @@ pub(crate) fn fault_matrix() {
     let report = initialize(true, &mut |_| {}, &mut |_, _, _| {
         Err(SwitcherError::Message("目录读取失败".into()))
     });
-    assert!(!report.can_continue, "{:?}", report.steps);
+    assert!(report.can_continue, "{:?}", report.steps);
     assert_eq!(report.steps[5].status, "warning");
     assert_eq!(
         report
@@ -515,8 +517,8 @@ pub(crate) fn fault_matrix() {
     assert_eq!(fs::read_to_string(&auth).unwrap(), oauth);
     assert!(protected_sections_match(&original, &written).unwrap());
 
-    // A bad original baseline gets replaced by a healthy recovery point, but
-    // the warning still blocks first-run entry until the result is confirmed.
+    // A bad original baseline is still a blocking safety warning even though
+    // the model catalogue itself is recoverable.
     let baseline = backups_dir()
         .unwrap()
         .join(INITIAL_BACKUP_LABEL)
